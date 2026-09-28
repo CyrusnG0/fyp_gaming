@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 008fd085633f1dc44b9aeb471d54f7c1, type: 3}
+  m_Name: GlobalSettingDB
+  m_EditorClassIdentifier: 
+  enableUnitDeployment: 0
+  autoEndTurn: 0
+  endMoveAfterAttack: 0
+  enableCounterAttack: 0
+  restoreAPOnTurn: 0
+  useAPToMove: 0
+  useAPToAttack: 0
+  apPerMove: 1
+  apPerNode: 0
+  apPerAttack: 1
+  enableFogOfWar: 0
+  enableCoverSystem: 0
+  coverCritBonus: 0.25
+  coverDodgeBonus: 0.3
+  turnMode: 0
+  allowSwitching: 1
+  allowUnitSwitching: 0
+  waitForUnitDestroy: 0
+  cdTracking: 0

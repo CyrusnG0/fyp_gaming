@@ -1,0 +1,77 @@
+# Unity .gitattributes (minimal, no Git LFS — binaries are committed as-is so the
+# project clones and opens without extra tooling; keep binary files small).
+
+# Default: auto-detect text, normalize line endings
+* text=auto
+
+# Unity source files
+*.cs                    text diff=csharp
+*.shader                text
+*.cginc                 text
+*.compute               text
+*.hlsl                  text
+
+# Unity JSON files
+*.asmdef                text eol=lf
+*.asmref                text eol=lf
+*.inputactions          text eol=lf
+*.json                  text eol=lf
+
+# Unity YAML files
+*.anim                  text eol=lf
+*.asset                 text eol=lf
+*.controller            text eol=lf
+*.guiskin               text eol=lf
+*.lighting              text eol=lf
+*.mask                  text eol=lf
+*.mat                   text eol=lf
+*.meta                  text eol=lf
+*.mixer                 text eol=lf
+*.overrideController    text eol=lf
+*.playable              text eol=lf
+*.prefab                text eol=lf
+*.preset                text eol=lf
+*.renderTexture         text eol=lf
+*.scenetemplate         text eol=lf
+*.shadervariants        text eol=lf
+*.signal                text eol=lf
+*.spriteatlas           text eol=lf
+*.terrainlayer          text eol=lf
+*.unity                 text eol=lf
+*.physicMaterial        text eol=lf
+*.physicsMaterial2D     text eol=lf
+
+# Binary assets (explicit, so line-ending conversion never touches them)
+*.png                   binary
+*.psd                   binary
+*.jpg                   binary
+*.jpeg                  binary
+*.tga                   binary
+*.tif                   binary
+*.tiff                  binary
+*.bmp                   binary
+*.exr                   binary
+*.hdr                   binary
+*.gif                   binary
+*.fbx                   binary
+*.FBX                   binary
+*.obj                   binary
+*.blend                 binary
+*.wav                   binary
+*.mp3                   binary
+*.ogg                   binary
+*.aif                   binary
+*.aiff                  binary
+*.ttf                   binary
+*.otf                   binary
+*.dll                   binary
+*.exe                   binary
+*.pdf                   binary
+*.zip                   binary
+*.unitypackage          binary
+*.skel.bytes            binary
+LightingData.asset      binary
+
+# Exclude from GitHub stats and diffs: third-party plugins, packages lock file
+Assets/Plugins/**           linguist-generated
+Packages/packages-lock.json linguist-generated

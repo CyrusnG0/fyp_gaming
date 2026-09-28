@@ -1,0 +1,424 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 46e94a055fdc8db47b3e92a260689a52, type: 3}
+  m_Name: AbilityFDB
+  m_EditorClassIdentifier: 
+  abilityList:
+  - prefabID: 5
+    instanceID: 0
+    icon: {fileID: 0}
+    name: Col_GainHP
+    desp: Use by collectible, restore target's hp by 5-10
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 0
+    targetType: 0
+    requireTarget: 1
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 0
+    useLimit: 0
+    impactDelay: 0
+    impactType: 2
+    hpModifierMin: 5
+    hpModifierMax: 10
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 
+    clearAllEffect: 0
+    switchFaction: 0
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 0
+    instanceID: 0
+    icon: {fileID: 0}
+    name: Col_DamageHostile
+    desp: Damage all hostile within 4 adjacent nodes for 5-10 damage
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 0
+    targetType: 0
+    requireTarget: 1
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 0
+    useLimit: 0
+    impactDelay: 0
+    impactType: 1
+    hpModifierMin: 5
+    hpModifierMax: 10
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 05000000
+    clearAllEffect: 0
+    switchFaction: 0
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 1
+    instanceID: 0
+    icon: {fileID: 21300104, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: ScanArea
+    desp: Scan an area to reveal fog-of-war
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 6
+    targetType: 0
+    requireTarget: 1
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 4
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 4
+    useLimit: 0
+    impactDelay: 0.5
+    impactType: 0
+    hpModifierMin: 0
+    hpModifierMax: 0
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 
+    clearAllEffect: 0
+    switchFaction: 1
+    switchFacControllable: 1
+    duration: 2
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 2
+    instanceID: 0
+    icon: {fileID: 21300056, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Buff All Friendlies
+    desp: Buff attack and defense of all friendly units by 50 for 2 turns
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 0
+    targetType: 3
+    requireTarget: 0
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 0
+    useLimit: 1
+    impactDelay: 0
+    impactType: 0
+    hpModifierMin: 0
+    hpModifierMax: 0
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 04000000
+    clearAllEffect: 0
+    switchFaction: 1
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 3
+    instanceID: 0
+    icon: {fileID: 21300060, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Repair and Reset
+    desp: Remove active effects on all friendly unit and restore their HP by 5 to
+      8
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 0
+    targetType: 3
+    requireTarget: 0
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 3
+    useLimit: 0
+    impactDelay: 0
+    impactType: 2
+    hpModifierMin: 5
+    hpModifierMax: 8
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 
+    clearAllEffect: 1
+    switchFaction: 0
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 4
+    instanceID: -1
+    icon: {fileID: 21300086, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Reinforcement
+    desp: Deploy a light tank
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 2
+    targetType: 4
+    requireTarget: 1
+    requireLos: 1
+    rangeMin: 0
+    range: 5
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 114105213224067032, guid: a40cc5d55d9dcb64ea04dc6a1b318bd2,
+      type: 3}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 3
+    useLimit: 2
+    impactDelay: 0.5
+    impactType: 0
+    hpModifierMin: 5
+    hpModifierMax: 5
+    apModifierMin: 5
+    apModifierMax: 5
+    damageType: 0
+    attack: 1
+    hitChance: 1
+    critChance: 0
+    critMultiplier: 2
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 
+    clearAllEffect: 0
+    switchFaction: 0
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}
+  - prefabID: 6
+    instanceID: 0
+    icon: {fileID: 21300054, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Debuff Hostile
+    desp: Put a debuff on a hostile unit, reduce its attack and defense by 50% for
+      2 turns.
+    srcUnit: {fileID: 0}
+    facID: 0
+    index: 0
+    isUnitAbility: 0
+    isFacAbility: 0
+    type: 0
+    targetType: 2
+    requireTarget: 1
+    requireLos: 0
+    rangeMin: 0
+    range: 0
+    aoeRange: 0
+    useLineAOE: 0
+    fov: 60
+    spawnUnitPrefab: {fileID: 0}
+    obstaclePrefab: {fileID: 0}
+    moveCost: 0
+    attackCost: 0
+    abilityCost: 0
+    apCost: 0
+    endAllActionAfterUse: 0
+    cooldown: 4
+    useLimit: 0
+    impactDelay: 0.25
+    impactType: 0
+    hpModifierMin: 0
+    hpModifierMax: 0
+    apModifierMin: 0
+    apModifierMax: 0
+    damageType: 0
+    attack: 0
+    hitChance: 0
+    critChance: 0
+    critMultiplier: 0
+    factorInTargetStats: 0
+    effHitChance: 1
+    effectIDList: 05000000
+    clearAllEffect: 0
+    switchFaction: 0
+    switchFacControllable: 1
+    duration: 1
+    useAttackSequence: 0
+    aimAtUnit: 0
+    shootObject: {fileID: 0}
+    effectOnUse:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    effectOnHit:
+      obj: {fileID: 0}
+      autoDestroy: 1
+      duration: 1.5
+    activateSound: {fileID: 0}

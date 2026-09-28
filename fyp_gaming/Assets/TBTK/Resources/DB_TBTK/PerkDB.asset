@@ -1,0 +1,773 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 00323cad13a59ea45b5bf4e02b697985, type: 3}
+  m_Name: PerkDB
+  m_EditorClassIdentifier: 
+  rscIcon: {fileID: 0}
+  perkList:
+  - prefabID: 0
+    instanceID: -1
+    icon: {fileID: 21300032, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Light Tank I
+    desp: Give all light-tanks ability 'Power-Up', which give them extra move and
+      attack for the turn when activated
+    type: 0
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 1
+    abilityPID: 8
+    stats:
+      hp: 1
+      ap: 1
+      hpRegen: 0
+      apRegen: 2
+      attack: 1
+      defense: 1
+      hit: 1
+      dodge: 1
+      dmgHPMin: 1
+      dmgHPMax: 1
+      dmgAPMin: 1
+      dmgAPMax: 1
+      critChance: 1
+      critReduc: 1
+      critMultiplier: 1
+      cDmgMultip: 1
+      cHitPenalty: 1
+      cCritPenalty: 1
+      oDmgMultip: 1
+      oHitPenalty: 1
+      oCritPenalty: 1
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 1
+      turnPriority: 1
+      sight: 1
+      moveLimit: 1
+      attackLimit: 1
+      counterLimit: 1
+      abilityLimit: 1
+      abDuration: 2
+      abCooldown: 1
+      abUseLimit: 1
+      abApCost: 1
+      abAoeRange: 1
+      abEffHitChance: 0
+      effduration: 1
+      effHP: 1
+      effAP: 1
+    applyToAll: 0
+    itemPIDList: 0000000001000000
+    effModType: 1
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 1
+    instanceID: -1
+    icon: {fileID: 21300032, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Light Tank II
+    desp: Reduce cooldown of unit ability 'Power-Up' to 5, reduced by 3
+    type: 3
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 00000000
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: -3
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 0
+    itemPIDList: 08000000
+    effModType: 1
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 3
+    instanceID: -1
+    icon: {fileID: 21300036, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Medium Tank I
+    desp: Increase maximum damage of medium tank by 1
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 00000000
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 1
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 11
+    instanceID: -1
+    icon: {fileID: 21300036, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Medium Tank II
+    desp: Increase the hit chance of medium tank by 15%
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 03000000
+    statsType: 1
+    abilityPID: 0
+    stats:
+      hp: 1
+      ap: 1
+      hpRegen: 1
+      apRegen: 1
+      attack: 1
+      defense: 1
+      hit: 1.15
+      dodge: 1
+      dmgHPMin: 1
+      dmgHPMax: 1
+      dmgAPMin: 1
+      dmgAPMax: 1
+      critChance: 1
+      critReduc: 1
+      critMultiplier: 1
+      cDmgMultip: 1
+      cHitPenalty: 1
+      cCritPenalty: 1
+      oDmgMultip: 1
+      oHitPenalty: 1
+      oCritPenalty: 1
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 1
+      turnPriority: 1
+      sight: 1
+      moveLimit: 1
+      attackLimit: 1
+      counterLimit: 1
+      abilityLimit: 1
+      abDuration: 1
+      abCooldown: 1
+      abUseLimit: 1
+      abApCost: 1
+      abAoeRange: 1
+      abEffHitChance: 1
+      effduration: 1
+      effHP: 1
+      effAP: 1
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 2
+    instanceID: -1
+    icon: {fileID: 21300038, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Heavy Tank I
+    desp: Heavy tank 'Charge Attack' ability deals 100% more damage.
+    type: 3
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 00000000
+    statsType: 1
+    abilityPID: 0
+    stats:
+      hp: 1
+      ap: 1
+      hpRegen: 1
+      apRegen: 1
+      attack: 1
+      defense: 1
+      hit: 1
+      dodge: 1
+      dmgHPMin: 2
+      dmgHPMax: 2
+      dmgAPMin: 1
+      dmgAPMax: 1
+      critChance: 1
+      critReduc: 1
+      critMultiplier: 1
+      cDmgMultip: 1
+      cHitPenalty: 1
+      cCritPenalty: 1
+      oDmgMultip: 1
+      oHitPenalty: 1
+      oCritPenalty: 1
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 1
+      turnPriority: 1
+      sight: 1
+      moveLimit: 1
+      attackLimit: 1
+      counterLimit: 1
+      abilityLimit: 1
+      abDuration: 1
+      abCooldown: 1
+      abUseLimit: 1
+      abApCost: 1
+      abAoeRange: 1
+      abEffHitChance: 1
+      effduration: 1
+      effHP: 1
+      effAP: 1
+    applyToAll: 0
+    itemPIDList: 03000000
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 12
+    instanceID: -1
+    icon: {fileID: 21300038, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Heavy Tank II
+    desp: Heavy Tank attack gains  10% chance to stun target for 2 rounds
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 02000000
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 0
+    itemPIDList: 03000000
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 4
+    instanceID: -1
+    icon: {fileID: 21300048, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Superior Armor
+    desp: All units gain 2 extra hit-points
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 2
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 5
+    instanceID: -1
+    icon: {fileID: 21300080, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Superior Weapon
+    desp: Increase all units damage by 2
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 2
+      dmgHPMax: 2
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 6
+    instanceID: -1
+    icon: {fileID: 21300096, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Targeting System
+    desp: Increase all units hit chance by 20% and critical chance by 10%
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 1
+    abilityPID: 0
+    stats:
+      hp: 1
+      ap: 1
+      hpRegen: 1
+      apRegen: 1
+      attack: 1
+      defense: 1
+      hit: 1.2
+      dodge: 1
+      dmgHPMin: 1
+      dmgHPMax: 1
+      dmgAPMin: 1
+      dmgAPMax: 1
+      critChance: 1.1
+      critReduc: 1
+      critMultiplier: 1
+      cDmgMultip: 1
+      cHitPenalty: 1
+      cCritPenalty: 1
+      oDmgMultip: 1
+      oHitPenalty: 1
+      oCritPenalty: 1
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 1
+      turnPriority: 1
+      sight: 1
+      moveLimit: 1
+      attackLimit: 1
+      counterLimit: 1
+      abilityLimit: 1
+      abDuration: 1
+      abCooldown: 1
+      abUseLimit: 1
+      abApCost: 1
+      abAoeRange: 1
+      abEffHitChance: 1
+      effduration: 1
+      effHP: 1
+      effAP: 1
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 7
+    instanceID: -1
+    icon: {fileID: 21300078, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Turret Range Buff I
+    desp: Increase the attack range of Laser and Missile Turret by 1
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 0
+    itemPIDList: 0700000008000000
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 8
+    instanceID: -1
+    icon: {fileID: 21300078, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Turret Range Buff II
+    desp: Increase the attack range of Laser and Missile Turret by 1
+    type: 2
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 07000000
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 1
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 0
+    itemPIDList: 0700000008000000
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 9
+    instanceID: -1
+    icon: {fileID: 21300076, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Better Convert I
+    desp: Increase successful chance of cnverting a target when using 'Convert-Hostile'
+      to 75%
+    type: 3
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0.25
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 
+  - prefabID: 10
+    instanceID: -1
+    icon: {fileID: 21300076, guid: 829675e3673863042b49e7db0431f3e3, type: 3}
+    name: Better Convert II
+    desp: Increase successful chance of cnverting a target when using 'Convert-Hostile'
+      to 100%
+    type: 3
+    repeatable: 0
+    unlocked: 0
+    cost: 1
+    minPerkPoint: 0
+    prereq: 09000000
+    statsType: 0
+    abilityPID: 0
+    stats:
+      hp: 0
+      ap: 0
+      hpRegen: 0
+      apRegen: 0
+      attack: 0
+      defense: 0
+      hit: 0
+      dodge: 0
+      dmgHPMin: 0
+      dmgHPMax: 0
+      dmgAPMin: 0
+      dmgAPMax: 0
+      critChance: 0
+      critReduc: 0
+      critMultiplier: 0
+      cDmgMultip: 0
+      cHitPenalty: 0
+      cCritPenalty: 0
+      oDmgMultip: 0
+      oHitPenalty: 0
+      oCritPenalty: 0
+      attackRange: 0
+      attackRangeMin: 0
+      moveRange: 0
+      turnPriority: 0
+      sight: 0
+      moveLimit: 0
+      attackLimit: 0
+      counterLimit: 0
+      abilityLimit: 0
+      abDuration: 0
+      abCooldown: 0
+      abUseLimit: 0
+      abApCost: 0
+      abAoeRange: 0
+      abEffHitChance: 0.25
+      effduration: 0
+      effHP: 0
+      effAP: 0
+    applyToAll: 1
+    itemPIDList: 
+    effModType: 0
+    effIDList: 
+    unitImmuneEffIDList: 

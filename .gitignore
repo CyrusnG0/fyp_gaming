@@ -1,0 +1,9 @@
+# Local agent/tooling config (per-machine, do not share)
+.kimi-code/
+
+# Third-party asset packages (TBTK source is already imported under fyp_gaming/Assets/TBTK/)
+*.unitypackage
+
+# OS junk
+Thumbs.db
+.DS_Store
