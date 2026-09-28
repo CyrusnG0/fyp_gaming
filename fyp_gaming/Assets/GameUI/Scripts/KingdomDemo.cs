@@ -48,6 +48,20 @@ namespace LuanShi
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
 
+        // concept tabs: 地圖 is the live view, the rest preview the full design
+        // (doc/LuanShi-Game-Design-v1.md). Only 史官 renders real data.
+        private string activeTab = "map";
+        private Vector2 historianScroll;
+        private static readonly string[,] Tabs =
+        {
+            { "map",       "地圖" },
+            { "domestic",  "內政" },
+            { "diplomacy", "外交" },
+            { "intel",     "諜報" },
+            { "research",  "研究" },
+            { "history",   "史官" },
+        };
+
         // ------------------------------------------------------------------ setup
 
         void Awake()
@@ -255,7 +269,8 @@ namespace LuanShi
         {
             var e = Event.current;
             if (e.type != EventType.MouseDown) return;
-            if (!ready || reportShowing) return;
+            // a concept tab is modal over the map, exactly like the 朝報 report
+            if (!ready || reportShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
             if (e.button == 1) { ClearArmyMoveTargets(); selCity = null; selArmy = null; e.Use(); return; }
@@ -469,9 +484,24 @@ namespace LuanShi
             GUI.Label(new Rect(22, 12, 980, 28),
                 $"第 {engine.State.Season} 季 · {fac.Name}（玩家） · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason} · 人口 {pop} · 糧 {food} · 金 {gold}", title);
 
-            // selection panel
-            if (selCity != null) DrawCityPanel(selCity, body, btn);
-            else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
+            // tab bar — 地圖 is the live view; the others preview the full design concept
+            var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
+            for (int i = 0; i < Tabs.GetLength(0); i++)
+            {
+                var r = new Rect(1020 + i * 66, 8, 62, 34);
+                uiRects.Add(r);
+                var prevBg = GUI.backgroundColor;
+                if (activeTab == Tabs[i, 0]) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
+                if (GUI.Button(r, Tabs[i, 1], tabBtn)) ShowTab(Tabs[i, 0]);
+                GUI.backgroundColor = prevBg;
+            }
+
+            // selection panel (map view only)
+            if (activeTab == "map")
+            {
+                if (selCity != null) DrawCityPanel(selCity, body, btn);
+                else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
+            }
 
             // end season
             var end = new Rect(1420, 8, 170, 44);
@@ -486,6 +516,7 @@ namespace LuanShi
             for (int i = 0; i < jsonFeed.Count; i++)
                 GUI.Label(new Rect(20, 826 + i * 16, 1080, 16), jsonFeed[i], mono);
 
+            if (activeTab != "map" && !reportShowing) DrawTabPanel(body, btn, title, mono);
             if (reportShowing) DrawReport(body, btn, title);
 
             HandleClicks();
@@ -534,6 +565,204 @@ namespace LuanShi
             for (int i = 1; i < reportLines.Count; i++) sb.AppendLine(reportLines[i]);
             GUI.Label(new Rect(p.x + 20, p.y + 50, 760, 300), sb.ToString(), body);
             if (GUI.Button(new Rect(p.x + 330, p.y + 360, 140, 40), "繼續", btn)) CloseReport();
+        }
+
+        // ------------------------------------------------------------ concept tabs
+        // 內政 / 外交 / 諜報 / 研究 are display-only previews of the full design;
+        // 史官 renders the real in-memory event log.
+
+        /// <summary>Opens a concept panel by tab key. Same entry point the tab bar uses,
+        /// so scripted demos and screenshot passes can drive the UI without a mouse.</summary>
+        public void ShowTab(string key)
+        {
+            activeTab = key;
+        }
+
+        void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
+        {
+            var p = new Rect(400, 190, 800, 480);
+            uiRects.Add(p);
+            GUI.Box(p, GUIContent.none);
+            GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
+
+            switch (activeTab)
+            {
+                case "domestic":  DrawDomesticPanel(p, body); break;
+                case "diplomacy": DrawDiplomacyPanel(p, body); break;
+                case "intel":     DrawIntelPanel(p, body); break;
+                case "research":  DrawResearchPanel(p, body); break;
+                default:          DrawHistorianPanel(p, body, mono); break;
+            }
+
+            if (GUI.Button(new Rect(p.x + 320, p.y + 424, 160, 40), "關閉", btn)) activeTab = "map";
+        }
+
+        string TabTitle()
+        {
+            switch (activeTab)
+            {
+                case "domestic":  return "內政 · 待開發";
+                case "diplomacy": return "外交 · 待開發";
+                case "intel":     return "諜報 · 待開發";
+                case "research":  return "研究 · 待開發";
+                default:          return "史官 · 本局史書";
+            }
+        }
+
+        void DrawDomesticPanel(Rect p, GUIStyle body)
+        {
+            float y = p.y + 52;
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "內政行動（設計文件第 11 章 · 共 10 項）", body);
+            y += 30;
+
+            string[] rows =
+            {
+                "徵稅　　耗令 1　金 ＋、民心 −5",
+                "輕徭　　耗令 1　民心 ＋8、金 −",
+                "開墾　　耗令 1　該城糧產 ＋15%（上限 ＋60%）",
+                "練兵　　耗令 1　訓練 ＋1（上限 5）",
+                "修城　　耗令 1　城防 ＋1（上限 5）",
+                "興建建築　耗令 1　金足夠、有空位",
+                "賑災　　耗令 1　糧 −、民心 ＋15",
+                "遷都　　耗令 1　威望 −5、換都城",
+            };
+            foreach (var row in rows)
+            {
+                PlannedLabel(new Rect(p.x + 36, y, 744, 22), "〔待開發〕 " + row, body);
+                y += 24;
+            }
+
+            y += 10;
+            GUI.Label(new Rect(p.x + 20, y, 760, 44),
+                "已開放：屯田、徵兵 — 點選我方城池後，於左側城池面板下達命令。\n其餘行動待內政模組完成後陸續開放。", body);
+        }
+
+        void DrawDiplomacyPanel(Rect p, GUIStyle body)
+        {
+            float y = p.y + 52;
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "條約　（本局尚無任何條約）", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 40),
+                "可締結：互不侵犯 · 同盟 · 共同防禦 · 停戰 · 朝貢\n　　　　　割地 · 通商 · 借道 · 聯姻 · 稱臣", body);
+            y += 48;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "勢力關係", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 44),
+                "魏（玩家）　↔　蜀（腳本 AI）　　信任 —　　關係【未開放】\n威望 —　（待外交模組）", body);
+            y += 54;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "外交行動", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 44),
+                "〔待開發〕 遣使 · 提出條約 · 贈禮 · 索貢 · 通商\n〔待開發〕 斷交 · 宣戰 · 招降", body);
+            y += 54;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 40),
+                "設計要點：說話不改狀態，只有簽了字的條款才算數；對方簽不簽，取決於信任值。", body);
+        }
+
+        void DrawIntelPanel(Rect p, GUIStyle body)
+        {
+            float y = p.y + 52;
+            GUI.Label(new Rect(p.x + 20, y, 760, 44),
+                "戰爭迷霧：己方城池周邊 3 格、己方軍隊周邊 2 格可見，其餘一片模糊。\n目前無間諜潛伏 — 敵軍位置與兵力皆為推測。", body);
+            y += 52;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "間諜任務", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 66),
+                "〔待開發〕 偵察 200 金　　〔待開發〕 竊取軍報 400 金\n" +
+                "〔待開發〕 散播謠言 500 金　〔待開發〕 偽造軍報 600 金\n" +
+                "〔待開發〕 挑撥離間 800 金　〔待開發〕 收買將領 1000 金", body);
+            y += 74;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "反諜", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "〔待開發〕 巡查　　〔待開發〕 清查", body);
+            y += 30;
+
+            GUI.Label(new Rect(p.x + 20, y, 760, 40),
+                "暴露判定：基礎 5% ＋ 所在城治安 ＋ 目標國諜報等級；嫌疑 ≥ 80 必定暴露。", body);
+        }
+
+        void DrawResearchPanel(Rect p, GUIStyle body)
+        {
+            float y = p.y + 52;
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "四條國策線（各 5 級：20 / 40 / 70 / 110 / 160 研究點）", body);
+            y += 30;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 96),
+                "〔待開發〕 農政 1　開墾 — 糧 ＋10%\n" +
+                "〔待開發〕 兵法 1　練兵 — 訓練 ＋1\n" +
+                "〔待開發〕 諜報 1　細作 — 可派間諜\n" +
+                "〔待開發〕 吏治 1　賦稅 — 金 ＋10%", body);
+            y += 108;
+            GUI.Label(new Rect(p.x + 20, y, 760, 44),
+                "開局約 15 研究點／季，一局之內通常只能專精兩條線。\n研究模組完成後可於此花費研究點逐級解鎖。", body);
+        }
+
+        void DrawHistorianPanel(Rect p, GUIStyle body, GUIStyle mono)
+        {
+            var records = engine.Log.Records;
+            GUI.Label(new Rect(p.x + 20, p.y + 52, 760, 22),
+                $"本局史書 — 共 {records.Count} 條（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
+
+            float lineH = 18f;
+            var view = new Rect(p.x + 20, p.y + 80, 760, 300);
+            var content = new Rect(0, 0, 744, Mathf.Max(view.height, records.Count * lineH + 8f));
+            historianScroll = GUI.BeginScrollView(view, historianScroll, content, false, true);
+            for (int i = 0; i < records.Count; i++)
+                GUI.Label(new Rect(4, 4 + i * lineH, 736, lineH), HistorianLine(records[i]), mono);
+            GUI.EndScrollView();
+
+            GUI.Label(new Rect(p.x + 20, p.y + 388, 760, 22),
+                $"史官記：本季共錄得 {CountSeasonEvents()} 事。", body);
+        }
+
+        string HistorianLine(EventRecord rec)
+        {
+            var sb = new StringBuilder();
+            sb.Append(rec.Seq.ToString().PadLeft(2));
+            sb.Append("　第").Append(rec.Season).Append("季　");
+            sb.Append(rec.EventType);
+            sb.Append("　").Append(SeatShort(rec.ActorSeatId));
+            string payload = PayloadText(rec.Payload);
+            if (payload.Length > 0) sb.Append("　").Append(payload);
+            return sb.ToString();
+        }
+
+        string SeatShort(string seatId)
+        {
+            if (seatId == null) return "—";
+            var f = engine.State.FindFaction(seatId);
+            return f != null ? f.Name : seatId;
+        }
+
+        string PayloadText(Dictionary<string, string> payload)
+        {
+            if (payload == null || payload.Count == 0) return "";
+            var sb = new StringBuilder();
+            foreach (var kv in payload)
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(kv.Key).Append('=').Append(kv.Value);
+            }
+            return sb.ToString();
+        }
+
+        string PhaseLabel(string phase)
+        {
+            if (phase == "player_orders") return "下令";
+            if (phase == "resolution") return "結算";
+            return phase;
+        }
+
+        void PlannedLabel(Rect r, string text, GUIStyle style)
+        {
+            bool prev = GUI.enabled;
+            GUI.enabled = false;      // grayed out: designed, not yet implemented
+            GUI.Label(r, text, style);
+            GUI.enabled = prev;
         }
 
         string OwnerName(CityState city)

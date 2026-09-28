@@ -62,7 +62,8 @@
 |---|---|---|
 | Map view: zoom/pan, terrain, cities, armies, fog mask | 🟡 | LuanShi_Demo: terrain/cities/army-banners/camera done (2D fake-3D, ADR-008); fog mask not yet |
 | Nation/city/army panels + action menu (legal actions only) | 🟡 | IMGUI city/army panels with 屯田/徵兵/march orders (KingdomDemo); legal-action filtering minimal |
-| 朝報 / 朝議 / 史官 screens | 🟡 | 朝報 season-report panel + 史官 summary line done; 朝議 not yet |
+| 朝報 / 朝議 / 史官 screens | 🟡 | 朝報 season-report panel done; 史官 tab shows the real event log (scrollable); 朝議 not yet |
+| Concept tab bar （內政/外交/諜報/研究 placeholders) | 🟡 | 2026-09-28: display-only previews of the design doc in KingdomDemo; no mechanics behind them |
 | Diplomacy panel (grouped relations, treaty deadlines) | ❌ | 8 seats → up to 56 directed trust values; must filter/group |
 | Notifications + turn progress | ❌ | |
 | Replay viewer | ❌ | |

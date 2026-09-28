@@ -111,3 +111,6 @@ InitTestScene*.unity*
 
 # Agent tool worktrees / state
 .kilo/
+
+# Unity crash-recovery scenes (auto-generated, not real content)
+/[Aa]ssets/_Recovery/
