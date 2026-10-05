@@ -66,17 +66,20 @@ namespace LuanShi
 
         void Awake()
         {
-            // GameControl.Awake still runs on a disabled component (grid init), but its
-            // Start coroutine never fires — TBTK's tactical battle flow stays off.
-            var gc = FindAnyObjectByType<TBTK.GameControl>();
-            if (gc != null) gc.enabled = false;
         }
 
-        void Start()
+        System.Collections.IEnumerator Start()
         {
+            // Let TBTK's Awake methods initialize the serialized grid before replacing
+            // its tactical flow with the kingdom controller.
+            yield return null;
+
+            var gc = FindAnyObjectByType<TBTK.GameControl>();
+            if (gc != null) gc.enabled = false;
+
             // TBTK's tactical-layer UI (HUD, perk menu, ability bars) is not part of the
             // kingdom demo; hide it so only the strategic IMGUI shows.
-            foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+            foreach (var mb in FindObjectsByType<MonoBehaviour>())
                 if (mb.GetType().Namespace == "TBTK" && mb.GetType().Name.StartsWith("UI"))
                     mb.gameObject.SetActive(false);
 
@@ -152,8 +155,14 @@ namespace LuanShi
             AddArmy(shuArmyObj, "army-shu-1", "蜀軍", AiSeat);
             foreach (var name in unusedArmyObjs)
             {
-                var go = GameObject.Find(name);
-                if (go != null) go.SetActive(false);
+                var go = FindSceneObject(name);
+                if (go == null || !go.activeInHierarchy) continue;
+
+                bool isWei = name.StartsWith("Wei_", System.StringComparison.Ordinal);
+                string faction = isWei ? "wei" : "shu";
+                string seat = isWei ? HumanSeat : AiSeat;
+                string number = name.Substring(name.Length - 1);
+                AddArmy(name, "army-" + faction + "-" + number, isWei ? "魏軍" : "蜀軍", seat);
             }
 
             engine.BeginSeason();
@@ -163,7 +172,7 @@ namespace LuanShi
 
         void AddCity(string objName, string id, string displayName, string ownerSeat)
         {
-            var go = GameObject.Find(objName);
+            var go = FindOrCreateMarker(objName, id == "city-wei" ? 2 : id == "city-shu" ? 9 : 6, id == "city-wei" ? 2 : id == "city-shu" ? 6 : 4);
             if (go == null) throw new System.Exception("scene object missing: " + objName);
             var node = TBTK.GridManager.GetNode(go.transform.position, null);
             if (node == null) throw new System.Exception(objName + " is not on a grid node");
@@ -193,10 +202,16 @@ namespace LuanShi
 
         void AddArmy(string objName, string id, string displayName, string ownerSeat)
         {
-            var go = GameObject.Find(objName);
+            var go = FindOrCreateMarker(objName, id == "army-wei-1" ? 2 : 9, id == "army-wei-1" ? 3 : 5);
             if (go == null) throw new System.Exception("scene object missing: " + objName);
+            if (!go.activeInHierarchy)
+            {
+                Debug.Log("[KingdomDemo] skipping disabled army: " + objName);
+                return;
+            }
             var node = TBTK.GridManager.GetNode(go.transform.position, null);
             if (node == null) throw new System.Exception(objName + " is not on a grid node");
+            go.transform.position = node.GetPos();
 
             engine.State.Armies.Add(new ArmyState
             {
@@ -208,6 +223,32 @@ namespace LuanShi
                 Z = node.idxZ,
             });
             armyObjs[id] = go;
+        }
+
+        GameObject FindOrCreateMarker(string objName, int x, int z)
+        {
+            var go = FindSceneObject(objName);
+            if (go != null) return go;
+
+            var node = TBTK.GridManager.GetNode(x, z);
+            if (node == null)
+                for (int ix = 0; ix < TBTK.GridManager.DimensionX() && node == null; ix++)
+                    for (int iz = 0; iz < TBTK.GridManager.DimensionZ() && node == null; iz++)
+                        node = TBTK.GridManager.GetNode(ix, iz);
+            if (node == null) return null;
+
+            go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            go.name = objName;
+            go.transform.position = node.GetPos();
+            go.transform.localScale = new Vector3(0.45f, 0.2f, 0.45f);
+            return go;
+        }
+
+        GameObject FindSceneObject(string objName)
+        {
+            foreach (var go in FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+                if (go.name == objName) return go;
+            return null;
         }
 
         void TintCity(string cityId)
@@ -232,25 +273,89 @@ namespace LuanShi
             if (!ready || reportShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
-            if (e.button == 1) { selCity = null; selArmy = null; e.Use(); return; }
+            if (e.button == 1) { ClearArmyMoveTargets(); selCity = null; selArmy = null; e.Use(); return; }
             if (e.button != 0) return;
 
             var cam = Camera.main;
             if (cam == null) return;
-            var ray = cam.ScreenPointToRay(new Vector3(e.mousePosition.x, Screen.height - e.mousePosition.y, 0f));
-            if (!Physics.Raycast(ray, out var hit, 500f)) return;
-            var node = TBTK.GridManager.GetNode(hit.point, null);
+            var ray = cam.ScreenPointToRay(Input.mousePosition);
+            var node = ResolveClickedNode(ray);
             if (node == null) return;
 
             var city = engine.State.CityAt(node.idxX, node.idxZ);
             var army = engine.State.ArmiesOf(HumanSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
 
-            if (army != null) { selArmy = army; selCity = null; statusMsg = "已選擇 " + army.Name + " — 點選目的地"; return; }
-            if (city != null && city.OwnerSeatId == HumanSeat) { selCity = city; selArmy = null; return; }
-            if (city != null) { selCity = city; selArmy = null; statusMsg = city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市"; return; }
+            if (army != null)
+            {
+                selArmy = army;
+                selCity = null;
+                TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
+                ShowArmyMoveTargets(army);
+                statusMsg = "已選擇 " + army.Name + " — 點選目的地";
+                e.Use();
+                return;
+            }
+            if (selArmy != null)
+            {
+                TryMarch(selArmy, node.idxX, node.idxZ);
+                e.Use();
+                return;
+            }
+            if (city != null && city.OwnerSeatId == HumanSeat)
+            {
+                ClearArmyMoveTargets();
+                selCity = city; selArmy = null; e.Use(); return;
+            }
+            if (city != null)
+            {
+                ClearArmyMoveTargets();
+                selCity = city; selArmy = null;
+                statusMsg = city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市";
+                e.Use();
+                return;
+            }
 
-            if (selArmy != null) TryMarch(selArmy, node.idxX, node.idxZ);
             e.Use();
+        }
+
+        TBTK.Node ResolveClickedNode(Ray ray)
+        {
+            int nodeLayerMask = 1 << TBTK.TBTK.GetLayerNode();
+            if (Physics.Raycast(ray, out var nodeHit, 500f, nodeLayerMask))
+                return TBTK.GridManager.GetNode(nodeHit.point, nodeHit.collider.gameObject);
+
+            if (Physics.Raycast(ray, out var hit, 500f))
+                return TBTK.GridManager.GetNode(hit.point, null);
+
+            return null;
+        }
+
+        void ShowArmyMoveTargets(ArmyState army)
+        {
+            var targets = new List<TBTK.Node>();
+            if (!army.MarchedThisSeason)
+                for (int x = 0; x < engine.State.Map.Width; x++)
+                    for (int z = 0; z < engine.State.Map.Height; z++)
+                    {
+                        if (x == army.X && z == army.Z) continue;
+                        if (!engine.State.Map.IsWalkable(x, z)) continue;
+                        if (engine.State.ArmyAt(x, z) != null) continue;
+
+                        var city = engine.State.CityAt(x, z);
+                        if (city != null && !city.IsNeutral && city.OwnerSeatId != HumanSeat) continue;
+                        if (engine.State.Map.PathCost(army.X, army.Z, x, z,
+                                BalanceConfig.ArmyMoveCostPerSeason) < 0) continue;
+
+                        var node = TBTK.GridManager.GetNode(x, z);
+                        if (node != null) targets.Add(node);
+                    }
+
+            TBTK.GridIndicator.ShowMovable(targets);
+        }
+
+        void ClearArmyMoveTargets()
+        {
+            TBTK.GridIndicator.HideAll();
         }
 
         bool PointerOverUI(Vector2 m)
@@ -269,8 +374,14 @@ namespace LuanShi
             cmd.ControllerType = ControllerType.Human;
             var r = engine.Submit(cmd);
             PushJson(cmd, r);
-            if (r.Ok && cmd.Type == ActionType.March) SyncArmyVisual(cmd.TargetId);
-            statusMsg = r.Ok ? "命令已執行" : "命令被拒：" + r.Error;
+            if (r.Ok && cmd.Type == ActionType.March)
+            {
+                ClearArmyMoveTargets();
+                SyncArmyVisual(cmd.TargetId);
+            }
+            statusMsg = r.Ok ? "命令已執行" : r.Error == "no command points left"
+                ? "行動點不足：本季已沒有可用行動點"
+                : "命令被拒：" + r.Error;
         }
 
         void TryMarch(ArmyState army, int x, int z)
@@ -281,7 +392,7 @@ namespace LuanShi
             var army = engine.State.FindArmy(armyId);
             var node = TBTK.GridManager.GetNode(army.X, army.Z);
             var t = armyObjs[armyId].transform;
-            t.position = node.GetPos() + Vector3.up * 0.1f;
+            t.position = node.GetPos();
 
             foreach (var city in engine.State.Cities) TintCity(city.Id);   // capture may have changed owners
         }
@@ -423,12 +534,10 @@ namespace LuanShi
                 GUI.Label(new Rect(22, 84, 280, 80),
                     $"人口 {city.Population}\n糧食 {city.Food}\n金錢 {city.Gold}\n駐軍 {city.Garrison}", body);
                 var fac = engine.State.FindFaction(HumanSeat);
-                GUI.enabled = fac.CommandPoints > 0;
                 if (GUI.Button(new Rect(22, 172, 120, 34), "屯田", btn))
                     SubmitHuman(new ActionCommand { Type = ActionType.Farm, TargetId = city.Id, Reason = "UI: farm order" });
                 if (GUI.Button(new Rect(152, 172, 120, 34), "徵兵", btn))
                     SubmitHuman(new ActionCommand { Type = ActionType.Recruit, TargetId = city.Id, Reason = "UI: recruit order" });
-                GUI.enabled = true;
             }
             else
             {
