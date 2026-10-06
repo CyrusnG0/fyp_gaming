@@ -29,6 +29,8 @@
 - **Verified 2026-09-26** (headless + play mode, screenshots in `docs/screenshots/`): farm/recruit/march accepted; double-farm, CP-exhaustion, enemy-army-steal rejected; human march (2,6)→(5,6) cost 3; AI seat farm+recruit via same pipeline; resolution report numbers match event log; season 2 begins with CP reset and march flags cleared; city capture verified headless.
 - **Concept tab bar (2026-09-28)**: 地圖/內政/外交/諜報/研究/史官 tabs in `KingdomDemo.OnGUI`. 內政/外交/諜報/研究 are greyed-out display-only previews of the design doc (no mechanics); **史官 renders the real event log** (scrollable, `engine.Log.Records`). Tab state is modal over map clicks. Public `ShowTab(key)` allows scripted demos/screenshots. Verified in play mode, screenshots `luanshi_ui_*.png` in `docs/screenshots/`.
 - **Repo flattened + pushed (2026-09-28)**: single repo `github.com/CyrusnG0/fyp_gaming`; Unity project as plain files under `fyp_gaming/` (nested git repo removed; its 1-commit history backed up as a bundle in `%TEMP%`). Root `.gitignore` (agent config, `*.unitypackage`, OS junk); `fyp_gaming/.gitignore` = Unity template + `.slnx` + `.kilo/` + `Assets/_Recovery/`; `.gitattributes` rewritten minimal **no-LFS** (binaries committed as-is). 918 files, ~90 MB. Teammate: clone → open `fyp_gaming/` in Unity Hub (6000.6.2f1) → play `LuanShi_Demo`.
+- **Teammate PR #1 merged (2026-10-06)**: "armies can move now" — GameControl disable deferred one frame (Start coroutine); clicks raycast the TBTK node layer via `Input.mousePosition`; reachable-hex highlight via `TBTK.GridIndicator` (engine `PathCost` budget); all 8 army objects registered (4 per side); friendly CP-exhaustion message. `VersionControlSettings.asset` reverted to Visible Meta Files (was set to Unity Version Control/Plastic — wrong for git).
+- **`docs/ACTIONS.md` drafted (2026-10-06)**: canonical action spec — schema v2 (`args`+`text` fields), all 41+ designed actions inventoried vs the 3 implemented, MVP tier proposal (D1-D7, M1-M3, P1-P6, fog observations, control switch), 7 team decision points in §10. **Awaiting team sign-off before implementation.**
 
 ## In progress
 
@@ -56,7 +58,8 @@
 
 ## Next actions (priority order)
 
-1. **User: restart Unity editor** (applies activeInputHandler=Both → TBTK camera pan/zoom works), then play `LuanShi_Demo` hands-on: click 魏都 → 屯田/徵兵, click red banner → march, 結束季節 → 朝報, flip through the tabs.
+1. **Team: review `docs/ACTIONS.md` §10 decision points** (CP 5 vs 3, `farm`→`reclaim` semantics, MVP tier, 攻城 scope, treaty timing, 民心 consequence, betrayal-as-derived) — then implementation follows the spec.
+2. **User: restart Unity editor** (applies activeInputHandler=Both → TBTK camera pan/zoom works), then play `LuanShi_Demo` hands-on: click 魏都 → 屯田/徵兵, click red banner → march, 結束季節 → 朝報, flip through the tabs.
 2. **Professor demo rehearsal**: capture neutral 南城 by marching onto it (capture event + recolor), show JSON feed = the same commands an LLM will send, show 史官 tab = the real event log.
 3. **Resolve open decisions** — `docs/OPEN_QUESTIONS.md` (MVP seat count, faction roster, map dimensions, LLM provider/budget, turn-order rule).
 4. Next engine slices (post-demo): `IPlayerController` interface extraction (Human/Scripted/LLM stubs per CONTROLLER_PROTOCOL), more actions （徵稅/開墾/練兵…), basic combat for enemy cities, fog-of-war filtered observations, state snapshots, JSON balance config, LLM controller adapter (observation→prompt→JSON→validate→retry/fallback + LLMRun logging).
