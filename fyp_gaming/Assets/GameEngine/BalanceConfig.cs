@@ -7,7 +7,8 @@ namespace LuanShi.Engine
     public static class BalanceConfig
     {
         public const int CommandPointsPerSeason = 5;      // LOCKED (ADR-010): 號令 per faction per season
-        public const int CommandPointsPerOrder = 1;       // default 號令 per accepted command (M3 攻城 = 2, §4)
+        public const int CommandPointsPerOrder = 1;       // default 號令 per accepted command (§3 domestic)
+        public const int CommandPointsPerAttackCity = 2;  // LOCKED (ACTIONS.md §4 M3): 攻城 costs 2
         public const int ArmyMoveCostPerSeason = 6;       // TBD: total hex-cost an army may spend per season
 
         public const int CityBaseFoodYield = 200;         // TBD: passive food per owned city per season (pre-開墾)
@@ -56,5 +57,51 @@ namespace LuanShi.Engine
         public const int StartFood = 500;                 // TBD
         public const int StartGold = 300;                 // TBD
         public const int StartFieldArmyTroops = 2000;     // TBD
+
+        // ---- 戰鬥 M2/M3 (design §6, ACTIONS.md §4) ------------------------------
+
+        public const int ArmyMoraleStart = 60;             // TBD: 士氣 of a new army
+        public const int ArmyMoraleRegainPerSeason = 10;   // TBD: 士氣 regained per season, up to ArmyMoraleStart
+        public const int CombatRounds = 5;                 // LOCKED (design §6.2): ≤5 rounds per battle
+        public const float CombatLossPerRound = 0.08f;     // LOCKED (ACTIONS.md M2): loss/round = enemy 戰力 × 8%
+        public const float CombatVariance = 0.15f;         // TBD: seeded ±15% on each round's losses
+        public const float CombatTrainingBonusPerLevel = 0.10f;   // LOCKED (design §5.1/§6.1): 訓練 +10% 戰力/級
+        public const float CombatMoraleFloor = 0.5f;       // LOCKED (design §6.1): 士氣 0 → ×0.5
+        public const float CombatMoraleScale = 200f;       // LOCKED (design §6.1): 戰力 × (floor + 士氣 / scale)
+        public const float CombatDefenseBonusPerLevel = 0.15f;    // TBD: 城防 +15% defender 戰力 per level
+        public const float CombatMoraleLossPerLossPercent = 1f;   // TBD: 士氣 −1 per % of troops lost in a round (§6.2)
+        public const int CombatRoutMoraleThreshold = 0;    // LOCKED (ACTIONS.md M2): 士氣 0 → 潰散 (design §5.1 says <30)
+        public const float CombatRoutExtraLoss = 0.30f;    // LOCKED (design §6.2): a 潰散 army loses a further 30%
+        public const int CombatVictoryMoraleGain = 10;     // TBD: winning restores 士氣 (design §5.1: 勝仗)
+        public const int AssaultTroopRatio = 3;            // LOCKED (design §4.3): 強攻 needs ≥3:1 unless 器械
+
+        // ---- 名聲: victory prestige and 背盟 / 偷襲 penalties (design §7.3–§7.4) -
+
+        public const int PrestigeBattleVictory = 3;        // TBD: 威望 for winning a field battle
+        public const int PrestigeCityCaptured = 5;         // TBD: 威望 for storming a city
+        public const int SurpriseAttackTrustPenalty = 40;  // LOCKED (design §7.3 偷襲): victim's trust −40
+        public const int SurpriseAttackPrestigePenalty = 12;   // LOCKED (design §7.3 偷襲): 威望 −12
+        public const int BetrayalTrustPenalty = 50;        // LOCKED (design §7.3 背盟): victim's trust −50
+        public const int BetrayalPrestigePenalty = 15;     // LOCKED (design §7.3 背盟): 威望 −15
+        public const int BetrayalThirdPartyTrustPenalty = 15;  // LOCKED (design §7.4): every other faction −15
+        public const int TruceBreakTrustPenalty = 30;      // LOCKED (design §7.3 撕毀停戰): victim's trust −30
+        public const int TruceBreakPrestigePenalty = 10;   // LOCKED (design §7.3 撕毀停戰): 威望 −10
+
+        // ---- scripted-AI policy (a baseline behaviour, not a game rule) --------
+
+        public const int ScriptedAttackTroopAdvantagePercent = 50;   // AI attacks only with this troop edge
+
+        /// <summary>
+        /// 號令 cost of an action — the spec's "CP" column lives here so neither a handler nor a UI
+        /// label hardcodes it (ACTIONS.md §3–§4). Anything the spec does not price costs the default.
+        /// </summary>
+        public static int CommandPointCost(string actionType)
+        {
+            switch (actionType)
+            {
+                case ActionType.AttackCity: return CommandPointsPerAttackCity;
+                default: return CommandPointsPerOrder;
+            }
+        }
     }
 }

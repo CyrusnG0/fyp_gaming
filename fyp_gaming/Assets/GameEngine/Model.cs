@@ -84,6 +84,22 @@ namespace LuanShi.Engine
         public int Troops;
         public int X, Z;
         public bool MarchedThisSeason;
+        public int Morale = BalanceConfig.ArmyMoraleStart;   // 士氣, range MoraleMin..MoraleMax; 0 = 潰散
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(160);
+            sb.Append('{');
+            sb.Append("\"id\":").Append(MiniJson.Str(Id));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append(",\"troops\":").Append(MiniJson.Num(Troops));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"morale\":").Append(MiniJson.Num(Morale));
+            sb.Append('}');
+            return sb.ToString();
+        }
     }
 
     /// <summary>
@@ -101,6 +117,18 @@ namespace LuanShi.Engine
         public int Index(int x, int z) => z * Width + x;
         public bool InBounds(int x, int z) => x >= 0 && z >= 0 && x < Width && z < Height;
         public bool IsWalkable(int x, int z) => InBounds(x, z) && Walkable[Index(x, z)];
+
+        /// <summary>Same hex or hex-adjacent: the range-1 check for 野戰 / 攻城 (ACTIONS.md §4).</summary>
+        public bool AreAdjacent(int x1, int z1, int x2, int z2)
+        {
+            if (x1 == x2 && z1 == z2) return true;
+            if (!InBounds(x1, z1) || !InBounds(x2, z2)) return false;
+            var neighbors = Neighbors[Index(x1, z1)];
+            if (neighbors == null) return false;
+            int target = Index(x2, z2);
+            foreach (int n in neighbors) if (n == target) return true;
+            return false;
+        }
 
         /// <summary>Dijkstra over hex costs. Returns total cost, or -1 if unreachable within maxCost.</summary>
         public int PathCost(int fromX, int fromZ, int toX, int toZ, int maxCost)
@@ -152,13 +180,24 @@ namespace LuanShi.Engine
         }
     }
 
-    /// <summary>One treaty record (ACTIONS.md §5). Type ∈ nap 互不侵犯 | alliance 同盟 | truce 停戰.</summary>
+    /// <summary>Treaty kinds for the MVP diplomatic set (ACTIONS.md §5 P2).</summary>
+    public static class TreatyType
+    {
+        public const string Nap = "nap";               // 互不侵犯
+        public const string Alliance = "alliance";     // 同盟
+        public const string Truce = "truce";           // 停戰
+    }
+
+    /// <summary>One treaty record (ACTIONS.md §5). Type ∈ TreatyType.*</summary>
     public sealed class TreatyRecord
     {
-        public string Type;
+        public string Type;            // TreatyType.*
         public string FactionA;        // seat id
         public string FactionB;        // seat id
         public int ExpirySeason;       // last season the treaty is in force
+
+        public bool Covers(string seatA, string seatB)
+            => (FactionA == seatA && FactionB == seatB) || (FactionA == seatB && FactionB == seatA);
 
         public string ToJson()
         {
@@ -209,6 +248,19 @@ namespace LuanShi.Engine
         }
 
         public void MakePeace(string seatA, string seatB) => WarWith.Remove(WarKey(seatA, seatB));
+
+        /// <summary>The treaty of this type between the two seats, or null (order-independent).</summary>
+        public TreatyRecord FindTreaty(string type, string seatA, string seatB)
+            => Treaties.Find(t => t.Type == type && t.Covers(seatA, seatB));
+
+        public bool HasTreaty(string type, string seatA, string seatB)
+            => FindTreaty(type, seatA, seatB) != null;
+
+        /// <summary>Removes a treaty — used when it is broken by force (ADR-010 #7) or expires.</summary>
+        public void BreakTreaty(TreatyRecord treaty)
+        {
+            if (treaty != null) Treaties.Remove(treaty);
+        }
 
         public string ToJson()
         {

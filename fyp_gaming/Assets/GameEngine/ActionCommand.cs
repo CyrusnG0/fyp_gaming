@@ -103,6 +103,8 @@ namespace LuanShi.Engine
         public const string Fortify = "fortify";            // 修城 D6: target_id = city, Defense +1
         public const string Relief = "relief";              // 賑災 D7: target_id = city, 民心 +ReliefMoraleGain
         public const string March = "march";                // 行軍 M1: target_id = army, param_a/b = dest hex x,z
+        public const string AttackArmy = "attack_army";     // 野戰 M2: target_id = own army, param_a/b = enemy army hex
+        public const string AttackCity = "attack_city";     // 攻城 M3: target_id = own army, param_a/b = enemy city hex
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";

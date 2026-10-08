@@ -379,22 +379,97 @@ namespace LuanShi
                 ClearArmyMoveTargets();
                 SyncArmyVisual(cmd.TargetId);
             }
-            statusMsg = r.Ok ? "命令已執行" : r.Error == "no command points left"
-                ? "行動點不足：本季已沒有可用行動點"
-                : "命令被拒：" + r.Error;
+            if (r.Ok && IsBattle(cmd.Type))
+            {
+                ClearArmyMoveTargets();
+                SyncBattleVisuals();
+            }
+
+            if (!r.Ok)
+                statusMsg = r.Error == "no command points left"
+                    ? "行動點不足：本季已沒有可用行動點"
+                    : "命令被拒：" + r.Error;
+            else if (IsBattle(cmd.Type))
+                statusMsg = LastBattleSummary() ?? "命令已執行";
+            else
+                statusMsg = "命令已執行";
         }
+
+        static bool IsBattle(string type)
+            => type == ActionType.AttackArmy || type == ActionType.AttackCity;
 
         void TryMarch(ArmyState army, int x, int z)
             => SubmitHuman(new ActionCommand { Type = ActionType.March, TargetId = army.Id, ParamA = x, ParamB = z });
 
         void SyncArmyVisual(string armyId)
         {
+            if (!armyObjs.TryGetValue(armyId, out var go) || go == null) return;
             var army = engine.State.FindArmy(armyId);
+            if (army == null) return;                                  // destroyed in battle
             var node = TBTK.GridManager.GetNode(army.X, army.Z);
-            var t = armyObjs[armyId].transform;
-            t.position = node.GetPos();
+            if (node == null) return;
 
+            go.transform.position = node.GetPos();
             foreach (var city in engine.State.Cities) TintCity(city.Id);   // capture may have changed owners
+        }
+
+        /// <summary>After a battle: hide banners of destroyed armies, move the survivors, recolour
+        /// captured cities, drop a selection that no longer exists.</summary>
+        void SyncBattleVisuals()
+        {
+            foreach (var kv in armyObjs)
+                if (kv.Value != null && kv.Value.activeSelf && engine.State.FindArmy(kv.Key) == null)
+                    kv.Value.SetActive(false);
+            foreach (var army in engine.State.Armies) SyncArmyVisual(army.Id);
+            if (selArmy != null && engine.State.FindArmy(selArmy.Id) == null) selArmy = null;
+            if (selCity != null && engine.State.FindCity(selCity.Id) == null) selCity = null;
+        }
+
+        // ---- 戰報: read the last battle back out of the log (design §6.4) ------
+
+        string LastBattleSummary()
+        {
+            var records = engine.Log.Records;
+            for (int i = records.Count - 1; i >= 0; i--)
+            {
+                if (records[i].EventType == "battle_field") return FieldSummary(records[i]);
+                if (records[i].EventType == "battle_siege") return SiegeSummary(records[i]);
+            }
+            return null;
+        }
+
+        string FieldSummary(EventRecord rec)
+            => $"野戰 {rec.Payload["rounds"]}輪：{SeatShort(rec.Payload["attacker_seat_id"])}" +
+               $"{rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} 對 " +
+               $"{SeatShort(rec.Payload["defender_seat_id"])}" +
+               $"{rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]}　{OutcomeLabel(rec.Payload["outcome"])}";
+
+        string SiegeSummary(EventRecord rec)
+            => $"攻城 {CityName(rec.Payload["city_id"])} {rec.Payload["rounds"]}輪：" +
+               $"攻方{rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}、守軍{rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]}　{OutcomeLabel(rec.Payload["outcome"])}";
+
+        string CityName(string cityId)
+        {
+            var city = engine.State.FindCity(cityId);
+            return city != null ? city.Name : cityId;
+        }
+
+        static string OutcomeLabel(string outcome)
+        {
+            switch (outcome)
+            {
+                case "defender_destroyed": return "敵軍覆沒";
+                case "attacker_destroyed": return "我軍覆沒";
+                case "mutual_destruction": return "兩敗俱傷";
+                case "defender_routed":    return "敵軍潰散";
+                case "attacker_routed":    return "我軍潰散";
+                case "mutual_rout":        return "兩軍潰散";
+                case "defender_holds":     return "守方留場";
+                case "captured":           return "城破佔領";
+                case "city_held":          return "守城成功";
+                case "assault_failed":     return "攻方覆沒";
+                default:                   return outcome;
+            }
         }
 
         void PushJson(ActionCommand cmd, ValidationResult r)
@@ -416,6 +491,7 @@ namespace LuanShi
                     var r = engine.Submit(cmd);
                     PushJson(cmd, r);
                     if (r.Ok && cmd.Type == ActionType.March) SyncArmyVisual(cmd.TargetId);
+                    if (r.Ok && IsBattle(cmd.Type)) SyncBattleVisuals();
                 }
             }
 
@@ -431,6 +507,11 @@ namespace LuanShi
                     var fac = engine.State.FindFaction(city.OwnerSeatId);
                     reportLines.Add($"★ {fac.Name}軍進駐{city.Name}，開拓版圖！");
                 }
+            foreach (var rec in engine.Log.Records)
+                if (rec.Season == engine.State.Season && rec.EventType == "battle_field")
+                    reportLines.Add("戰報：" + FieldSummary(rec));
+                else if (rec.Season == engine.State.Season && rec.EventType == "battle_siege")
+                    reportLines.Add("戰報：" + SiegeSummary(rec));
             foreach (var line in report.Lines) reportLines.Add(line);
             reportLines.Add("");
             reportLines.Add($"史官記：本季共錄得 {CountSeasonEvents()} 事。");
@@ -541,21 +622,21 @@ namespace LuanShi
                     body);
 
                 string hint = null;
-                hint = FirstReason(hint, OrderButton(new Rect(22, 210, 120, 34), city, ActionType.LevyTax, "徵稅", null, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 210, 120, 34), city, ActionType.LightenLabor, "輕徭",
-                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "金不足", btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 248, 120, 34), city, ActionType.Reclaim, "開墾",
+                hint = FirstReason(hint, OrderButton(new Rect(22, 210, 120, 34), ActionType.LevyTax, city.Id, "徵稅", null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 210, 120, 34), ActionType.LightenLabor, city.Id, "輕徭",
+                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "金不足", 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 248, 120, 34), ActionType.Reclaim, city.Id, "開墾",
                     city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "已達上限"
-                    : city.ReclaimedThisSeason ? "本季已開墾" : null, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 248, 120, 34), city, ActionType.Recruit, "募兵",
+                    : city.ReclaimedThisSeason ? "本季已開墾" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 248, 120, 34), ActionType.Recruit, city.Id, "募兵",
                     city.Gold < BalanceConfig.RecruitGoldCost ? "金不足"
-                    : city.Population < BalanceConfig.RecruitPopCost ? "人口不足" : null, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 286, 120, 34), city, ActionType.Train, "練兵",
-                    city.Training >= BalanceConfig.TrainingMax ? "已達上限" : null, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 286, 120, 34), city, ActionType.Fortify, "修城",
-                    city.Defense >= BalanceConfig.DefenseMax ? "已達上限" : null, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 324, 120, 34), city, ActionType.Relief, "賑災",
-                    city.Food < BalanceConfig.ReliefFoodCost ? "糧不足" : null, btn));
+                    : city.Population < BalanceConfig.RecruitPopCost ? "人口不足" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 286, 120, 34), ActionType.Train, city.Id, "練兵",
+                    city.Training >= BalanceConfig.TrainingMax ? "已達上限" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 286, 120, 34), ActionType.Fortify, city.Id, "修城",
+                    city.Defense >= BalanceConfig.DefenseMax ? "已達上限" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 324, 120, 34), ActionType.Relief, city.Id, "賑災",
+                    city.Food < BalanceConfig.ReliefFoodCost ? "糧不足" : null, 0, 0, btn));
 
                 if (hint != null) GUI.Label(new Rect(22, 364, 280, 22), hint, body);
             }
@@ -566,17 +647,21 @@ namespace LuanShi
         }
 
         /// <summary>
-        /// One 內政 order button (ACTIONS.md §3 D1-D7). Returns a player-facing reason when the
-        /// button is greyed out, or null when the order is obviously legal — the engine remains
-        /// the only authority; a stale hint just means the click gets rejected with a reason.
+        /// One order button. It always submits a real ActionCommand through SubmitHuman and shows the
+        /// action's 號令 cost from BalanceConfig; the engine stays the only authority, so a stale hint
+        /// just means the click comes back rejected with a reason.
         /// </summary>
-        string OrderButton(Rect r, CityState city, string type, string label, string blockedReason, GUIStyle btn)
+        string OrderButton(Rect r, string type, string targetId, string label, string blockedReason,
+            int paramA, int paramB, GUIStyle btn)
         {
             bool available = blockedReason == null;
             var prev = GUI.enabled;
             GUI.enabled = available;
-            if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointsPerOrder}令", btn))
-                SubmitHuman(new ActionCommand { Type = type, TargetId = city.Id, Reason = "UI: " + type });
+            if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointCost(type)}令", btn))
+                SubmitHuman(new ActionCommand
+                {
+                    Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB, Reason = "UI: " + type,
+                });
             GUI.enabled = prev;
             return available ? null : label + "：" + blockedReason;
         }
@@ -585,12 +670,63 @@ namespace LuanShi
 
         void DrawArmyPanel(ArmyState army, GUIStyle body, GUIStyle btn)
         {
-            var p = new Rect(10, 50, 300, 110);
+            var enemyArmies = AdjacentEnemyArmies(army);
+            var enemyCities = AdjacentEnemyCities(army);
+            int orders = enemyArmies.Count + enemyCities.Count;
+
+            var p = new Rect(10, 50, 300, orders > 0 ? 236 + orders * 38 : 150);
             uiRects.Add(p);
             GUI.Box(p, GUIContent.none);
-            GUI.Label(new Rect(22, 58, 280, 60),
-                $"{army.Name} · 兵力 {army.Troops}\n位置 ({army.X}, {army.Z})" +
-                (army.MarchedThisSeason ? "\n本季已行軍" : "\n點選六邊格以行軍"), body);
+            GUI.Label(new Rect(22, 58, 280, 24), $"{army.Name} · 兵力 {army.Troops}", body);
+            GUI.Label(new Rect(22, 86, 280, 66),
+                $"位置 ({army.X}, {army.Z})\n士氣 {army.Morale}\n" +
+                (army.MarchedThisSeason ? "本季已行軍" : "點選六邊格以行軍"), body);
+
+            if (orders == 0)
+            {
+                GUI.Label(new Rect(22, 156, 280, 22), "四周無敵軍或敵城", body);
+                return;
+            }
+
+            string hint = null;
+            int row = 0;
+            foreach (var enemy in enemyArmies)
+            {
+                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackArmy,
+                    army.Id, "攻擊 " + enemy.Name,
+                    army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "士氣潰散，無法出戰" : null,
+                    enemy.X, enemy.Z, btn));
+                row++;
+            }
+            foreach (var city in enemyCities)
+            {
+                string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "士氣潰散，無法出戰"
+                    : army.Troops < BalanceConfig.AssaultTroopRatio * city.Garrison
+                        ? $"需 {BalanceConfig.AssaultTroopRatio}:1 兵力（守軍 {city.Garrison}）" : null;
+                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackCity,
+                    army.Id, "攻城 " + city.Name, blocked, city.X, city.Z, btn));
+                row++;
+            }
+
+            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 280, 22), hint, body);
+        }
+
+        List<ArmyState> AdjacentEnemyArmies(ArmyState army)
+        {
+            var list = new List<ArmyState>();
+            foreach (var other in engine.State.Armies)
+                if (other.OwnerSeatId != army.OwnerSeatId
+                    && engine.State.Map.AreAdjacent(army.X, army.Z, other.X, other.Z)) list.Add(other);
+            return list;
+        }
+
+        List<CityState> AdjacentEnemyCities(ArmyState army)
+        {
+            var list = new List<CityState>();
+            foreach (var city in engine.State.Cities)
+                if (!city.IsNeutral && city.OwnerSeatId != army.OwnerSeatId
+                    && engine.State.Map.AreAdjacent(army.X, army.Z, city.X, city.Z)) list.Add(city);
+            return list;
         }
 
         void DrawReport(GUIStyle body, GUIStyle btn, GUIStyle title)
@@ -686,7 +822,8 @@ namespace LuanShi
 
             y += 10;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                $"點選我方城池後，於左側城池面板下達命令；條件不足的按鈕呈灰色。\n每季共 {BalanceConfig.CommandPointsPerSeason} 點號令，愈珍貴的行動愈要挑在對的季節做。", body);
+                $"點選我方城池後，於左側城池面板下達命令；條件不足的按鈕呈灰色。\n" +
+                $"點選我方部隊，可對相鄰敵軍發動野戰（1令）、對敵城強攻（{BalanceConfig.CommandPointsPerAttackCity}令，需 {BalanceConfig.AssaultTroopRatio}:1 兵力）。", body);
         }
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)

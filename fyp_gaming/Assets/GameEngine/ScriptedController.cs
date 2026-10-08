@@ -18,6 +18,45 @@ namespace LuanShi.Engine
 
             int cp = fac.CommandPoints;
             var cities = state.CitiesOf(seatId);
+            var committed = new List<string>();
+
+            // 野戰 / 攻城 first: an army in contact with the enemy is the urgent thing, and only
+            // real opportunities are taken. The scripted seat is the no-diplomacy baseline, so it
+            // never opens an undeclared war and never storms a city of a faction it is not already
+            // at war with (ADR-010 #7 prices surprise attacks from state).
+            foreach (var army in state.ArmiesOf(seatId))
+            {
+                if (army.Morale <= BalanceConfig.CombatRoutMoraleThreshold) continue;
+
+                foreach (var enemy in state.Armies)
+                {
+                    if (enemy.OwnerSeatId == seatId) continue;
+                    if (!state.Map.AreAdjacent(army.X, army.Z, enemy.X, enemy.Z)) continue;
+                    int attackCost = BalanceConfig.CommandPointCost(ActionType.AttackArmy);
+                    if (cp < attackCost) break;
+                    if (army.Troops * 100 < enemy.Troops * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
+                    plan.Add(Order(ActionType.AttackArmy, seatId, army.Id, "決戰", enemy.X, enemy.Z));
+                    cp -= attackCost;
+                    committed.Add(army.Id);
+                    break;
+                }
+                if (committed.Contains(army.Id)) continue;
+
+                foreach (var city in state.Cities)
+                {
+                    if (city.IsNeutral || city.OwnerSeatId == seatId) continue;
+                    if (!state.Diplomacy.IsAtWar(seatId, city.OwnerSeatId)) continue;
+                    if (!state.Map.AreAdjacent(army.X, army.Z, city.X, city.Z)) continue;
+                    int assaultCost = BalanceConfig.CommandPointCost(ActionType.AttackCity);
+                    if (cp < assaultCost) break;
+                    if (army.Troops * 100 < city.Garrison * BalanceConfig.AssaultTroopRatio
+                                                            * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
+                    plan.Add(Order(ActionType.AttackCity, seatId, army.Id, "攻取城池", city.X, city.Z));
+                    cp -= assaultCost;
+                    committed.Add(army.Id);
+                    break;
+                }
+            }
 
             // 徵稅: raise gold when the treasury cannot pay for troops and 民心 can take it.
             foreach (var city in cities)
@@ -29,11 +68,12 @@ namespace LuanShi.Engine
                 cp--;
             }
 
-            // 開墾: reclaim every city that hasn't reclaimed yet.
+            // 開墾: reclaim every city that still has land left to reclaim.
             foreach (var city in cities)
             {
                 if (cp <= 0) break;
                 if (city.ReclaimedThisSeason) continue;
+                if (city.ReclaimPct >= BalanceConfig.ReclaimPctCap) continue;
                 plan.Add(Order(ActionType.Reclaim, seatId, city.Id, "積穀防饑"));
                 cp--;
             }
@@ -77,12 +117,13 @@ namespace LuanShi.Engine
                 cp--;
             }
 
-            // 行軍: send the strongest idle field army toward the nearest neutral city.
+            // 行軍: send the strongest idle field army toward the nearest free neutral city.
             if (cp > 0)
             {
                 ArmyState best = null;
                 foreach (var a in state.ArmiesOf(seatId))
-                    if (!a.MarchedThisSeason && (best == null || a.Troops > best.Troops)) best = a;
+                    if (!a.MarchedThisSeason && !committed.Contains(a.Id) && (best == null || a.Troops > best.Troops))
+                        best = a;
 
                 if (best != null)
                 {
@@ -91,6 +132,7 @@ namespace LuanShi.Engine
                     foreach (var c in state.Cities)
                     {
                         if (!c.IsNeutral) continue;
+                        if (state.ArmyAt(c.X, c.Z) != null) continue;      // occupied hexes are refused by M1
                         int cost = state.Map.PathCost(best.X, best.Z, c.X, c.Z, BalanceConfig.ArmyMoveCostPerSeason);
                         if (cost >= 0 && cost < bestCost) { bestCost = cost; target = c; }
                     }
