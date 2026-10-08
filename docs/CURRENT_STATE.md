@@ -5,17 +5,18 @@
 
 ## Status summary
 
-**2026-10-08: ADR-010 locked; the locked MVP tier is implemented (P0–P4).** Five sessions took the demo
-from 3 actions to the full locked tier, all through the one `GameEngine.Submit()` pipeline:
-`06eece2` **P0** state fields + schema v2 (`args`/`text`, CP 5, `farm`→`reclaim`, 民心<30 → yields −50%);
-`e25594b` **P1** domestic D1–D7; `f1d7ff9` **P2** military M2/M3 (field battle, assault-only 攻城,
-derived 偷襲/背盟 penalties — `Trust`/`Prestige`/`WarWith` finally have writers); `f831c98` **P3**
-diplomacy P1–P6 (pending proposals, ratify/lapse at rollover, treaty expiry, working 外交 tab);
-`1d6f91d` **P4** hotseat pass-and-play (`SeatRotation` + per-seat UI + handover blocker) and
-engine-side fog observations (`GameEngine.Observe()`, ADR-011/ADR-012). Engine stays pure C# and is
-re-compiled + re-verified headless in every session. **Caveat: none of the P1–P4 UI has ever been run
-inside Unity** — engine behaviour is covered by throwaway assertion harnesses (P1 57, P2 64, P3 92,
-P4 53 checks), the adapter by differential syntax and symbol checks only.
+**2026-10-08: ADR-010 locked; the locked MVP tier is implemented (P0–P4) and verified in Unity.** Five
+sessions took the demo from 3 actions to the full locked tier, all through the one `GameEngine.Submit()`
+pipeline: `06eece2` **P0** state fields + schema v2 (`args`/`text`, CP 5, `farm`→`reclaim`, 民心<30 →
+yields −50%); `e25594b` **P1** domestic D1–D7; `f1d7ff9` **P2** military M2/M3 (field battle, assault-only
+攻城, derived 偷襲/背盟 penalties — `Trust`/`Prestige`/`WarWith` finally have writers); `f831c98` **P3**
+diplomacy P1–P6 (pending proposals, ratify/lapse at rollover, treaty expiry, working 外交 tab); `1d6f91d`
+**P4** hotseat pass-and-play (`SeatRotation` + per-seat UI + handover blocker) and engine-side fog
+observations (`GameEngine.Observe()`, ADR-011/ADR-012). The engine stays pure C# and is re-verified
+headless every session (P1 57, P2 64, P3 92, P4 53 assertions); **the adapter has now passed three Unity
+play-mode smoke rounds** — domestic orders, march, 朝報 and the event log; then combat (`battle_field`
+with `round_log`, the 3:1 siege gate enforced), hotseat handover (陛下請坐 blocker, per-seat fog map) and
+opaque panels; then the frame-1 synchronous init fix. Screenshots: `docs/screenshots/smoke*.png`.
 
 **Phase 1 — the professor demo loop WORKS.** One full season plays end-to-end on `LuanShi_Demo`: human orders (屯田/徵兵/march) through the authoritative `GameEngine.Submit()` pipeline, scripted-AI seat through the *same* pipeline, season resolution, 朝報 report panel, 史官 line, append-only JSONL event log. All orders — UI clicks and AI alike — are the same `ActionCommand` JSON (the FYP thesis artifact, shown live in the on-screen feed). Engine architecture: ADR-009.
 
@@ -37,7 +38,7 @@ P4 53 checks), the adapter by differential syntax and symbol checks only.
   - `EventLog.cs` — append-only JSONL, CONTROLLER_PROTOCOL §5 record shape.
   - `ScriptedController.cs` — deterministic rule-based seat that only proposes commands (farm → recruit → march to nearest neutral city).
   - `BalanceConfig.cs` — all tunables, marked TBD (3 CP/season, move cost 6, etc.).
-- **Unity adapter `KingdomDemo.cs`** (`Assets/GameUI/Scripts/`, on `KingdomDemo` object in scene): disables TBTK `GameControl` in Awake (grid still inits; tactical flow never starts), deactivates all `TBTK.UI*` objects, builds engine from TBTK grid, IMGUI demo UI — top bar (season/CP/人口/糧/金), city panel (屯田/徵兵), army panel + click-to-march, 結束季節 button, JSON command feed, 朝報 report modal. Clicks via `Event.current` in OnGUI (work regardless of Active Input Handling). Log dumped to `persistentDataPath/luanshi_log.jsonl` each season.
+- **Unity adapter `KingdomDemo.cs`** (`Assets/GameUI/Scripts/`, on `KingdomDemo` object in scene): disables TBTK `GameControl` synchronously in frame-1 `Start` (the grid still inits from `GameControl.Awake`; the tactical flow and its `TBTK.OnGameStart()` never run), deactivates all `TBTK.UI*` objects, builds the engine from the TBTK grid, and draws the IMGUI demo UI — top bar for the current seat (season/CP/威望/人口/糧/金), city panel (D1-D7, CP cost on every label, greyed with a reason), army panel (攻擊/攻城), 內政 + 外交 tabs, per-seat 史官, selected-seat 朝報, hotseat handover blocker, JSON command feed. Clicks via `Event.current` in OnGUI (work regardless of Active Input Handling). Log dumped to `persistentDataPath/luanshi_log.jsonl` each season.
 - **Verified 2026-09-26** (headless + play mode, screenshots in `docs/screenshots/`): farm/recruit/march accepted; double-farm, CP-exhaustion, enemy-army-steal rejected; human march (2,6)→(5,6) cost 3; AI seat farm+recruit via same pipeline; resolution report numbers match event log; season 2 begins with CP reset and march flags cleared; city capture verified headless.
 - **Concept tab bar (2026-09-28)**: 地圖/內政/外交/諜報/研究/史官 tabs in `KingdomDemo.OnGUI`. 內政/外交/諜報/研究 are greyed-out display-only previews of the design doc (no mechanics); **史官 renders the real event log** (scrollable, `engine.Log.Records`). Tab state is modal over map clicks. Public `ShowTab(key)` allows scripted demos/screenshots. Verified in play mode, screenshots `luanshi_ui_*.png` in `docs/screenshots/`.
 - **Repo flattened + pushed (2026-09-28)**: single repo `github.com/CyrusnG0/fyp_gaming`; Unity project as plain files under `fyp_gaming/` (nested git repo removed; its 1-commit history backed up as a bundle in `%TEMP%`). Root `.gitignore` (agent config, `*.unitypackage`, OS junk); `fyp_gaming/.gitignore` = Unity template + `.slnx` + `.kilo/` + `Assets/_Recovery/`; `.gitattributes` rewritten minimal **no-LFS** (binaries committed as-is). 918 files, ~90 MB. Teammate: clone → open `fyp_gaming/` in Unity Hub (6000.6.2f1) → play `LuanShi_Demo`.
@@ -48,16 +49,16 @@ P4 53 checks), the adapter by differential syntax and symbol checks only.
 - **P2 — military M2/M3 (`f1d7ff9`)**: `ArmyState.Morale`; 戰力 = 兵力 × 訓練 × 士氣 (城防 for garrisons); ≤5 rounds with seeded variance, 潰散 (extra 30% + retreat, or annihilation), 0 troops removes the army; assault-only 攻城 (3:1, single resolution) captures cities (駐軍 0, 民心 0, +威望); **derived 偷襲/背盟** penalties price undeclared attacks from diplomacy state; army panel gains 攻擊/攻城 buttons, 朝報 gains 戰報 lines.
 - **P3 — diplomacy P1-P6 (`f831c98`)**: 遣使 (text-only), 提出條約/接受/拒絕/反提案 via pending `TreatyProposal`s that ratify or lapse at rollover, `gift` (信任/威望), `declare_war`, `break_treaty`; treaty expiry at rollover; 停戰 ends war; the 外交 tab is live (relations, treaties with terms left, incoming inbox, 遣使 field, CP costs, greyed reasons).
 - **P4 — hotseat + fog observations (`1d6f91d`)**: data-driven `humanSeats` + `SeatRotation` + a full-screen handover blocker between human seats (single-human mode behaves exactly as before); `GameEngine.Observe(seatId)`/`InSight`/`SeesEvent` (ADR-011) and a per-seat UI — map hiding, filtered 史官/朝報/diplomacy; `Observation.ToJson()` is the payload the LLM adapter/HandoverBundle will carry.
+- **Smoke round 1 — adapter fixes (`8dc0cc7`)**: the 史官 footer's stale `CountSeasonEvents()` call (CS7036 — a standalone compile cannot see arity errors inside methods whose signature uses unresolved Unity types) now passes `engine.State.Season`; two public test hooks (`DebugSelect("city:<id>"|"army:<id>")`, `DebugOrder("<type>|<target_id>[|x,z]")`) let the harness drive selection and orders through the same `SubmitHuman` path as the buttons.
+- **Smoke round 1 — panel & marker art (`1ebffb7`)**: every panel and modal draws an opaque charcoal plate (`DrawBackdrop`) before its `GUI.Box` — the skin's box is see-through, so map sprites used to collide with panel text; the 朝報 hugs its lines and the 史官 scroll view its content; fallback markers (scene objects that don't exist yet) are tinted flat discs using a cached runtime material per faction colour instead of grey cylinders; `unusedArmyObjs` → `extraArmyObjs` (`FormerlySerializedAs`).
+- **Smoke round 1 — namespace fix (`af024e6`)**: `FormerlySerializedAs` lives in `UnityEngine.Serialization`, not `UnityEngine` — the same blind spot as the CS7036 (every UnityEngine type resolves as CS0234 in the standalone check).
+- **Smoke round 2 — PASSED**: combat (`battle_field` with `round_log`, the 3:1 siege gate enforced), hotseat handover (陛下請坐 blocker, per-seat fog map) and opaque panels, screenshots `docs/screenshots/smoke2_*.png`.
+- **Smoke round 3 — gate PASSED (`12af419`)**: initialisation is frame-1 synchronous (the old `yield return null` meant an unfocused editor window never initialised the demo at all); scrollbars appear only on overflow; the 史官 panel is content-sized and the report panel hugs its lines.
+- **Docs sync (`6950a78`)**: FEATURES/ACTIONS/CURRENT_STATE aligned with P0-P4, ADR-011/ADR-012 appended, OPEN_QUESTIONS 16-20 added.
 
 ## In progress
 
-- **Unity play-mode smoke test of the P1-P4 UI (blocks the next phase).** The adapter has not been run
-  inside the editor since P1 — every P1-P4 engine change was verified headless, but the city panel
-  (D1-D7 buttons), army panel (攻擊/攻城), 外交 tab (proposals, gifts, treaty terms, 遣使 field), 朝報
-  戰報/外交 lines, the hotseat handover blocker and the fog hiding are compile/symbol-checked only.
-  Things to eyeball: blocker opacity + centering; set `humanSeats = { "seat-0", "seat-1" }` on the
-  KingdomDemo component for the two-player demo; that a captured city re-appears as soon as an own
-  unit is within ±2/±3 of it.
+- (nothing actively in progress — P0-P4 are implemented and smoke-verified in play mode; P5 is next, see below)
 
 ## Known integration issues (TBTK ↔ this project)
 
@@ -81,21 +82,19 @@ P4 53 checks), the adapter by differential syntax and symbol checks only.
 
 ## Next actions (priority order)
 
-1. **Unity play-mode smoke test** — restart the editor (applies `activeInputHandler=Both` → TBTK camera
-   pan/zoom works) and play `LuanShi_Demo`, exercising P1-P4 by hand: a domestic order on 魏都, a march, an
-   attack on an adjacent unit/city, the 外交 tab (propose → accept → treaty in force next season), and
-   `humanSeats = { "seat-0", "seat-1" }` for the two-player handover. Fix whatever the editor reports —
-   nothing else should be trusted about the P1-P4 UI until this passes.
-2. **Professor demo rehearsal** after the smoke test: capture neutral 南城 by marching onto it, show the
-   JSON feed = the exact commands an LLM will send, show the 史官 tab = the seat's *filtered* log, flip
-   through 內政/外交 as live screens (諜報/研究 stay previews).
-3. **P5 — controllers**: extract `IPlayerController` (Human/Scripted/LLM, CONTROLLER_PROTOCOL §2) out of
-   KingdomDemo, then the LLM adapter (observation → prompt → JSON → validate → retry/fallback + `LLMRun`
-   logging) and the HandoverBundle built from `Observation` + pending proposals. Then state snapshots and a
-   JSON balance file.
-4. **Team: answer `docs/OPEN_QUESTIONS.md`** — first the items raised during P2-P4 (宣戰 vs existing
-   treaties, 遣使 trust, validator-oracle leaks, 民心 25 vs 30, estimation levels), then the blocking
-   Phase 0/1 list (seat count, faction roster, map size, LLM provider/budget, turn order).
+1. **P5 — controllers** (the FYP core): extract `IPlayerController` (Human/Scripted/LLM,
+   CONTROLLER_PROTOCOL §2) out of KingdomDemo, then build the LLM adapter (observation → prompt → JSON →
+   validate → retry/fallback + `LLMRun` logging) and the HandoverBundle from `Observation` + pending
+   proposals. Two blockers of its own: **the engine's JSON support is writer-only** (`MiniJson` has no
+   parser — a small hand-rolled one is the first engine task), and the provider/model/budget decision is
+   still open (OPEN_QUESTIONS 4). After that: state snapshots and a JSON balance file.
+2. **Professor demo rehearsal** on the smoke-tested build: capture neutral 南城 by marching onto it,
+   propose → accept a treaty and show it come into force next season, fight a field battle (戰報 +
+   `round_log`), hand the chair to a second human (陛下請坐) to show per-seat fog, and use the JSON feed to
+   make the thesis argument that UI clicks and LLM output are the same commands.
+3. **Team: answer `docs/OPEN_QUESTIONS.md`** — items 16-20 raised during P2-P4 (宣戰 vs existing treaties,
+   遣使 trust, the validator-oracle leak, 民心 25 vs 30, estimation levels), then the blocking Phase 0/1
+   list (seat count, faction roster, map size, LLM provider/budget, turn order).
 
 ## Blockers
 
@@ -109,7 +108,7 @@ P4 53 checks), the adapter by differential syntax and symbol checks only.
 - Cities: `City_Wei` (3,8), `City_Shu` (22,8), `City_South` (14,15) under `GridItems`; pagoda billboards, tinted by owner (魏 blue / 蜀 green / neutral grey) at runtime by KingdomDemo. Engine ids `city-wei/shu/south`; 南城 neutral (capture target).
 - Armies: `Wei_Army1` (魏軍, human field army, 2000 troops) and `Shu_Army1` (蜀軍, scripted) active; the other 6 army objects deactivated at runtime. Banner transforms moved directly by adapter on accepted march.
 - `KingdomDemo` GameObject with `LuanShi.KingdomDemo` component (scene wiring fields = object names; `randomSeed=12345`).
-- GameControl present but disabled at runtime (KingdomDemo.Awake); useGlobalSetting=false, fogOfWar/deployment off. All `TBTK.UI*` objects deactivated at runtime.
+- GameControl present but disabled at runtime (KingdomDemo's frame-1 `Start`; `[DefaultExecutionOrder(-100)]` puts it ahead of `GameControl.Start`); useGlobalSetting=false, fogOfWar/deployment off. All `TBTK.UI*` objects deactivated at runtime.
 - Camera: `CameraPivot` (holds CameraControl) at position **(-1,0,0)**, rot (45,0,0); Main Camera child local z=-22, fov 30; limits rotate 25–65, zoom 8–45, pan ±16/±14. (x=-1 frames both capitals + Wei banner; wider margins need z=-26 backoff, not done.)
 - Art: `Assets/GameUI/Art/` (6 PNGs + `_make_sprites.py`, run with `/c/Python313/python`). `BillboardSprite.cs` locks 45° pitch in LateUpdate.
 
@@ -127,4 +126,5 @@ P4 53 checks), the adapter by differential syntax and symbol checks only.
 - The formal report docx lags `docs/`; on conflict, **v1.1 docx + docs/ win**.
 - Game design detail (numbers, tables, 41 actions) in `doc/LuanShi-Game-Design-v1.md`; MVP scope per report §14: 4 seats, 2 maps, 15–20 seasons.
 - The demo's JSON feed + `luanshi_log.jsonl` are the thesis artifact: identical schema for human clicks and (future) LLM output. Keep it that way — no side channels.
+- **Process rule (standing, earned over three smoke rounds):** a change to `KingdomDemo.cs` must pass a **compile check in the editor before the next full smoke round**. A standalone compile of the adapter cannot see Unity-namespace, arity or serialization-attribute errors — CS7036 and the `UnityEngine.Serialization` namespace both slipped through it. Cheap headless pre-checks that do work: `arity_audit.py` (call-site arity vs declaration, including code inside interpolated strings), `external_audit.py` (adapter→engine signatures), `namespace_guard.py` (attribute and fully-qualified-name namespaces), plus a grep for fully-qualified `UnityEngine.*` usages after any adapter edit.
 - Unity editor restart still pending for `activeInputHandler=Both` (TBTK legacy-input loops broken until then; KingdomDemo UI unaffected).
