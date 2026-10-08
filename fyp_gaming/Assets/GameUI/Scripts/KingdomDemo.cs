@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Serialization;
 using LuanShi.Engine;
 
 namespace LuanShi
@@ -22,7 +23,7 @@ namespace LuanShi
         public string southCityObj = "City_South";
         public string weiArmyObj = "Wei_Army1";
         public string shuArmyObj = "Shu_Army1";
-        [UnityEngine.FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
+        [FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
         public string[] extraArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
                                           "Shu_Army2", "Shu_Army3", "Shu_Army4" };
 
