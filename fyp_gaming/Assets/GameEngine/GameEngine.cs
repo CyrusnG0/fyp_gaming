@@ -36,6 +36,10 @@ namespace LuanShi.Engine
             foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
             Emit(null, null, "season_start", "public", P("season", State.Season.ToString()), null);
+
+            // Rollover is when diplomacy moves: offers lapse or are ratified into treaties, and
+            // treaties that have run their term expire (ADR-010 #5: treaties take effect next season).
+            ResolveDiplomacyRollover();
         }
 
         /// <summary>Resolution: taxes, harvests, consumption, growth, starvation.</summary>
@@ -133,6 +137,12 @@ namespace LuanShi.Engine
                 case ActionType.March: r = DoMarch(fac, cmd); break;
                 case ActionType.AttackArmy: r = DoAttackArmy(fac, cmd); break;
                 case ActionType.AttackCity: r = DoAttackCity(fac, cmd); break;
+                case ActionType.SendMessage: r = DoSendMessage(fac, cmd); break;
+                case ActionType.ProposeTreaty: r = DoProposeTreaty(fac, cmd); break;
+                case ActionType.RespondTreaty: r = DoRespondTreaty(fac, cmd); break;
+                case ActionType.Gift: r = DoGift(fac, cmd); break;
+                case ActionType.DeclareWar: r = DoDeclareWar(fac, cmd); break;
+                case ActionType.BreakTreaty: r = DoBreakTreaty(fac, cmd); break;
                 default: r = ValidationResult.Fail($"unknown action type '{cmd.Type}'"); break;
             }
 
@@ -314,6 +324,277 @@ namespace LuanShi.Engine
 
         private static int Clamp(int value, int min, int max)
             => value < min ? min : value > max ? max : value;
+
+        // ---- 外交 P1-P6 (ACTIONS.md §5) ----------------------------------------
+        // Command shapes (the UI and the LLM adapter must both produce exactly these):
+        //   send_message    target_id = recipient seat · text = 訊息
+        //   propose_treaty  target_id = recipient seat · args { treaty_type ∈ nap|alliance|truce,
+        //                                                        duration = seasons, optional }
+        //   respond_treaty  target_id = proposer seat  · args { response ∈ accept|reject|counter }
+        //                                                 (+ treaty_type/duration when countering)
+        //   gift            target_id = recipient seat · param_a = gold amount
+        //   declare_war     target_id = seat
+        //   break_treaty    target_id = seat          · args { treaty_type }
+
+        /// <summary>P1 遣使: a message is free and changes nothing (design §7.1: 說話不會改狀態).</summary>
+        private ValidationResult DoSendMessage(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState other);
+            if (!check.Ok) return check;
+            if (string.IsNullOrEmpty(cmd.Text)) return ValidationResult.Fail("a message needs text");
+
+            Emit(fac.SeatId, fac.Controller, "message_sent", "public",
+                P("to_seat_id", other.SeatId, "text", cmd.Text), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>P2 提出條約: creates a pending offer; it takes effect next season once accepted.</summary>
+        private ValidationResult DoProposeTreaty(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState other);
+            if (!check.Ok) return check;
+
+            string type = Arg(cmd, "treaty_type");
+            if (!TreatyType.IsValid(type))
+                return ValidationResult.Fail($"unknown treaty_type '{type}' (use nap, alliance or truce)");
+            if (State.Diplomacy.HasTreaty(type, fac.SeatId, other.SeatId))
+                return ValidationResult.Fail($"a {type} treaty with that seat is already in force");
+            if (State.Diplomacy.FindProposal(fac.SeatId, other.SeatId) != null)
+                return ValidationResult.Fail("an offer is already pending with that seat");
+
+            ValidationResult durationCheck = ProposalDuration(cmd, out int seasons);
+            if (!durationCheck.Ok) return durationCheck;
+
+            var proposal = State.Diplomacy.AddProposal(fac.SeatId, other.SeatId, type, seasons,
+                State.Season, cmd.Text);
+            Emit(fac.SeatId, fac.Controller, "treaty_proposed", "owner_and_observers",
+                P("proposal_id", proposal.ProposalId, "from_seat_id", fac.SeatId, "to_seat_id", other.SeatId,
+                  "treaty_type", type, "duration", seasons.ToString(), "text", cmd.Text ?? ""), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>P3 接受/拒絕/修改: an answer is free; acceptance is ratified at the rollover.</summary>
+        private ValidationResult DoRespondTreaty(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState proposer);
+            if (!check.Ok) return check;
+
+            string response = Arg(cmd, "response");
+            if (response != "accept" && response != "reject" && response != "counter")
+                return ValidationResult.Fail($"unknown response '{response}' (use accept, reject or counter)");
+
+            var proposal = State.Diplomacy.FindProposal(proposer.SeatId, fac.SeatId);
+            if (proposal == null || proposal.ToSeatId != fac.SeatId)
+                return ValidationResult.Fail("no offer from that seat is pending");
+
+            if (response == "reject")
+            {
+                State.Diplomacy.Proposals.Remove(proposal);
+                Emit(fac.SeatId, fac.Controller, "treaty_responded", "owner_and_observers",
+                    P("proposal_id", proposal.ProposalId, "from_seat_id", proposal.FromSeatId,
+                      "to_seat_id", proposal.ToSeatId, "treaty_type", proposal.Type, "response", "reject"),
+                    cmd.ActionId);
+                return ValidationResult.Success;
+            }
+
+            if (response == "counter")
+            {
+                string type = Arg(cmd, "treaty_type");
+                if (!TreatyType.IsValid(type))
+                    return ValidationResult.Fail($"unknown treaty_type '{type}' (use nap, alliance or truce)");
+                ValidationResult durationCheck = ProposalDuration(cmd, out int seasons);
+                if (!durationCheck.Ok) return durationCheck;
+
+                State.Diplomacy.Proposals.Remove(proposal);
+                var counter = State.Diplomacy.AddProposal(fac.SeatId, proposal.FromSeatId, type, seasons,
+                    State.Season, cmd.Text);
+                Emit(fac.SeatId, fac.Controller, "treaty_responded", "owner_and_observers",
+                    P("proposal_id", proposal.ProposalId, "from_seat_id", proposal.FromSeatId,
+                      "to_seat_id", proposal.ToSeatId, "treaty_type", proposal.Type, "response", "counter",
+                      "counter_proposal_id", counter.ProposalId, "counter_treaty_type", type,
+                      "duration", seasons.ToString()), cmd.ActionId);
+                Emit(fac.SeatId, fac.Controller, "treaty_proposed", "owner_and_observers",
+                    P("proposal_id", counter.ProposalId, "from_seat_id", counter.FromSeatId,
+                      "to_seat_id", counter.ToSeatId, "treaty_type", type, "duration", seasons.ToString(),
+                      "text", counter.Text ?? ""), cmd.ActionId);
+                return ValidationResult.Success;
+            }
+
+            proposal.Accepted = true;        // ratified at the next rollover, not now (ADR-010 #5)
+            Emit(fac.SeatId, fac.Controller, "treaty_responded", "owner_and_observers",
+                P("proposal_id", proposal.ProposalId, "from_seat_id", proposal.FromSeatId,
+                  "to_seat_id", proposal.ToSeatId, "treaty_type", proposal.Type, "response", "accept",
+                  "duration", proposal.DurationSeasons.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>P4 贈禮: gold buys 信任 for the giver and 威望 (design §7.3: per 1,000 金).</summary>
+        private ValidationResult DoGift(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState other);
+            if (!check.Ok) return check;
+
+            int gold = cmd.ParamA;
+            if (gold < BalanceConfig.GiftGoldPerTrustUnit)
+                return ValidationResult.Fail($"a gift must be at least {BalanceConfig.GiftGoldPerTrustUnit} gold");
+            if (!PayFromTreasury(fac, gold))
+                return ValidationResult.Fail($"not enough gold (need {gold})");
+
+            int units = gold / BalanceConfig.GiftGoldPerTrustUnit;
+            int trustGain = units * BalanceConfig.GiftTrustPerUnit;
+            int prestigeGain = units * BalanceConfig.GiftPrestigePerUnit;
+            AddTrustEvent(other.SeatId, fac.SeatId, trustGain, "gift", cmd);        // 對方對你的信任 +
+            AddPrestige(fac, prestigeGain, "gift", cmd);
+            Emit(fac.SeatId, fac.Controller, "gift_sent", "owner_and_observers",
+                P("from_seat_id", fac.SeatId, "to_seat_id", other.SeatId, "gold", gold.ToString(),
+                  "trust_gain", trustGain.ToString(), "prestige_gain", prestigeGain.ToString(),
+                  "trust", State.Diplomacy.GetTrust(other.SeatId, fac.SeatId).ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>P5 宣戰: formal war, cheaper in 威望 than a 偷襲 (design §11 #18).</summary>
+        private ValidationResult DoDeclareWar(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState other);
+            if (!check.Ok) return check;
+            if (State.Diplomacy.IsAtWar(fac.SeatId, other.SeatId))
+                return ValidationResult.Fail("already at war with that seat");
+
+            State.Diplomacy.DeclareWar(fac.SeatId, other.SeatId);
+            AddPrestige(fac, -BalanceConfig.DeclareWarPrestigeCost, "declared_war", cmd);
+            Emit(fac.SeatId, fac.Controller, "war_declared", "public",
+                P("attacker_seat_id", fac.SeatId, "defender_seat_id", other.SeatId, "cause", "declared"),
+                cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>P6 背盟/毀約: renounce a treaty by act of state (design §7.3 penalties).</summary>
+        private ValidationResult DoBreakTreaty(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OtherFaction(fac, cmd, out FactionState other);
+            if (!check.Ok) return check;
+
+            string type = Arg(cmd, "treaty_type");
+            if (!TreatyType.IsValid(type))
+                return ValidationResult.Fail($"unknown treaty_type '{type}' (use nap, alliance or truce)");
+            var treaty = State.Diplomacy.FindTreaty(type, fac.SeatId, other.SeatId);
+            if (treaty == null)
+                return ValidationResult.Fail($"no {type} treaty with that seat is in force");
+
+            bool truce = type == TreatyType.Truce;
+            string reason = "broke_" + type;
+            State.Diplomacy.BreakTreaty(treaty);
+            AddTrustEvent(other.SeatId, fac.SeatId,
+                -(truce ? BalanceConfig.TruceBreakTrustPenalty : BalanceConfig.BetrayalTrustPenalty), reason, cmd);
+            AddPrestige(fac, -(truce ? BalanceConfig.TruceBreakPrestigePenalty
+                                     : BalanceConfig.BetrayalPrestigePenalty), reason, cmd);
+            if (!truce)
+                foreach (var third in State.Factions)
+                    if (third.SeatId != fac.SeatId && third.SeatId != other.SeatId)
+                        AddTrustEvent(third.SeatId, fac.SeatId, -BalanceConfig.BetrayalThirdPartyTrustPenalty,
+                            "bystander_" + reason, cmd);
+
+            Emit(fac.SeatId, fac.Controller, "treaty_broken", "public",
+                P("breaker_seat_id", fac.SeatId, "counterpart_seat_id", other.SeatId, "treaty_type", type),
+                cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>
+        /// Rollover (ADR-010 #5): unanswered offers lapse, accepted ones are ratified into treaties that
+        /// run to their ExpirySeason, and treaties whose term is over expire. A ratified 停戰 ends the war.
+        /// </summary>
+        private void ResolveDiplomacyRollover()
+        {
+            var dip = State.Diplomacy;
+
+            foreach (var proposal in dip.Proposals.ToArray())
+            {
+                dip.Proposals.Remove(proposal);
+                if (!proposal.Accepted)
+                {
+                    Emit(null, null, "treaty_lapsed", "owner_and_observers",
+                        P("proposal_id", proposal.ProposalId, "from_seat_id", proposal.FromSeatId,
+                          "to_seat_id", proposal.ToSeatId, "treaty_type", proposal.Type,
+                          "proposed_season", proposal.ProposedSeason.ToString()), null);
+                    continue;
+                }
+
+                int expiry = State.Season + proposal.DurationSeasons - 1;
+                dip.Treaties.Add(new TreatyRecord
+                {
+                    Type = proposal.Type,
+                    FactionA = proposal.FromSeatId,
+                    FactionB = proposal.ToSeatId,
+                    ExpirySeason = expiry,
+                });
+                bool endedWar = proposal.Type == TreatyType.Truce
+                             && dip.IsAtWar(proposal.FromSeatId, proposal.ToSeatId);
+                if (endedWar) dip.MakePeace(proposal.FromSeatId, proposal.ToSeatId);
+
+                Emit(null, null, "treaty_ratified", "public",
+                    P("proposal_id", proposal.ProposalId, "from_seat_id", proposal.FromSeatId,
+                      "to_seat_id", proposal.ToSeatId, "treaty_type", proposal.Type,
+                      "expiry_season", expiry.ToString(), "war_ended", endedWar ? "true" : "false"), null);
+            }
+
+            foreach (var treaty in dip.Treaties.ToArray())
+            {
+                if (treaty.ExpirySeason >= State.Season) continue;
+                dip.Treaties.Remove(treaty);
+                Emit(null, null, "treaty_expired", "public",
+                    P("treaty_type", treaty.Type, "faction_a", treaty.FactionA, "faction_b", treaty.FactionB,
+                      "expiry_season", treaty.ExpirySeason.ToString()), null);
+            }
+        }
+
+        /// <summary>Resolves target_id to another faction's seat — diplomacy targets seats, not hexes.</summary>
+        private ValidationResult OtherFaction(FactionState fac, ActionCommand cmd, out FactionState other)
+        {
+            other = State.FindFaction(cmd.TargetId);
+            if (other == null) return ValidationResult.Fail($"unknown seat '{cmd.TargetId}'");
+            if (other.SeatId == fac.SeatId) return ValidationResult.Fail("that is your own seat");
+            return ValidationResult.Success;
+        }
+
+        /// <summary>Schema-v2 `args` reader: null when the controller sent no such key.</summary>
+        private static string Arg(ActionCommand cmd, string key)
+            => cmd.Args != null && cmd.Args.TryGetValue(key, out string value) ? value : null;
+
+        /// <summary>Optional args.duration in seasons, defaulted and clamped to the configured range.</summary>
+        private ValidationResult ProposalDuration(ActionCommand cmd, out int seasons)
+        {
+            seasons = BalanceConfig.TreatyDurationSeasons;
+            string raw = Arg(cmd, "duration");
+            if (string.IsNullOrEmpty(raw)) return ValidationResult.Success;
+            if (!int.TryParse(raw, out int parsed))
+                return ValidationResult.Fail($"duration must be a number of seasons, not '{raw}'");
+
+            if (parsed < BalanceConfig.TreatyDurationMinSeasons) parsed = BalanceConfig.TreatyDurationMinSeasons;
+            if (parsed > BalanceConfig.TreatyDurationMaxSeasons) parsed = BalanceConfig.TreatyDurationMaxSeasons;
+            seasons = parsed;
+            return ValidationResult.Success;
+        }
+
+        /// <summary>Gold is a national resource in the design but a per-city field in the model, so a
+        /// treasury payment draws on the faction's cities in state order — and pays nothing on failure.</summary>
+        private bool PayFromTreasury(FactionState fac, int amount)
+        {
+            var cities = State.CitiesOf(fac.SeatId);
+            int total = 0;
+            foreach (var city in cities) total += city.Gold;
+            if (total < amount) return false;
+
+            int left = amount;
+            foreach (var city in cities)
+            {
+                int take = Math.Min(city.Gold, left);
+                city.Gold -= take;
+                left -= take;
+                if (left == 0) break;
+            }
+            return true;
+        }
 
         // ---- 野戰 / 攻城 M2-M3 (ACTIONS.md §4, design §6) -----------------------
 

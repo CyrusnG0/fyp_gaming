@@ -105,6 +105,12 @@ namespace LuanShi.Engine
         public const string March = "march";                // 行軍 M1: target_id = army, param_a/b = dest hex x,z
         public const string AttackArmy = "attack_army";     // 野戰 M2: target_id = own army, param_a/b = enemy army hex
         public const string AttackCity = "attack_city";     // 攻城 M3: target_id = own army, param_a/b = enemy city hex
+        public const string SendMessage = "send_message";   // 遣使 P1: target_id = recipient seat, text = 訊息
+        public const string ProposeTreaty = "propose_treaty";  // 提出條約 P2: target_id = seat, args.treaty_type/duration
+        public const string RespondTreaty = "respond_treaty";  // 接受/拒絕 P3: target_id = proposer seat, args.response
+        public const string Gift = "gift";                  // 贈禮 P4: target_id = seat, param_a = gold amount
+        public const string DeclareWar = "declare_war";     // 宣戰 P5: target_id = seat
+        public const string BreakTreaty = "break_treaty";   // 背盟/毀約 P6: target_id = seat, args.treaty_type
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";

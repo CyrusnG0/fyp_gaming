@@ -91,14 +91,33 @@ namespace LuanShi.Engine
 
         public const int ScriptedAttackTroopAdvantagePercent = 50;   // AI attacks only with this troop edge
 
+        // ---- 外交 P1-P6 (ACTIONS.md §5) -----------------------------------------
+
+        public const int CommandPointsPerTalk = 0;         // LOCKED (design §2, ACTIONS.md §2): 說話/提案/回覆 free
+        public const int GiftGoldPerTrustUnit = 1000;      // LOCKED (design §7.3): 贈禮 per 1,000 金
+        public const int GiftTrustPerUnit = 3;             // LOCKED (design §7.3): 對方對你的信任 +3
+        public const int GiftPrestigePerUnit = 1;          // LOCKED (design §7.3): 你的威望 +1
+        public const int DeclareWarPrestigeCost = 5;       // LOCKED (design §11 #18): 正式開戰 威望 −5
+        public const int TreatyDurationSeasons = 6;        // TBD: treaty term when the offer names none
+        public const int TreatyDurationMinSeasons = 1;     // TBD
+        public const int TreatyDurationMaxSeasons = 12;    // TBD
+
+        public const int ScriptedNapTrustThreshold = 0;        // AI signs/offers 互不侵犯 at or above this 信任
+        public const int ScriptedAllianceTrustThreshold = 30;  // TBD
+        public const int ScriptedTruceTrustThreshold = -50;    // AI signs/offers 停戰 at or above this 信任
+
         /// <summary>
         /// 號令 cost of an action — the spec's "CP" column lives here so neither a handler nor a UI
-        /// label hardcodes it (ACTIONS.md §3–§4). Anything the spec does not price costs the default.
+        /// label hardcodes it (ACTIONS.md §3–§5). Anything the spec does not price costs the default.
         /// </summary>
         public static int CommandPointCost(string actionType)
         {
             switch (actionType)
             {
+                // §2: 遣使 / 提案 / 回覆 are free — talking never costs 號令.
+                case ActionType.SendMessage:
+                case ActionType.ProposeTreaty:
+                case ActionType.RespondTreaty: return CommandPointsPerTalk;
                 case ActionType.AttackCity: return CommandPointsPerAttackCity;
                 default: return CommandPointsPerOrder;
             }

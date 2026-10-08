@@ -186,6 +186,42 @@ namespace LuanShi.Engine
         public const string Nap = "nap";               // 互不侵犯
         public const string Alliance = "alliance";     // 同盟
         public const string Truce = "truce";           // 停戰
+
+        public static bool IsValid(string type)
+            => type == Nap || type == Alliance || type == Truce;
+    }
+
+    /// <summary>
+    /// A treaty offer awaiting an answer (ACTIONS.md §5 P2/P3). One may be pending per pair, in either
+    /// direction. Unanswered offers lapse at season rollover; accepted ones are ratified there, because
+    /// treaties take effect next season (ADR-010 #5).
+    /// </summary>
+    public sealed class TreatyProposal
+    {
+        public string ProposalId;      // "p-1", ...
+        public string FromSeatId;
+        public string ToSeatId;
+        public string Type;            // TreatyType.*
+        public int DurationSeasons;    // seasons in force once ratified
+        public int ProposedSeason;
+        public bool Accepted;          // answered "accept", waiting for ratification at rollover
+        public string Text;            // 附言, optional
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            sb.Append("\"proposal_id\":").Append(MiniJson.Str(ProposalId));
+            sb.Append(",\"from_seat_id\":").Append(MiniJson.Str(FromSeatId));
+            sb.Append(",\"to_seat_id\":").Append(MiniJson.Str(ToSeatId));
+            sb.Append(",\"treaty_type\":").Append(MiniJson.Str(Type));
+            sb.Append(",\"duration_seasons\":").Append(MiniJson.Num(DurationSeasons));
+            sb.Append(",\"proposed_season\":").Append(MiniJson.Num(ProposedSeason));
+            sb.Append(",\"accepted\":").Append(Accepted ? "true" : "false");
+            sb.Append(",\"text\":").Append(MiniJson.Str(Text));
+            sb.Append('}');
+            return sb.ToString();
+        }
     }
 
     /// <summary>One treaty record (ACTIONS.md §5). Type ∈ TreatyType.*</summary>
@@ -222,6 +258,8 @@ namespace LuanShi.Engine
         public readonly Dictionary<string, int> Trust = new Dictionary<string, int>();  // key: PairKey(from, to)
         public readonly List<TreatyRecord> Treaties = new List<TreatyRecord>();
         public readonly List<string> WarWith = new List<string>();                      // key: WarKey(a, b), unordered
+        public readonly List<TreatyProposal> Proposals = new List<TreatyProposal>();     // pending offers (§5 P2/P3)
+        private int nextProposalId = 1;
 
         /// <summary>Key of an ordered pair — 信任 is directional (A's view of B ≠ B's view of A).</summary>
         public static string PairKey(string fromSeatId, string toSeatId) => fromSeatId + "|" + toSeatId;
@@ -262,15 +300,41 @@ namespace LuanShi.Engine
             if (treaty != null) Treaties.Remove(treaty);
         }
 
+        /// <summary>The pending offer between these two seats in either direction, or null.</summary>
+        public TreatyProposal FindProposal(string seatA, string seatB)
+            => Proposals.Find(p => (p.FromSeatId == seatA && p.ToSeatId == seatB)
+                                || (p.FromSeatId == seatB && p.ToSeatId == seatA));
+
+        /// <summary>One offer per ordered pair, so an offer id never has to be guessed.</summary>
+        public TreatyProposal AddProposal(string fromSeatId, string toSeatId, string type, int durationSeasons,
+            int season, string text)
+        {
+            var proposal = new TreatyProposal
+            {
+                ProposalId = "p-" + nextProposalId++,
+                FromSeatId = fromSeatId,
+                ToSeatId = toSeatId,
+                Type = type,
+                DurationSeasons = durationSeasons,
+                ProposedSeason = season,
+                Text = text,
+            };
+            Proposals.Add(proposal);
+            return proposal;
+        }
+
         public string ToJson()
         {
             var treaties = new List<string>(Treaties.Count);
             foreach (var t in Treaties) treaties.Add(t.ToJson());
+            var proposals = new List<string>(Proposals.Count);
+            foreach (var p in Proposals) proposals.Add(p.ToJson());
 
-            var sb = new StringBuilder(256);
+            var sb = new StringBuilder(320);
             sb.Append("{\"trust\":").Append(MiniJson.IntMap(Trust));
             sb.Append(",\"treaties\":").Append(MiniJson.Array(treaties));
             sb.Append(",\"war_with\":").Append(MiniJson.StrArray(WarWith));
+            sb.Append(",\"proposals\":").Append(MiniJson.Array(proposals));
             sb.Append('}');
             return sb.ToString();
         }

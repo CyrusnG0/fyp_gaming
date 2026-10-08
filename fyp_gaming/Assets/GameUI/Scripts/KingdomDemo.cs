@@ -47,9 +47,10 @@ namespace LuanShi
         private bool reportShowing;
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
+        private string envoyText = "";        // 遣使 draft for the 外交 tab (never sent automatically)
 
         // concept tabs: 地圖 is the live view, the rest preview the full design
-        // (doc/LuanShi-Game-Design-v1.md). Only 史官 renders real data.
+        // (doc/LuanShi-Game-Design-v1.md). 內政/外交 are live, 諜報/研究 previews, 史官 renders real data.
         private string activeTab = "map";
         private Vector2 historianScroll;
         private static readonly string[,] Tabs =
@@ -512,6 +513,19 @@ namespace LuanShi
                     reportLines.Add("戰報：" + FieldSummary(rec));
                 else if (rec.Season == engine.State.Season && rec.EventType == "battle_siege")
                     reportLines.Add("戰報：" + SiegeSummary(rec));
+            // 外交 news of the season (the same events the 外交 tab works from).
+            foreach (var rec in engine.Log.Records)
+            {
+                if (rec.Season != engine.State.Season) continue;
+                if (rec.EventType == "war_declared")
+                    reportLines.Add($"外交：{SeatShort(rec.Payload["attacker_seat_id"])}向" +
+                                    $"{SeatShort(rec.Payload["defender_seat_id"])}宣戰");
+                else if (rec.EventType == "treaty_broken")
+                    reportLines.Add($"外交：{SeatShort(rec.Payload["breaker_seat_id"])}毀棄與" +
+                                    $"{SeatShort(rec.Payload["counterpart_seat_id"])}的{TreatyLabel(rec.Payload["treaty_type"])}條約");
+                else if (rec.EventType == "message_sent")
+                    reportLines.Add($"外交：{SeatShort(rec.ActorSeatId)}來使 — {rec.Payload["text"]}");
+            }
             foreach (var line in report.Lines) reportLines.Add(line);
             reportLines.Add("");
             reportLines.Add($"史官記：本季共錄得 {CountSeasonEvents()} 事。");
@@ -652,7 +666,8 @@ namespace LuanShi
         /// just means the click comes back rejected with a reason.
         /// </summary>
         string OrderButton(Rect r, string type, string targetId, string label, string blockedReason,
-            int paramA, int paramB, GUIStyle btn)
+            int paramA, int paramB, GUIStyle btn,
+            Dictionary<string, string> args = null, string text = null)
         {
             bool available = blockedReason == null;
             var prev = GUI.enabled;
@@ -660,7 +675,8 @@ namespace LuanShi
             if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointCost(type)}令", btn))
                 SubmitHuman(new ActionCommand
                 {
-                    Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB, Reason = "UI: " + type,
+                    Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB,
+                    Args = args, Text = text, Reason = "UI: " + type,
                 });
             GUI.enabled = prev;
             return available ? null : label + "：" + blockedReason;
@@ -776,7 +792,7 @@ namespace LuanShi
             switch (activeTab)
             {
                 case "domestic":  return "內政 · 行動一覽";
-                case "diplomacy": return "外交 · 待開發";
+                case "diplomacy": return "外交 · 行動一覽";
                 case "intel":     return "諜報 · 待開發";
                 case "research":  return "研究 · 待開發";
                 default:          return "史官 · 本局史書";
@@ -828,33 +844,158 @@ namespace LuanShi
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)
         {
+            var dip = engine.State.Diplomacy;
+            var me = engine.State.FindFaction(HumanSeat);
+            var btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
+            const int shownFactions = 3;      // placeholder layout: the rest are summarised
+
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 22),
-                $"條約　（本局 {engine.State.Diplomacy.Treaties.Count} 條生效）", body);
+                $"外交　號令 {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}　威望 {me.Prestige}" +
+                $"　條約 {dip.Treaties.Count}　待決提案 {dip.Proposals.Count}", body);
             y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 40),
-                "可締結：互不侵犯 · 同盟 · 共同防禦 · 停戰 · 朝貢\n　　　　　割地 · 通商 · 借道 · 聯姻 · 稱臣", body);
-            y += 48;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "勢力關係", body);
-            y += 26;
-            var human = engine.State.FindFaction(HumanSeat);
-            // 信任/威望 are real state (ACTIONS.md §9); the relations screen is not built yet.
-            GUI.Label(new Rect(p.x + 36, y, 744, 22),
-                $"魏（玩家）　↔　蜀（腳本 AI）　　信任 {engine.State.Diplomacy.GetTrust(HumanSeat, AiSeat)}" +
-                $"　威望 {human.Prestige}", body);
-            y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "關係等級 · 條約期限 · 背盟記錄　【未開放 · 待外交模組】", body);
-            y += 28;
+            // 遣使: type here, then press 遣使 on a faction row to submit it.
+            GUI.Label(new Rect(p.x + 36, y, 120, 22), "遣使文書", body);
+            envoyText = GUI.TextField(new Rect(p.x + 160, y, 604, 24), envoyText, 120);
+            y += 34;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "外交行動", body);
-            y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 44),
-                "〔待開發〕 遣使 · 提出條約 · 贈禮 · 索貢 · 通商\n〔待開發〕 斷交 · 宣戰 · 招降", body);
-            y += 54;
+            // Incoming offers first: they are the only diplomacy that demands an answer.
+            var incoming = new List<TreatyProposal>();
+            foreach (var proposal in dip.Proposals)
+                if (proposal.ToSeatId == HumanSeat) incoming.Add(proposal);
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 40),
-                "設計要點：說話不改狀態，只有簽了字的條款才算數；對方簽不簽，取決於信任值。", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), $"待決提案（{incoming.Count}）", body);
+            y += 24;
+
+            if (incoming.Count == 0)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 20), "目前無人來使提案。", body);
+                y += 24;
+            }
+            foreach (var proposal in incoming)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 20),
+                    $"{SeatShort(proposal.FromSeatId)} 提議 {TreatyLabel(proposal.Type)}　{proposal.DurationSeasons} 季" +
+                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"　附言：{proposal.Text}"), body);
+                y += 22;
+                OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "接受",
+                    null, 0, 0, btn, new Dictionary<string, string> { { "response", "accept" } });
+                OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "拒絕",
+                    null, 0, 0, btn, new Dictionary<string, string> { { "response", "reject" } });
+                y += 36;
+            }
+
+            // Relations and the actions available against each other seat.
+            int drawn = 0;
+            foreach (var other in engine.State.Factions)
+            {
+                if (other.SeatId == HumanSeat) continue;
+                if (drawn == shownFactions)
+                {
+                    GUI.Label(new Rect(p.x + 36, y, 744, 20), "…（其餘勢力省略）", body);
+                    break;
+                }
+
+                GUI.Label(new Rect(p.x + 20, y, 760, 20),
+                    $"{other.Name}　信任 我→他 {dip.GetTrust(HumanSeat, other.SeatId)}" +
+                    $"／他→我 {dip.GetTrust(other.SeatId, HumanSeat)}　{StatusLine(other.SeatId)}", body);
+                y += 22;
+
+                string hint = null;
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.DeclareWar,
+                    other.SeatId, "宣戰",
+                    dip.IsAtWar(HumanSeat, other.SeatId) ? "已在交戰" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.Gift,
+                    other.SeatId, $"贈禮 {BalanceConfig.GiftGoldPerTrustUnit}",
+                    Treasury() < BalanceConfig.GiftGoldPerTrustUnit ? "金不足" : null,
+                    BalanceConfig.GiftGoldPerTrustUnit, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 400, y, 176, 30), ActionType.SendMessage,
+                    other.SeatId, "遣使", string.IsNullOrEmpty(envoyText) ? "請先輸入文書" : null,
+                    0, 0, btn, null, envoyText));
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 582, y, 182, 30), ActionType.BreakTreaty,
+                    other.SeatId, "毀約", BreakBlocked(other.SeatId), 0, 0, btn,
+                    new Dictionary<string, string> { { "treaty_type", BreakableType(other.SeatId) } }));
+                y += 34;
+
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 236, 30), ActionType.ProposeTreaty,
+                    other.SeatId, "互不侵犯", ProposalBlocked(other.SeatId, TreatyType.Nap), 0, 0, btn,
+                    new Dictionary<string, string> { { "treaty_type", TreatyType.Nap } }));
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 282, y, 236, 30), ActionType.ProposeTreaty,
+                    other.SeatId, "同盟", ProposalBlocked(other.SeatId, TreatyType.Alliance), 0, 0, btn,
+                    new Dictionary<string, string> { { "treaty_type", TreatyType.Alliance } }));
+                hint = FirstReason(hint, OrderButton(new Rect(p.x + 528, y, 236, 30), ActionType.ProposeTreaty,
+                    other.SeatId, "停戰提案", ProposalBlocked(other.SeatId, TreatyType.Truce), 0, 0, btn,
+                    new Dictionary<string, string> { { "treaty_type", TreatyType.Truce } }));
+                y += 34;
+
+                if (hint != null)
+                {
+                    GUI.Label(new Rect(p.x + 20, y, 760, 20), hint, body);
+                    y += 22;
+                }
+                y += 4;
+                drawn++;
+            }
+        }
+
+        /// <summary>和平 / 交戰 plus every treaty in force (with seasons left) and any pending offer.</summary>
+        string StatusLine(string seatId)
+        {
+            var dip = engine.State.Diplomacy;
+            var sb = new StringBuilder(dip.IsAtWar(HumanSeat, seatId) ? "交戰" : "和平");
+            foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
+            {
+                var treaty = dip.FindTreaty(type, HumanSeat, seatId);
+                if (treaty == null) continue;
+                int seasonsLeft = treaty.ExpirySeason - engine.State.Season + 1;
+                if (seasonsLeft < 1) seasonsLeft = 1;
+                sb.Append($"　[{TreatyLabel(type)} 剩 {seasonsLeft} 季]");
+            }
+            var proposal = dip.FindProposal(HumanSeat, seatId);
+            if (proposal != null)
+                sb.Append("　[").Append(proposal.FromSeatId == HumanSeat ? "我方提案待覆" : "待你回覆")
+                  .Append("：").Append(TreatyLabel(proposal.Type)).Append(']');
+            return sb.ToString();
+        }
+
+        static string TreatyLabel(string type)
+        {
+            switch (type)
+            {
+                case TreatyType.Nap: return "互不侵犯";
+                case TreatyType.Alliance: return "同盟";
+                case TreatyType.Truce: return "停戰";
+                default: return type;
+            }
+        }
+
+        /// <summary>Reason a treaty offer is obviously illegal, or null when it can be sent.</summary>
+        string ProposalBlocked(string seatId, string type)
+        {
+            var dip = engine.State.Diplomacy;
+            if (dip.HasTreaty(type, HumanSeat, seatId)) return "已在生效";
+            if (dip.FindProposal(HumanSeat, seatId) != null) return "已有提案待覆";
+            return null;
+        }
+
+        string BreakBlocked(string seatId)
+            => BreakableType(seatId) == null ? "沒有條約可毀" : null;
+
+        /// <summary>First treaty in force with that seat (nap → alliance → truce), or null.</summary>
+        string BreakableType(string seatId)
+        {
+            var dip = engine.State.Diplomacy;
+            foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
+                if (dip.HasTreaty(type, HumanSeat, seatId)) return type;
+            return null;
+        }
+
+        int Treasury()
+        {
+            int gold = 0;
+            foreach (var city in engine.State.CitiesOf(HumanSeat)) gold += city.Gold;
+            return gold;
         }
 
         void DrawIntelPanel(Rect p, GUIStyle body)

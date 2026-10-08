@@ -20,6 +20,10 @@ namespace LuanShi.Engine
             var cities = state.CitiesOf(seatId);
             var committed = new List<string>();
 
+            // 外交 first: answering an offer is free (0 號令) and is also the most time-sensitive thing
+            // a seat does, so it never competes with the CP budget.
+            PlanDiplomacy(state, seatId, plan);
+
             // 野戰 / 攻城 first: an army in contact with the enemy is the urgent thing, and only
             // real opportunities are taken. The scripted seat is the no-diplomacy baseline, so it
             // never opens an undeclared war and never storms a city of a faction it is not already
@@ -149,7 +153,7 @@ namespace LuanShi.Engine
 
         /// <summary>A proposed command is only ever a proposal — it still goes through Submit().</summary>
         private static ActionCommand Order(string type, string seatId, string targetId, string reason,
-            int paramA = 0, int paramB = 0)
+            int paramA = 0, int paramB = 0, Dictionary<string, string> args = null)
             => new ActionCommand
             {
                 Type = type,
@@ -158,7 +162,57 @@ namespace LuanShi.Engine
                 TargetId = targetId,
                 ParamA = paramA,
                 ParamB = paramB,
+                Args = args,
                 Reason = reason,
             };
+
+        /// <summary>
+        /// 外交 is free (0 號令), so the scripted seat always answers what is on the table and then keeps
+        /// one offer in play. Every command mirrors an engine precondition, so a plan never bounces.
+        /// </summary>
+        private static void PlanDiplomacy(GameState state, string seatId, List<ActionCommand> plan)
+        {
+            var dip = state.Diplomacy;
+
+            // Answer incoming offers: my own 信任 in the proposer decides, per design §7.1.
+            foreach (var proposal in dip.Proposals.ToArray())
+            {
+                if (proposal.ToSeatId != seatId) continue;
+                int trust = dip.GetTrust(seatId, proposal.FromSeatId);
+                bool accept;
+                switch (proposal.Type)
+                {
+                    case TreatyType.Nap: accept = trust >= BalanceConfig.ScriptedNapTrustThreshold; break;
+                    case TreatyType.Alliance: accept = trust >= BalanceConfig.ScriptedAllianceTrustThreshold; break;
+                    case TreatyType.Truce: accept = trust >= BalanceConfig.ScriptedTruceTrustThreshold; break;
+                    default: accept = false; break;
+                }
+                plan.Add(Order(ActionType.RespondTreaty, seatId, proposal.FromSeatId,
+                    accept ? "締約" : "婉拒",
+                    args: new Dictionary<string, string> { { "response", accept ? "accept" : "reject" } }));
+            }
+
+            // One offer per turn: 求和 to anyone we are still fighting, otherwise 互不侵犯 to the
+            // first neighbour we do not distrust and have nothing pending with.
+            foreach (var other in state.Factions)
+            {
+                if (other.SeatId == seatId) continue;
+                if (dip.FindProposal(seatId, other.SeatId) != null) continue;
+
+                if (dip.IsAtWar(seatId, other.SeatId))
+                {
+                    if (dip.GetTrust(seatId, other.SeatId) < BalanceConfig.ScriptedTruceTrustThreshold) continue;
+                    plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "求成",
+                        args: new Dictionary<string, string> { { "treaty_type", TreatyType.Truce } }));
+                    return;
+                }
+
+                if (dip.GetTrust(seatId, other.SeatId) < BalanceConfig.ScriptedNapTrustThreshold) continue;
+                if (dip.HasTreaty(TreatyType.Nap, seatId, other.SeatId)) continue;
+                plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "和好",
+                    args: new Dictionary<string, string> { { "treaty_type", TreatyType.Nap } }));
+                return;
+            }
+        }
     }
 }
