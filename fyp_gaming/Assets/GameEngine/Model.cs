@@ -130,6 +130,38 @@ namespace LuanShi.Engine
             return false;
         }
 
+        /// <summary>
+        /// Hex steps between two nodes over the adjacency graph, or -1 when farther than maxSteps
+        /// (used by fog of war). Sight is a radius, not line-of-sight, so terrain never blocks it —
+        /// the search follows the adjacency graph without consulting Walkable.
+        /// </summary>
+        public int HexDistance(int fromX, int fromZ, int toX, int toZ, int maxSteps)
+        {
+            if (!InBounds(fromX, fromZ) || !InBounds(toX, toZ)) return -1;
+            int start = Index(fromX, fromZ), goal = Index(toX, toZ);
+            if (start == goal) return 0;
+
+            var visited = new HashSet<int> { start };
+            var frontier = new List<int> { start };
+            for (int step = 1; step <= maxSteps && frontier.Count > 0; step++)
+            {
+                var next = new List<int>();
+                foreach (int node in frontier)
+                {
+                    var neighbors = Neighbors[node];
+                    if (neighbors == null) continue;
+                    foreach (int n in neighbors)
+                    {
+                        if (!visited.Add(n)) continue;
+                        if (n == goal) return step;
+                        next.Add(n);
+                    }
+                }
+                frontier = next;
+            }
+            return -1;
+        }
+
         /// <summary>Dijkstra over hex costs. Returns total cost, or -1 if unreachable within maxCost.</summary>
         public int PathCost(int fromX, int fromZ, int toX, int toZ, int maxCost)
         {
@@ -362,5 +394,160 @@ namespace LuanShi.Engine
 
         public List<CityState> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
         public List<ArmyState> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
+    }
+
+    /// <summary>
+    /// What one seat knows about another: name, controller and 威望 are public (design §3/§7.3); the
+    /// seat's own side of 信任 is its business. Both directions are carried because the design's
+    /// diplomacy screen is built on watching the other party's trust move.
+    /// </summary>
+    public sealed class FactionView
+    {
+        public string SeatId;
+        public string Name;
+        public string Controller;      // ControllerType.*
+        public int Prestige;
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"seat_id\":").Append(MiniJson.Str(SeatId));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"controller_type\":").Append(MiniJson.Str(Controller));
+            sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>A seat's view of one relationship: 信任 in both directions plus whether war is on.</summary>
+    public sealed class RelationView
+    {
+        public string SeatId;
+        public int MyTrust;            // this seat's 信任 in them
+        public int TheirTrust;         // their 信任 in this seat
+        public bool AtWar;
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"seat_id\":").Append(MiniJson.Str(SeatId));
+            sb.Append(",\"my_trust\":").Append(MiniJson.Num(MyTrust));
+            sb.Append(",\"their_trust\":").Append(MiniJson.Num(TheirTrust));
+            sb.Append(",\"at_war\":").Append(AtWar ? "true" : "false");
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// One seat's filtered world — the only thing a controller may decide on (AGENTS.md invariant #3).
+    /// Cities and armies outside the fog ranges are simply absent, and the event log is pre-filtered.
+    /// </summary>
+    public sealed class Observation
+    {
+        public string SeatId;
+        public int Season;
+        public string Phase;
+        public int CommandPoints;
+        public int Prestige;
+
+        public readonly List<CityState> Cities = new List<CityState>();
+        public readonly List<ArmyState> Armies = new List<ArmyState>();
+        public readonly List<FactionView> Factions = new List<FactionView>();
+        public readonly List<RelationView> Relations = new List<RelationView>();
+        public readonly List<TreatyRecord> Treaties = new List<TreatyRecord>();
+        public readonly List<TreatyProposal> Proposals = new List<TreatyProposal>();
+        public readonly List<EventRecord> Events = new List<EventRecord>();
+
+        public CityState FindCity(string id) => Cities.Find(c => c.Id == id);
+        public ArmyState FindArmy(string id) => Armies.Find(a => a.Id == id);
+        public List<CityState> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
+        public List<ArmyState> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
+        public FactionView Faction(string seatId) => Factions.Find(f => f.SeatId == seatId);
+        public RelationView Relation(string seatId) => Relations.Find(r => r.SeatId == seatId);
+
+        public string ToJson()
+        {
+            var cities = new List<string>(Cities.Count);
+            foreach (var c in Cities) cities.Add(c.ToJson());
+            var armies = new List<string>(Armies.Count);
+            foreach (var a in Armies) armies.Add(a.ToJson());
+            var factions = new List<string>(Factions.Count);
+            foreach (var f in Factions) factions.Add(f.ToJson());
+            var relations = new List<string>(Relations.Count);
+            foreach (var r in Relations) relations.Add(r.ToJson());
+            var treaties = new List<string>(Treaties.Count);
+            foreach (var t in Treaties) treaties.Add(t.ToJson());
+            var proposals = new List<string>(Proposals.Count);
+            foreach (var p in Proposals) proposals.Add(p.ToJson());
+            var events = new List<string>(Events.Count);
+            foreach (var e in Events) events.Add(e.ToJson());
+
+            var sb = new StringBuilder(640);
+            sb.Append("{\"seat_id\":").Append(MiniJson.Str(SeatId));
+            sb.Append(",\"season\":").Append(MiniJson.Num(Season));
+            sb.Append(",\"phase\":").Append(MiniJson.Str(Phase));
+            sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
+            sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append(",\"cities\":").Append(MiniJson.Array(cities));
+            sb.Append(",\"armies\":").Append(MiniJson.Array(armies));
+            sb.Append(",\"factions\":").Append(MiniJson.Array(factions));
+            sb.Append(",\"relations\":").Append(MiniJson.Array(relations));
+            sb.Append(",\"treaties\":").Append(MiniJson.Array(treaties));
+            sb.Append(",\"proposals\":").Append(MiniJson.Array(proposals));
+            sb.Append(",\"events\":").Append(MiniJson.Array(events));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Seat play order for a season (ADR-000: each seat takes one ordered turn). Pure C# so the hotseat
+    /// flow — who plays when and where the UI must stop for a human — is testable without Unity.
+    /// </summary>
+    public static class SeatRotation
+    {
+        /// <summary>Every seat, in the order it acts this season.</summary>
+        public static List<string> PlayOrder(GameState state)
+        {
+            var order = new List<string>();
+            foreach (var fac in state.Factions) order.Add(fac.SeatId);
+            return order;
+        }
+
+        /// <summary>Human-controlled seats, in play order — the ones a hotseat UI stops for.</summary>
+        public static List<string> HumanSeats(GameState state)
+        {
+            var humans = new List<string>();
+            foreach (var fac in state.Factions)
+                if (fac.Controller == ControllerType.Human) humans.Add(fac.SeatId);
+            return humans;
+        }
+
+        public static bool IsHuman(GameState state, string seatId)
+        {
+            var fac = state.FindFaction(seatId);
+            return fac != null && fac.Controller == ControllerType.Human;
+        }
+
+        /// <summary>The seat that acts after this one, or null when the season's rotation is done.</summary>
+        public static string NextAfter(GameState state, string seatId)
+        {
+            var order = PlayOrder(state);
+            int index = order.IndexOf(seatId);
+            if (index < 0 || index + 1 >= order.Count) return null;
+            return order[index + 1];
+        }
+
+        /// <summary>First seat to act in a season: the first human, else the first seat at all.</summary>
+        public static string FirstSeat(GameState state)
+        {
+            var humans = HumanSeats(state);
+            if (humans.Count > 0) return humans[0];
+            return state.Factions.Count > 0 ? state.Factions[0].SeatId : null;
+        }
     }
 }

@@ -28,12 +28,23 @@ namespace LuanShi
         [Header("Game setup")]
         public int randomSeed = 12345;
 
+        [Header("Seats (data-driven; the engine supports up to 8, AGENTS.md #6)")]
+        [Tooltip("Seat ids played by people at this keyboard. Every other seat is scripted. " +
+                 "Set two ids here for hotseat pass-and-play.")]
+        public string[] humanSeats = { "seat-0" };
+
         private GameEngine engine;
         private bool ready;
         private string initError;
 
-        private const string HumanSeat = "seat-0";
-        private const string AiSeat = "seat-1";
+        private const string SeatA = "seat-0";     // 魏 — scene roster, not "the human"
+        private const string SeatB = "seat-1";     // 蜀
+
+        // hotseat state (CONTROLLER_PROTOCOL §2: each seat takes one ordered turn per season)
+        private string currentSeat;                // whose turn the UI is showing right now
+        private bool handoverShowing;              // full-screen blocker between human seats
+        private bool pendingReport;                // 朝報 queued behind the handover screen
+        private Observation obs;                   // the current seat's filtered world (AGENTS.md #3)
 
         private readonly Dictionary<string, GameObject> cityObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, GameObject> armyObjs = new Dictionary<string, GameObject>();
@@ -142,18 +153,18 @@ namespace LuanShi
             engine = new GameEngine(randomSeed);
             engine.State.Map = map;
 
-            factionColors[HumanSeat] = new Color(0.40f, 0.55f, 0.95f);   // 魏 blue
-            factionColors[AiSeat] = new Color(0.45f, 0.80f, 0.45f);      // 蜀 green
+            factionColors[SeatA] = new Color(0.40f, 0.55f, 0.95f);   // 魏 blue
+            factionColors[SeatB] = new Color(0.45f, 0.80f, 0.45f);   // 蜀 green
 
-            engine.State.Factions.Add(new FactionState { SeatId = HumanSeat, Name = "魏", Controller = ControllerType.Human });
-            engine.State.Factions.Add(new FactionState { SeatId = AiSeat, Name = "蜀", Controller = ControllerType.ScriptedAi });
+            engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "魏", Controller = ControlOf(SeatA) });
+            engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "蜀", Controller = ControlOf(SeatB) });
 
-            AddCity(weiCityObj, "city-wei", "魏都", HumanSeat);
-            AddCity(shuCityObj, "city-shu", "成都", AiSeat);
+            AddCity(weiCityObj, "city-wei", "魏都", SeatA);
+            AddCity(shuCityObj, "city-shu", "成都", SeatB);
             AddCity(southCityObj, "city-south", "南城", null);
 
-            AddArmy(weiArmyObj, "army-wei-1", "魏軍", HumanSeat);
-            AddArmy(shuArmyObj, "army-shu-1", "蜀軍", AiSeat);
+            AddArmy(weiArmyObj, "army-wei-1", "魏軍", SeatA);
+            AddArmy(shuArmyObj, "army-shu-1", "蜀軍", SeatB);
             foreach (var name in unusedArmyObjs)
             {
                 var go = FindSceneObject(name);
@@ -161,14 +172,27 @@ namespace LuanShi
 
                 bool isWei = name.StartsWith("Wei_", System.StringComparison.Ordinal);
                 string faction = isWei ? "wei" : "shu";
-                string seat = isWei ? HumanSeat : AiSeat;
+                string seat = isWei ? SeatA : SeatB;
                 string number = name.Substring(name.Length - 1);
                 AddArmy(name, "army-" + faction + "-" + number, isWei ? "魏軍" : "蜀軍", seat);
             }
 
             engine.BeginSeason();
-            statusMsg = "第一季開始 — 點選城市或部隊下達命令";
-            Debug.Log("[KingdomDemo] game started, season 1");
+            currentSeat = SeatRotation.FirstSeat(engine.State);
+            RefreshObservation();
+            string humans = string.Join(",", SeatRotation.HumanSeats(engine.State).ToArray());
+            statusMsg = $"第一季開始 — 由 {currentSeat} 執政；點選城市或部隊下達命令";
+            Debug.Log($"[KingdomDemo] game started, season 1, human seats: {humans}");
+        }
+
+        /// <summary>humanSeats decides who is a person; every other seat is scripted
+        /// (AGENTS.md #6: never hardcode the player count — up to 8 seats).</summary>
+        string ControlOf(string seatId)
+        {
+            if (humanSeats != null)
+                foreach (var id in humanSeats)
+                    if (id == seatId) return ControllerType.Human;
+            return ControllerType.ScriptedAi;
         }
 
         void AddCity(string objName, string id, string displayName, string ownerSeat)
@@ -271,7 +295,7 @@ namespace LuanShi
             var e = Event.current;
             if (e.type != EventType.MouseDown) return;
             // a concept tab is modal over the map, exactly like the 朝報 report
-            if (!ready || reportShowing || activeTab != "map") return;
+            if (!ready || reportShowing || handoverShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
             if (e.button == 1) { ClearArmyMoveTargets(); selCity = null; selArmy = null; e.Use(); return; }
@@ -284,7 +308,7 @@ namespace LuanShi
             if (node == null) return;
 
             var city = engine.State.CityAt(node.idxX, node.idxZ);
-            var army = engine.State.ArmiesOf(HumanSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
+            var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
 
             if (army != null)
             {
@@ -302,12 +326,13 @@ namespace LuanShi
                 e.Use();
                 return;
             }
-            if (city != null && city.OwnerSeatId == HumanSeat)
+            if (city != null && city.OwnerSeatId == currentSeat)
             {
                 ClearArmyMoveTargets();
                 selCity = city; selArmy = null; e.Use(); return;
             }
-            if (city != null)
+            // a foreign city can only be selected while the current seat can actually see it (fog)
+            if (city != null && obs != null && obs.FindCity(city.Id) != null)
             {
                 ClearArmyMoveTargets();
                 selCity = city; selArmy = null;
@@ -340,10 +365,17 @@ namespace LuanShi
                     {
                         if (x == army.X && z == army.Z) continue;
                         if (!engine.State.Map.IsWalkable(x, z)) continue;
-                        if (engine.State.ArmyAt(x, z) != null) continue;
+
+                        // the highlight follows the seat's observation: units it cannot see do not
+                        // block a destination it can click (the engine still has the last word)
+                        var blocker = engine.State.ArmyAt(x, z);
+                        if (blocker != null && blocker.OwnerSeatId != currentSeat
+                            && (obs == null || obs.FindArmy(blocker.Id) == null)) blocker = null;
+                        if (blocker != null) continue;
 
                         var city = engine.State.CityAt(x, z);
-                        if (city != null && !city.IsNeutral && city.OwnerSeatId != HumanSeat) continue;
+                        if (city != null && !city.IsNeutral && city.OwnerSeatId != currentSeat
+                            && obs != null && obs.FindCity(city.Id) != null) continue;
                         if (engine.State.Map.PathCost(army.X, army.Z, x, z,
                                 BalanceConfig.ArmyMoveCostPerSeason) < 0) continue;
 
@@ -371,7 +403,7 @@ namespace LuanShi
 
         void SubmitHuman(ActionCommand cmd)
         {
-            cmd.ActorSeatId = HumanSeat;
+            cmd.ActorSeatId = currentSeat;
             cmd.ControllerType = ControllerType.Human;
             var r = engine.Submit(cmd);
             PushJson(cmd, r);
@@ -385,6 +417,7 @@ namespace LuanShi
                 ClearArmyMoveTargets();
                 SyncBattleVisuals();
             }
+            RefreshObservation();            // the world just moved: the fog radius moves with it
 
             if (!r.Ok)
                 statusMsg = r.Error == "no command points left"
@@ -398,6 +431,97 @@ namespace LuanShi
 
         static bool IsBattle(string type)
             => type == ActionType.AttackArmy || type == ActionType.AttackCity;
+
+        // ------------------------------------------------------------- hotseat seat flow
+
+        /// <summary>Ends the current seat's turn: scripted seats play out through the same pipeline,
+        /// then either the next human takes the chair or the season resolves (ADR-000).</summary>
+        void EndTurn()
+        {
+            selCity = null; selArmy = null;
+            ClearArmyMoveTargets();
+
+            string next = SeatRotation.NextAfter(engine.State, currentSeat);
+            while (next != null && !SeatRotation.IsHuman(engine.State, next))
+            {
+                RunScriptedSeat(next);
+                next = SeatRotation.NextAfter(engine.State, next);
+            }
+
+            if (next != null)
+            {
+                currentSeat = next;
+                StartSeatTurn();
+                return;
+            }
+
+            ResolveSeason();
+        }
+
+        void RunScriptedSeat(string seatId)
+        {
+            foreach (var cmd in ScriptedController.PlanTurn(engine.State, seatId))
+            {
+                var r = engine.Submit(cmd);
+                PushJson(cmd, r);
+                if (r.Ok && cmd.Type == ActionType.March) SyncArmyVisual(cmd.TargetId);
+                if (r.Ok && IsBattle(cmd.Type)) SyncBattleVisuals();
+            }
+        }
+
+        /// <summary>
+        /// Hands the chair over. With more than one human seat a full-screen blocker covers the map and
+        /// every panel — the previous player's screen is not the next player's briefing (hotseat rule).
+        /// With a single human seat the flow stays exactly as before: no blocker, play on.
+        /// </summary>
+        void StartSeatTurn()
+        {
+            selCity = null; selArmy = null;
+            ClearArmyMoveTargets();
+            jsonFeed.Clear();                     // one player's command feed is not the next one's
+            if (string.IsNullOrEmpty(currentSeat)) currentSeat = SeatRotation.FirstSeat(engine.State);
+            RefreshObservation();
+
+            handoverShowing = SeatRotation.HumanSeats(engine.State).Count > 1;
+            if (handoverShowing) return;
+
+            if (pendingReport) { pendingReport = false; reportShowing = true; }
+            else statusMsg = SeatTurnPrompt();
+        }
+
+        string SeatTurnPrompt()
+        {
+            var fac = engine.State.FindFaction(currentSeat);
+            return $"{fac?.Name} 的回合（第 {engine.State.Season} 季）— 點選城池或部隊下達命令";
+        }
+
+        /// <summary>The only world the UI draws: the current seat's filtered observation.</summary>
+        void RefreshObservation()
+        {
+            obs = engine.Observe(currentSeat);
+            ApplyFog();
+        }
+
+        /// <summary>
+        /// Fog on the map (AGENTS.md #3): foreign cities and armies outside the seat's observation are
+        /// hidden outright — the UI never shows a unit the seat cannot see, and a selection that drops
+        /// out of sight is dropped with it.
+        /// </summary>
+        void ApplyFog()
+        {
+            foreach (var kv in cityObjs)
+            {
+                bool visible = obs != null && obs.FindCity(kv.Key) != null;
+                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
+            }
+            foreach (var kv in armyObjs)
+            {
+                bool visible = obs != null && obs.FindArmy(kv.Key) != null;
+                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
+            }
+            if (selCity != null && (obs == null || obs.FindCity(selCity.Id) == null)) selCity = null;
+            if (selArmy != null && (obs == null || obs.FindArmy(selArmy.Id) == null)) selArmy = null;
+        }
 
         void TryMarch(ArmyState army, int x, int z)
             => SubmitHuman(new ActionCommand { Type = ActionType.March, TargetId = army.Id, ParamA = x, ParamB = z });
@@ -479,45 +603,44 @@ namespace LuanShi
             if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
         }
 
-        void EndSeasonFlow()
+        /// <summary>Season rollover: resolve the world, then open the next seat's 朝報 (design §2 ①).</summary>
+        void ResolveSeason()
         {
-            selCity = null; selArmy = null;
-
-            // AI seats play through the exact same pipeline.
-            foreach (var fac in engine.State.Factions)
-            {
-                if (fac.Controller == ControllerType.Human) continue;
-                foreach (var cmd in ScriptedController.PlanTurn(engine.State, fac.SeatId))
-                {
-                    var r = engine.Submit(cmd);
-                    PushJson(cmd, r);
-                    if (r.Ok && cmd.Type == ActionType.March) SyncArmyVisual(cmd.TargetId);
-                    if (r.Ok && IsBattle(cmd.Type)) SyncBattleVisuals();
-                }
-            }
-
             var report = engine.EndSeason();
+            engine.BeginSeason();
+            currentSeat = SeatRotation.FirstSeat(engine.State);
+            RefreshObservation();
 
+            BuildReport(report);
+            pendingReport = true;
+            handoverShowing = false;
+            StartSeatTurn();
+        }
+
+        /// <summary>
+        /// The 朝報 is the reader's own ministry report: public news plus only the city lines this seat
+        /// can see (the engine keeps the canonical report; the observation does the filtering).
+        /// </summary>
+        void BuildReport(SeasonReport report)
+        {
             reportLines.Clear();
-            reportLines.Add($"—— 第{engine.State.Season}季 · 朝報 ——");
+            reportLines.Add($"—— 第{report.Season}季 · 朝報（{engine.State.FindFaction(currentSeat)?.Name}）——");
             reportLines.Add("");
-            foreach (var rec in engine.Log.Records)
-                if (rec.Season == engine.State.Season && rec.EventType == "city_captured")
+
+            foreach (var rec in obs.Events)
+            {
+                if (rec.Season != report.Season) continue;
+                if (rec.EventType == "city_captured")
                 {
                     var city = engine.State.FindCity(rec.Payload["city_id"]);
                     var fac = engine.State.FindFaction(city.OwnerSeatId);
                     reportLines.Add($"★ {fac.Name}軍進駐{city.Name}，開拓版圖！");
                 }
-            foreach (var rec in engine.Log.Records)
-                if (rec.Season == engine.State.Season && rec.EventType == "battle_field")
+                else if (rec.EventType == "battle_field")
                     reportLines.Add("戰報：" + FieldSummary(rec));
-                else if (rec.Season == engine.State.Season && rec.EventType == "battle_siege")
+                else if (rec.EventType == "battle_siege")
                     reportLines.Add("戰報：" + SiegeSummary(rec));
-            // 外交 news of the season (the same events the 外交 tab works from).
-            foreach (var rec in engine.Log.Records)
-            {
-                if (rec.Season != engine.State.Season) continue;
-                if (rec.EventType == "war_declared")
+                else if (rec.EventType == "war_declared")
                     reportLines.Add($"外交：{SeatShort(rec.Payload["attacker_seat_id"])}向" +
                                     $"{SeatShort(rec.Payload["defender_seat_id"])}宣戰");
                 else if (rec.EventType == "treaty_broken")
@@ -526,27 +649,29 @@ namespace LuanShi
                 else if (rec.EventType == "message_sent")
                     reportLines.Add($"外交：{SeatShort(rec.ActorSeatId)}來使 — {rec.Payload["text"]}");
             }
-            foreach (var line in report.Lines) reportLines.Add(line);
+
+            foreach (var kv in report.CityLines)
+                if (obs.FindCity(kv.Key) != null) reportLines.Add(kv.Value);
+
             reportLines.Add("");
-            reportLines.Add($"史官記：本季共錄得 {CountSeasonEvents()} 事。");
+            reportLines.Add($"史官記：本季共錄得 {CountSeasonEvents(report.Season)} 事。");
 
             File.WriteAllText(Path.Combine(Application.persistentDataPath, "luanshi_log.jsonl"),
                               engine.Log.ToJsonLines());
-            reportShowing = true;
         }
 
-        int CountSeasonEvents()
+        int CountSeasonEvents(int season)
         {
+            if (obs == null) return 0;
             int n = 0;
-            foreach (var rec in engine.Log.Records) if (rec.Season == engine.State.Season) n++;
+            foreach (var rec in obs.Events) if (rec.Season == season) n++;
             return n;
         }
 
         void CloseReport()
         {
             reportShowing = false;
-            engine.BeginSeason();
-            statusMsg = $"第{engine.State.Season}季開始";
+            statusMsg = SeatTurnPrompt();
         }
 
         // ------------------------------------------------------------------ UI
@@ -568,16 +693,27 @@ namespace LuanShi
                 return;
             }
 
-            var fac = engine.State.FindFaction(HumanSeat);
-            int food = 0, gold = 0, pop = 0;
-            foreach (var c in engine.State.CitiesOf(HumanSeat)) { food += c.Food; gold += c.Gold; pop += c.Population; }
+            // Between human seats the whole screen is replaced by the handover blocker: the previous
+            // player must not see the next player's map, panels or report (hotseat rule).
+            if (handoverShowing)
+            {
+                DrawHandoverOverlay(title, body);
+                return;
+            }
 
+            var fac = engine.State.FindFaction(currentSeat);
+            int food = 0, gold = 0, pop = 0;
+            // render from the seat's observation, never from canonical state
+            foreach (var c in obs.CitiesOf(currentSeat)) { food += c.Food; gold += c.Gold; pop += c.Population; }
+
+            bool hotseat = SeatRotation.HumanSeats(engine.State).Count > 1;
             // top bar
             var top = new Rect(10, 8, 1000, 34);
             uiRects.Add(top);
             GUI.Box(top, GUIContent.none);
             GUI.Label(new Rect(22, 12, 980, 28),
-                $"第 {engine.State.Season} 季 · {fac.Name}（玩家） · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
+                $"第 {engine.State.Season} 季 · {fac.Name}（{(hotseat ? currentSeat + " · 玩家" : "玩家")}）" +
+                $" · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
                 $" · 威望 {fac.Prestige} · 人口 {pop} · 糧 {food} · 金 {gold}", title);
 
             // tab bar — 地圖 is the live view; the others preview the full design concept
@@ -599,10 +735,12 @@ namespace LuanShi
                 else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
             }
 
-            // end season
-            var end = new Rect(1420, 8, 170, 44);
+            // end this seat's turn (single-human mode ends the season, as before)
+            var end = new Rect(1400, 8, 190, 44);
             uiRects.Add(end);
-            if (GUI.Button(end, "結束季節", btn)) EndSeasonFlow();
+            if (GUI.Button(end, hotseat ? $"結束 {fac.Name} 回合" : "結束季節", btn)) EndTurn();
+            if (hotseat)
+                GUI.Label(new Rect(1400, 56, 190, 22), $"回合：{fac.Name}", mono);
 
             // status + JSON command feed (the FYP artifact: UI clicks == LLM JSON)
             var feed = new Rect(10, 800, 1100, 92);
@@ -618,9 +756,39 @@ namespace LuanShi
             HandleClicks();
         }
 
+        /// <summary>
+        /// Full-screen opaque blocker between seats: whoever is at the keyboard presses a key to take
+        /// the chair. Nothing of the previous player's screen survives it.
+        /// </summary>
+        void DrawHandoverOverlay(GUIStyle title, GUIStyle body)
+        {
+            var e = Event.current;
+            var centered = new GUIStyle(title) { alignment = TextAnchor.MiddleCenter };
+            var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
+
+            if (e.type == EventType.KeyDown || e.type == EventType.MouseDown)
+            {
+                handoverShowing = false;
+                statusMsg = SeatTurnPrompt();
+                e.Use();
+                if (pendingReport) { pendingReport = false; reportShowing = true; }
+                return;
+            }
+
+            var prevColor = GUI.color;
+            GUI.color = new Color(0.07f, 0.07f, 0.09f, 1f);
+            GUI.DrawTexture(new Rect(0, 0, 1600, 900), Texture2D.whiteTexture);
+            GUI.color = prevColor;
+
+            var fac = engine.State.FindFaction(currentSeat);
+            GUI.Label(new Rect(0, 330, 1600, 50), $"第 {engine.State.Season} 季 · {fac?.Name}（{currentSeat}）", centered);
+            GUI.Label(new Rect(0, 400, 1600, 40), "陛下請坐", centeredBody);
+            GUI.Label(new Rect(0, 460, 1600, 40), "按任意鍵開始", centeredBody);
+        }
+
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
-            bool mine = city.OwnerSeatId == HumanSeat;
+            bool mine = city.OwnerSeatId == currentSeat;
             var p = new Rect(10, 50, 300, mine ? 400 : 120);
             uiRects.Add(p);
             GUI.Box(p, GUIContent.none);
@@ -844,15 +1012,15 @@ namespace LuanShi
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)
         {
-            var dip = engine.State.Diplomacy;
-            var me = engine.State.FindFaction(HumanSeat);
+            var me = engine.State.FindFaction(currentSeat);
             var btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
             const int shownFactions = 3;      // placeholder layout: the rest are summarised
 
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 22),
-                $"外交　號令 {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}　威望 {me.Prestige}" +
-                $"　條約 {dip.Treaties.Count}　待決提案 {dip.Proposals.Count}", body);
+                $"外交（{me.Name}）　號令 {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}　威望 {me.Prestige}" +
+                $"　條約 {(obs != null ? obs.Treaties.Count : 0)}" +
+                $"　待決提案 {(obs != null ? obs.Proposals.Count : 0)}", body);
             y += 26;
 
             // 遣使: type here, then press 遣使 on a faction row to submit it.
@@ -862,8 +1030,9 @@ namespace LuanShi
 
             // Incoming offers first: they are the only diplomacy that demands an answer.
             var incoming = new List<TreatyProposal>();
-            foreach (var proposal in dip.Proposals)
-                if (proposal.ToSeatId == HumanSeat) incoming.Add(proposal);
+            if (obs != null)
+                foreach (var proposal in obs.Proposals)
+                    if (proposal.ToSeatId == currentSeat) incoming.Add(proposal);
 
             GUI.Label(new Rect(p.x + 20, y, 760, 22), $"待決提案（{incoming.Count}）", body);
             y += 24;
@@ -890,22 +1059,25 @@ namespace LuanShi
             int drawn = 0;
             foreach (var other in engine.State.Factions)
             {
-                if (other.SeatId == HumanSeat) continue;
+                if (other.SeatId == currentSeat) continue;
                 if (drawn == shownFactions)
                 {
                     GUI.Label(new Rect(p.x + 36, y, 744, 20), "…（其餘勢力省略）", body);
                     break;
                 }
 
+                var relation = obs != null ? obs.Relation(other.SeatId) : null;
+                int myTrust = relation != null ? relation.MyTrust : 0;
+                int theirTrust = relation != null ? relation.TheirTrust : 0;
+                bool atWar = relation != null && relation.AtWar;
+
                 GUI.Label(new Rect(p.x + 20, y, 760, 20),
-                    $"{other.Name}　信任 我→他 {dip.GetTrust(HumanSeat, other.SeatId)}" +
-                    $"／他→我 {dip.GetTrust(other.SeatId, HumanSeat)}　{StatusLine(other.SeatId)}", body);
+                    $"{other.Name}　信任 我→他 {myTrust}／他→我 {theirTrust}　{StatusLine(other.SeatId)}", body);
                 y += 22;
 
                 string hint = null;
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.DeclareWar,
-                    other.SeatId, "宣戰",
-                    dip.IsAtWar(HumanSeat, other.SeatId) ? "已在交戰" : null, 0, 0, btn));
+                    other.SeatId, "宣戰", atWar ? "已在交戰" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.Gift,
                     other.SeatId, $"贈禮 {BalanceConfig.GiftGoldPerTrustUnit}",
                     Treasury() < BalanceConfig.GiftGoldPerTrustUnit ? "金不足" : null,
@@ -939,22 +1111,23 @@ namespace LuanShi
             }
         }
 
-        /// <summary>和平 / 交戰 plus every treaty in force (with seasons left) and any pending offer.</summary>
+        /// <summary>和平 / 交戰 plus every treaty in force (with seasons left) and any pending offer,
+        /// read from this seat's observation only.</summary>
         string StatusLine(string seatId)
         {
-            var dip = engine.State.Diplomacy;
-            var sb = new StringBuilder(dip.IsAtWar(HumanSeat, seatId) ? "交戰" : "和平");
+            var relation = obs != null ? obs.Relation(seatId) : null;
+            var sb = new StringBuilder(relation != null && relation.AtWar ? "交戰" : "和平");
             foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
             {
-                var treaty = dip.FindTreaty(type, HumanSeat, seatId);
+                var treaty = MyTreaty(type, seatId);
                 if (treaty == null) continue;
                 int seasonsLeft = treaty.ExpirySeason - engine.State.Season + 1;
                 if (seasonsLeft < 1) seasonsLeft = 1;
                 sb.Append($"　[{TreatyLabel(type)} 剩 {seasonsLeft} 季]");
             }
-            var proposal = dip.FindProposal(HumanSeat, seatId);
+            var proposal = MyProposal(seatId);
             if (proposal != null)
-                sb.Append("　[").Append(proposal.FromSeatId == HumanSeat ? "我方提案待覆" : "待你回覆")
+                sb.Append("　[").Append(proposal.FromSeatId == currentSeat ? "我方提案待覆" : "待你回覆")
                   .Append("：").Append(TreatyLabel(proposal.Type)).Append(']');
             return sb.ToString();
         }
@@ -970,12 +1143,31 @@ namespace LuanShi
             }
         }
 
+        /// <summary>This seat's own treaty of that type with another seat, from the observation.</summary>
+        TreatyRecord MyTreaty(string type, string otherSeatId)
+        {
+            if (obs == null) return null;
+            foreach (var treaty in obs.Treaties)
+                if (treaty.Type == type && treaty.Covers(currentSeat, otherSeatId)) return treaty;
+            return null;
+        }
+
+        /// <summary>The pending offer between this seat and another, in either direction.</summary>
+        TreatyProposal MyProposal(string otherSeatId)
+        {
+            if (obs == null) return null;
+            foreach (var proposal in obs.Proposals)
+                if ((proposal.FromSeatId == currentSeat && proposal.ToSeatId == otherSeatId)
+                    || (proposal.ToSeatId == currentSeat && proposal.FromSeatId == otherSeatId))
+                    return proposal;
+            return null;
+        }
+
         /// <summary>Reason a treaty offer is obviously illegal, or null when it can be sent.</summary>
         string ProposalBlocked(string seatId, string type)
         {
-            var dip = engine.State.Diplomacy;
-            if (dip.HasTreaty(type, HumanSeat, seatId)) return "已在生效";
-            if (dip.FindProposal(HumanSeat, seatId) != null) return "已有提案待覆";
+            if (MyTreaty(type, seatId) != null) return "已在生效";
+            if (MyProposal(seatId) != null) return "已有提案待覆";
             return null;
         }
 
@@ -985,16 +1177,16 @@ namespace LuanShi
         /// <summary>First treaty in force with that seat (nap → alliance → truce), or null.</summary>
         string BreakableType(string seatId)
         {
-            var dip = engine.State.Diplomacy;
             foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
-                if (dip.HasTreaty(type, HumanSeat, seatId)) return type;
+                if (MyTreaty(type, seatId) != null) return type;
             return null;
         }
 
         int Treasury()
         {
             int gold = 0;
-            foreach (var city in engine.State.CitiesOf(HumanSeat)) gold += city.Gold;
+            if (obs == null) return 0;
+            foreach (var city in obs.CitiesOf(currentSeat)) gold += city.Gold;
             return gold;
         }
 
@@ -1039,9 +1231,11 @@ namespace LuanShi
 
         void DrawHistorianPanel(Rect p, GUIStyle body, GUIStyle mono)
         {
-            var records = engine.Log.Records;
+            // the chronicle is the seat's filtered view of the log (CONTROLLER_PROTOCOL §5)
+            var records = obs != null ? obs.Events : new List<EventRecord>();
             GUI.Label(new Rect(p.x + 20, p.y + 52, 760, 22),
-                $"本局史書 — 共 {records.Count} 條（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
+                $"本局史書（{engine.State.FindFaction(currentSeat)?.Name} 可見）— 共 {records.Count} 條" +
+                $"（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
 
             float lineH = 18f;
             var view = new Rect(p.x + 20, p.y + 80, 760, 300);

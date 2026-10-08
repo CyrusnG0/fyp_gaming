@@ -102,6 +102,11 @@ namespace LuanShi.Engine
         public const int TreatyDurationMinSeasons = 1;     // TBD
         public const int TreatyDurationMaxSeasons = 12;    // TBD
 
+        // ---- 戰爭迷霧 (ACTIONS.md §9, design §8.1) ------------------------------
+
+        public const int FogCityRange = 3;   // LOCKED (§9): an own city reveals ±3 hexes
+        public const int FogArmyRange = 2;   // LOCKED (§9): an own army reveals ±2 hexes
+
         public const int ScriptedNapTrustThreshold = 0;        // AI signs/offers 互不侵犯 at or above this 信任
         public const int ScriptedAllianceTrustThreshold = 30;  // TBD
         public const int ScriptedTruceTrustThreshold = -50;    // AI signs/offers 停戰 at or above this 信任

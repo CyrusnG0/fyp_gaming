@@ -84,9 +84,11 @@ namespace LuanShi.Engine
                     city.Population += (int)(city.Population * rate);
                 }
 
-                report.Lines.Add($"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}，民心{city.Morale}"
-                               + (disheartened ? $"（民心<{BalanceConfig.MoraleYieldPenaltyThreshold}，產出減半）" : "")
-                               + (note != null ? $"。{note}" : ""));
+                string line = $"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}，民心{city.Morale}"
+                            + (disheartened ? $"（民心<{BalanceConfig.MoraleYieldPenaltyThreshold}，產出減半）" : "")
+                            + (note != null ? $"。{note}" : "");
+                report.Lines.Add(line);
+                report.CityLines[city.Id] = line;      // keyed so a seat can read only the cities it can see
                 Emit(city.OwnerSeatId, fac?.Controller, "city_resolved", "owner_and_observers",
                     P("city_id", city.Id, "pop", city.Population.ToString(),
                       "food", city.Food.ToString(), "gold", city.Gold.ToString(),
@@ -324,6 +326,111 @@ namespace LuanShi.Engine
 
         private static int Clamp(int value, int min, int max)
             => value < min ? min : value > max ? max : value;
+
+        // ---- observations: fog of war (AGENTS.md #3, ACTIONS.md §9) -------------
+
+        /// <summary>
+        /// The filtered observation for one seat — the only world a controller may act on. Own cities and
+        /// armies are complete; foreign ones appear only inside the §9 detection ranges and are absent
+        /// (never redacted in place) outside them; the log is filtered by event visibility.
+        /// </summary>
+        public Observation Observe(string seatId)
+        {
+            var fac = State.FindFaction(seatId);
+            if (fac == null) return null;
+
+            var obs = new Observation
+            {
+                SeatId = fac.SeatId,
+                Season = State.Season,
+                Phase = State.Phase,
+                CommandPoints = fac.CommandPoints,
+                Prestige = fac.Prestige,
+            };
+
+            foreach (var city in State.Cities)
+                if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
+            foreach (var army in State.Armies)
+                if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(army);
+
+            foreach (var other in State.Factions)
+            {
+                obs.Factions.Add(new FactionView
+                {
+                    SeatId = other.SeatId,
+                    Name = other.Name,
+                    Controller = other.Controller,
+                    Prestige = other.Prestige,        // 威望 is the world's public opinion (design §7.3)
+                });
+                if (other.SeatId == seatId) continue;
+                obs.Relations.Add(new RelationView
+                {
+                    SeatId = other.SeatId,
+                    MyTrust = State.Diplomacy.GetTrust(seatId, other.SeatId),
+                    TheirTrust = State.Diplomacy.GetTrust(other.SeatId, seatId),
+                    AtWar = State.Diplomacy.IsAtWar(seatId, other.SeatId),
+                });
+            }
+
+            foreach (var treaty in State.Diplomacy.Treaties)
+                if (treaty.FactionA == seatId || treaty.FactionB == seatId) obs.Treaties.Add(treaty);
+            foreach (var proposal in State.Diplomacy.Proposals)
+                if (proposal.FromSeatId == seatId || proposal.ToSeatId == seatId) obs.Proposals.Add(proposal);
+            foreach (var rec in Log.Records)
+                if (SeesEvent(seatId, rec)) obs.Events.Add(rec);
+
+            return obs;
+        }
+
+        /// <summary>
+        /// Fog ranges (ACTIONS.md §9): a hex within FogCityRange of an own city, or FogArmyRange of an own
+        /// army, is seen regardless of who stands there. Terrain does not block sight (a radius, not a line).
+        /// </summary>
+        public bool InSight(string seatId, int x, int z)
+        {
+            foreach (var city in State.Cities)
+                if (city.OwnerSeatId == seatId
+                    && State.Map.HexDistance(city.X, city.Z, x, z, BalanceConfig.FogCityRange) >= 0) return true;
+            foreach (var army in State.Armies)
+                if (army.OwnerSeatId == seatId
+                    && State.Map.HexDistance(army.X, army.Z, x, z, BalanceConfig.FogArmyRange) >= 0) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Log filter (CONTROLLER_PROTOCOL §5): a seat sees public events, whatever it did itself, whatever
+        /// names it as a party, and `owner_and_observers` events whose subject it can currently see. An
+        /// `owner_and_observers` event with no in-sight subject reaches only its actor and its named parties.
+        /// </summary>
+        public bool SeesEvent(string seatId, EventRecord rec)
+        {
+            if (rec == null) return false;
+            if (rec.Visibility == "public") return true;
+            if (rec.ActorSeatId == seatId) return true;
+            if (EventField(rec, "to_seat_id") == seatId) return true;
+            if (EventField(rec, "from_seat_id") == seatId) return true;
+            if (EventField(rec, "attacker_seat_id") == seatId) return true;
+            if (EventField(rec, "defender_seat_id") == seatId) return true;
+            if (rec.Visibility != "owner_and_observers") return false;
+
+            string cityId = EventField(rec, "city_id");
+            if (cityId != null)
+            {
+                var city = State.FindCity(cityId);
+                if (city != null && InSight(seatId, city.X, city.Z)) return true;
+            }
+            string armyId = EventField(rec, "army_id") ?? EventField(rec, "attacker_army_id")
+                         ?? EventField(rec, "defender_army_id");
+            if (armyId != null)
+            {
+                var army = State.FindArmy(armyId);
+                if (army != null && InSight(seatId, army.X, army.Z)) return true;
+            }
+            return false;
+        }
+
+        private static string EventField(EventRecord rec, string key)
+            => rec.Payload != null && rec.Payload.TryGetValue(key, out string value) ? value : null;
 
         // ---- 外交 P1-P6 (ACTIONS.md §5) ----------------------------------------
         // Command shapes (the UI and the LLM adapter must both produce exactly these):
@@ -960,5 +1067,6 @@ namespace LuanShi.Engine
     {
         public int Season;
         public readonly List<string> Lines = new List<string>();
+        public readonly Dictionary<string, string> CityLines = new Dictionary<string, string>();  // city id → line
     }
 }
