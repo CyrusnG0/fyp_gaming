@@ -92,12 +92,17 @@ namespace LuanShi.Engine
         }
     }
 
-    /// <summary>Action vocabulary for the MVP strategic layer.</summary>
+    /// <summary>Action vocabulary for the MVP strategic layer (ACTIONS.md §3–§4).</summary>
     public static class ActionType
     {
-        public const string Reclaim = "reclaim";    // 開墾 D3: target_id = city, food yield +ReclaimPctPerUse%
-        public const string Recruit = "recruit";    // 徵兵 D4: target_id = city
-        public const string March = "march";        // 行軍 M1: target_id = army, param_a/b = dest hex x,z
+        public const string LevyTax = "levy_tax";           // 徵稅 D1: target_id = city
+        public const string LightenLabor = "lighten_labor"; // 輕徭 D2: target_id = city
+        public const string Reclaim = "reclaim";            // 開墾 D3: target_id = city, food yield +ReclaimPctPerUse%
+        public const string Recruit = "recruit";            // 募兵 D4: target_id = city
+        public const string Train = "train";                // 練兵 D5: target_id = city, Training +1
+        public const string Fortify = "fortify";            // 修城 D6: target_id = city, Defense +1
+        public const string Relief = "relief";              // 賑災 D7: target_id = city, 民心 +ReliefMoraleGain
+        public const string March = "march";                // 行軍 M1: target_id = army, param_a/b = dest hex x,z
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";

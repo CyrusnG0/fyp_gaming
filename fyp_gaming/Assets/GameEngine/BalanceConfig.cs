@@ -7,13 +7,22 @@ namespace LuanShi.Engine
     public static class BalanceConfig
     {
         public const int CommandPointsPerSeason = 5;      // LOCKED (ADR-010): 號令 per faction per season
+        public const int CommandPointsPerOrder = 1;       // default 號令 per accepted command (M3 攻城 = 2, §4)
         public const int ArmyMoveCostPerSeason = 6;       // TBD: total hex-cost an army may spend per season
 
         public const int CityBaseFoodYield = 200;         // TBD: passive food per owned city per season (pre-開墾)
 
-        public const int ReclaimPctStart = 0;             // TBD: 開墾 start (ACTIONS.md §9)
-        public const int ReclaimPctPerUse = 15;           // LOCKED (ADR-010): 開墾 D3, +15% food yield per use
+        public const int TaxLevyAmount = 200;             // TBD: 徵稅 D1 gold gained (design §11 quotes no number)
+        public const int TaxLevyMoraleCost = 5;           // LOCKED (design §11): 徵稅 民心 −5
+        public const int LightenLaborGoldCost = 100;      // TBD: 輕徭 D2 gold cost (design §11 quotes 金 − only)
+        public const int LightenLaborMoraleGain = 8;      // LOCKED (design §11): 輕徭 民心 +8
+
+        public const int ReclaimPctStart = 0;             // TBD: 開墾 D3 start (ACTIONS.md §9)
+        public const int ReclaimPctPerUse = 15;           // LOCKED (ADR-010): +15% food yield per use
         public const int ReclaimPctCap = 60;              // LOCKED (ADR-010): 開墾 cumulative cap
+
+        public const int ReliefFoodCost = 300;            // TBD: 賑災 D7 food cost (design §11 quotes 糧 − only)
+        public const int ReliefMoraleGain = 15;           // LOCKED (design §11): 賑災 民心 +15
 
         public const int MoraleStart = 60;                // TBD: 民心 start, range MoraleMin..MoraleMax
         public const int MoraleMin = 0;
@@ -32,7 +41,7 @@ namespace LuanShi.Engine
         public const int TrustMin = -100;
         public const int TrustMax = 100;
 
-        public const int RecruitGoldCost = 200;           // TBD: 徵兵 cost
+        public const int RecruitGoldCost = 200;           // TBD: 募兵 D4 cost
         public const int RecruitPopCost = 1000;           // TBD: population drawn into service
         public const int RecruitTroopGain = 1000;         // TBD: garrison troops gained
 

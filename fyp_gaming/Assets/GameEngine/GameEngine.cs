@@ -112,15 +112,20 @@ namespace LuanShi.Engine
             ValidationResult r;
             switch (cmd.Type)
             {
+                case ActionType.LevyTax: r = DoLevyTax(fac, cmd); break;
+                case ActionType.LightenLabor: r = DoLightenLabor(fac, cmd); break;
                 case ActionType.Reclaim: r = DoReclaim(fac, cmd); break;
                 case ActionType.Recruit: r = DoRecruit(fac, cmd); break;
+                case ActionType.Train: r = DoTrain(fac, cmd); break;
+                case ActionType.Fortify: r = DoFortify(fac, cmd); break;
+                case ActionType.Relief: r = DoRelief(fac, cmd); break;
                 case ActionType.March: r = DoMarch(fac, cmd); break;
                 default: r = ValidationResult.Fail($"unknown action type '{cmd.Type}'"); break;
             }
 
             if (!r.Ok) return Reject(cmd, r.Error);
 
-            fac.CommandPoints--;
+            fac.CommandPoints -= BalanceConfig.CommandPointsPerOrder;
             Emit(fac.SeatId, fac.Controller, "action", "public",
                 P("action", cmd.Type, "target_id", cmd.TargetId ?? "",
                   "param_a", cmd.ParamA.ToString(), "param_b", cmd.ParamB.ToString(),
@@ -128,12 +133,43 @@ namespace LuanShi.Engine
             return r;
         }
 
+        // ---- 內政 D1-D7 (ACTIONS.md §3, all target_id = own city) ---------------
+
+        /// <summary>D1 徵稅: gold now, 民心 pays for it.</summary>
+        private ValidationResult DoLevyTax(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+
+            city.Gold += BalanceConfig.TaxLevyAmount;
+            AddMorale(city, -BalanceConfig.TaxLevyMoraleCost);
+            Emit(fac.SeatId, fac.Controller, "tax_levied", "public",
+                P("city_id", city.Id, "gold_gained", BalanceConfig.TaxLevyAmount.ToString(),
+                  "morale", city.Morale.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>D2 輕徭: gold buys 民心.</summary>
+        private ValidationResult DoLightenLabor(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (city.Gold < BalanceConfig.LightenLaborGoldCost)
+                return ValidationResult.Fail($"not enough gold (needs {BalanceConfig.LightenLaborGoldCost})");
+
+            city.Gold -= BalanceConfig.LightenLaborGoldCost;
+            AddMorale(city, BalanceConfig.LightenLaborMoraleGain);
+            Emit(fac.SeatId, fac.Controller, "labor_lightened", "owner_and_observers",
+                P("city_id", city.Id, "gold_spent", BalanceConfig.LightenLaborGoldCost.ToString(),
+                  "morale", city.Morale.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
         /// <summary>D3 開墾: +ReclaimPctPerUse food yield, cumulative up to ReclaimPctCap.</summary>
         private ValidationResult DoReclaim(FactionState fac, ActionCommand cmd)
         {
-            var city = State.FindCity(cmd.TargetId);
-            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
-            if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("not your city");
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
             if (city.ReclaimedThisSeason) return ValidationResult.Fail("city already reclaimed this season");
             if (city.ReclaimPct >= BalanceConfig.ReclaimPctCap)
                 return ValidationResult.Fail($"land fully reclaimed (cap {BalanceConfig.ReclaimPctCap}%)");
@@ -148,19 +184,65 @@ namespace LuanShi.Engine
             return ValidationResult.Success;
         }
 
+        /// <summary>D4 募兵: gold + population become garrison.</summary>
         private ValidationResult DoRecruit(FactionState fac, ActionCommand cmd)
         {
-            var city = State.FindCity(cmd.TargetId);
-            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
-            if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("not your city");
-            if (city.Gold < BalanceConfig.RecruitGoldCost) return ValidationResult.Fail("not enough gold");
-            if (city.Population < BalanceConfig.RecruitPopCost) return ValidationResult.Fail("not enough population");
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (city.Gold < BalanceConfig.RecruitGoldCost)
+                return ValidationResult.Fail($"not enough gold (needs {BalanceConfig.RecruitGoldCost})");
+            if (city.Population < BalanceConfig.RecruitPopCost)
+                return ValidationResult.Fail($"not enough population (needs {BalanceConfig.RecruitPopCost})");
 
             city.Gold -= BalanceConfig.RecruitGoldCost;
             city.Population -= BalanceConfig.RecruitPopCost;
             city.Garrison += BalanceConfig.RecruitTroopGain;
             Emit(fac.SeatId, fac.Controller, "recruit", "owner_and_observers",
                 P("city_id", city.Id, "troops", BalanceConfig.RecruitTroopGain.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>D5 練兵: garrison training +1 (the §6.1 combat bonus lands with M2/M3).</summary>
+        private ValidationResult DoTrain(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (city.Training >= BalanceConfig.TrainingMax)
+                return ValidationResult.Fail($"training already at max ({BalanceConfig.TrainingMax})");
+
+            city.Training++;
+            Emit(fac.SeatId, fac.Controller, "troops_trained", "owner_and_observers",
+                P("city_id", city.Id, "training", city.Training.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>D6 修城: 城防 +1 (the §4.1 siege effect lands with M3).</summary>
+        private ValidationResult DoFortify(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (city.Defense >= BalanceConfig.DefenseMax)
+                return ValidationResult.Fail($"defense already at max ({BalanceConfig.DefenseMax})");
+
+            city.Defense++;
+            Emit(fac.SeatId, fac.Controller, "city_fortified", "owner_and_observers",
+                P("city_id", city.Id, "defense", city.Defense.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>D7 賑災: food buys 民心 back.</summary>
+        private ValidationResult DoRelief(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (city.Food < BalanceConfig.ReliefFoodCost)
+                return ValidationResult.Fail($"not enough food (needs {BalanceConfig.ReliefFoodCost})");
+
+            city.Food -= BalanceConfig.ReliefFoodCost;
+            AddMorale(city, BalanceConfig.ReliefMoraleGain);
+            Emit(fac.SeatId, fac.Controller, "disaster_relieved", "owner_and_observers",
+                P("city_id", city.Id, "food_spent", BalanceConfig.ReliefFoodCost.ToString(),
+                  "morale", city.Morale.ToString()), cmd.ActionId);
             return ValidationResult.Success;
         }
 
@@ -203,6 +285,22 @@ namespace LuanShi.Engine
         }
 
         // ---- helpers -----------------------------------------------------------
+
+        /// <summary>Resolves target_id to one of the acting faction's own cities.</summary>
+        private ValidationResult OwnCity(FactionState fac, ActionCommand cmd, out CityState city)
+        {
+            city = State.FindCity(cmd.TargetId);
+            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
+            if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("not your city");
+            return ValidationResult.Success;
+        }
+
+        /// <summary>民心 changes always clamp to the configured range.</summary>
+        private static void AddMorale(CityState city, int delta)
+            => city.Morale = Clamp(city.Morale + delta, BalanceConfig.MoraleMin, BalanceConfig.MoraleMax);
+
+        private static int Clamp(int value, int min, int max)
+            => value < min ? min : value > max ? max : value;
 
         private ValidationResult Reject(ActionCommand cmd, string why)
         {

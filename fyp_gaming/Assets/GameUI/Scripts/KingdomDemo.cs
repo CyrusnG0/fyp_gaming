@@ -482,7 +482,8 @@ namespace LuanShi
             uiRects.Add(top);
             GUI.Box(top, GUIContent.none);
             GUI.Label(new Rect(22, 12, 980, 28),
-                $"第 {engine.State.Season} 季 · {fac.Name}（玩家） · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason} · 人口 {pop} · 糧 {food} · 金 {gold}", title);
+                $"第 {engine.State.Season} 季 · {fac.Name}（玩家） · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
+                $" · 威望 {fac.Prestige} · 人口 {pop} · 糧 {food} · 金 {gold}", title);
 
             // tab bar — 地圖 is the live view; the others preview the full design concept
             var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
@@ -524,26 +525,63 @@ namespace LuanShi
 
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
-            var p = new Rect(10, 50, 300, city.OwnerSeatId == HumanSeat ? 200 : 120);
+            bool mine = city.OwnerSeatId == HumanSeat;
+            var p = new Rect(10, 50, 300, mine ? 400 : 120);
             uiRects.Add(p);
             GUI.Box(p, GUIContent.none);
             GUI.Label(new Rect(22, 58, 280, 24), $"{city.Name}（{OwnerName(city)}）", body);
 
-            if (city.OwnerSeatId == HumanSeat)
+            if (mine)
             {
-                GUI.Label(new Rect(22, 84, 280, 80),
-                    $"人口 {city.Population}\n糧食 {city.Food}\n金錢 {city.Gold}\n駐軍 {city.Garrison}", body);
-                var fac = engine.State.FindFaction(HumanSeat);
-                if (GUI.Button(new Rect(22, 172, 120, 34), "開墾", btn))
-                    SubmitHuman(new ActionCommand { Type = ActionType.Reclaim, TargetId = city.Id, Reason = "UI: reclaim order" });
-                if (GUI.Button(new Rect(152, 172, 120, 34), "徵兵", btn))
-                    SubmitHuman(new ActionCommand { Type = ActionType.Recruit, TargetId = city.Id, Reason = "UI: recruit order" });
+                string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? "（產出減半）" : "";
+                GUI.Label(new Rect(22, 86, 280, 116),
+                    $"人口 {city.Population}\n糧食 {city.Food}\n金錢 {city.Gold}\n駐軍 {city.Garrison}\n" +
+                    $"民心 {city.Morale}{moraleWarning}\n" +
+                    $"開墾 {city.ReclaimPct}%　城防 {city.Defense}/{BalanceConfig.DefenseMax}　訓練 {city.Training}/{BalanceConfig.TrainingMax}",
+                    body);
+
+                string hint = null;
+                hint = FirstReason(hint, OrderButton(new Rect(22, 210, 120, 34), city, ActionType.LevyTax, "徵稅", null, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 210, 120, 34), city, ActionType.LightenLabor, "輕徭",
+                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "金不足", btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 248, 120, 34), city, ActionType.Reclaim, "開墾",
+                    city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "已達上限"
+                    : city.ReclaimedThisSeason ? "本季已開墾" : null, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 248, 120, 34), city, ActionType.Recruit, "募兵",
+                    city.Gold < BalanceConfig.RecruitGoldCost ? "金不足"
+                    : city.Population < BalanceConfig.RecruitPopCost ? "人口不足" : null, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 286, 120, 34), city, ActionType.Train, "練兵",
+                    city.Training >= BalanceConfig.TrainingMax ? "已達上限" : null, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(152, 286, 120, 34), city, ActionType.Fortify, "修城",
+                    city.Defense >= BalanceConfig.DefenseMax ? "已達上限" : null, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(22, 324, 120, 34), city, ActionType.Relief, "賑災",
+                    city.Food < BalanceConfig.ReliefFoodCost ? "糧不足" : null, btn));
+
+                if (hint != null) GUI.Label(new Rect(22, 364, 280, 22), hint, body);
             }
             else
             {
                 GUI.Label(new Rect(22, 84, 280, 30), city.IsNeutral ? "無主之地" : "敵境 — 詳情不明", body);
             }
         }
+
+        /// <summary>
+        /// One 內政 order button (ACTIONS.md §3 D1-D7). Returns a player-facing reason when the
+        /// button is greyed out, or null when the order is obviously legal — the engine remains
+        /// the only authority; a stale hint just means the click gets rejected with a reason.
+        /// </summary>
+        string OrderButton(Rect r, CityState city, string type, string label, string blockedReason, GUIStyle btn)
+        {
+            bool available = blockedReason == null;
+            var prev = GUI.enabled;
+            GUI.enabled = available;
+            if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointsPerOrder}令", btn))
+                SubmitHuman(new ActionCommand { Type = type, TargetId = city.Id, Reason = "UI: " + type });
+            GUI.enabled = prev;
+            return available ? null : label + "：" + blockedReason;
+        }
+
+        static string FirstReason(string current, string candidate) => current ?? candidate;
 
         void DrawArmyPanel(ArmyState army, GUIStyle body, GUIStyle btn)
         {
@@ -601,7 +639,7 @@ namespace LuanShi
         {
             switch (activeTab)
             {
-                case "domestic":  return "內政 · 待開發";
+                case "domestic":  return "內政 · 行動一覽";
                 case "diplomacy": return "外交 · 待開發";
                 case "intel":     return "諜報 · 待開發";
                 case "research":  return "研究 · 待開發";
@@ -615,18 +653,32 @@ namespace LuanShi
             GUI.Label(new Rect(p.x + 20, y, 760, 22), "內政行動（設計文件第 11 章 · 共 10 項）", body);
             y += 30;
 
-            string[] rows =
+            // Live actions mirror ACTIONS.md §3 and read their numbers from BalanceConfig,
+            // so this panel cannot drift from what the engine actually charges.
+            string[] live =
             {
-                "徵稅　　耗令 1　金 ＋、民心 −5",
-                "輕徭　　耗令 1　民心 ＋8、金 −",
-                "開墾　　耗令 1　該城糧產 ＋15%（上限 ＋60%）",
-                "練兵　　耗令 1　訓練 ＋1（上限 5）",
-                "修城　　耗令 1　城防 ＋1（上限 5）",
-                "興建建築　耗令 1　金足夠、有空位",
-                "賑災　　耗令 1　糧 −、民心 ＋15",
-                "遷都　　耗令 1　威望 −5、換都城",
+                $"徵稅　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 ＋{BalanceConfig.TaxLevyAmount}、民心 −{BalanceConfig.TaxLevyMoraleCost}",
+                $"輕徭　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 −{BalanceConfig.LightenLaborGoldCost}、民心 ＋{BalanceConfig.LightenLaborMoraleGain}",
+                $"開墾　　耗令 {BalanceConfig.CommandPointsPerOrder}　該城糧產 ＋{BalanceConfig.ReclaimPctPerUse}%（上限 ＋{BalanceConfig.ReclaimPctCap}%）",
+                $"募兵　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 −{BalanceConfig.RecruitGoldCost}、人口 −{BalanceConfig.RecruitPopCost}、駐軍 ＋{BalanceConfig.RecruitTroopGain}",
+                $"練兵　　耗令 {BalanceConfig.CommandPointsPerOrder}　訓練 ＋1（上限 {BalanceConfig.TrainingMax}）",
+                $"修城　　耗令 {BalanceConfig.CommandPointsPerOrder}　城防 ＋1（上限 {BalanceConfig.DefenseMax}）",
+                $"賑災　　耗令 {BalanceConfig.CommandPointsPerOrder}　糧 −{BalanceConfig.ReliefFoodCost}、民心 ＋{BalanceConfig.ReliefMoraleGain}",
             };
-            foreach (var row in rows)
+            foreach (var row in live)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 22), "已開放　" + row, body);
+                y += 24;
+            }
+
+            y += 10;
+            string[] planned =
+            {
+                "屯田　　耗令 1　需農政 3：駐軍自給 30%",
+                "興建建築　耗令 1　金足夠、有空位（市集／農田／兵營…）",
+                "遷都　　耗令 1　需另一座城：威望 −5、換都城",
+            };
+            foreach (var row in planned)
             {
                 PlannedLabel(new Rect(p.x + 36, y, 744, 22), "〔待開發〕 " + row, body);
                 y += 24;
@@ -634,13 +686,14 @@ namespace LuanShi
 
             y += 10;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "已開放：開墾、徵兵 — 點選我方城池後，於左側城池面板下達命令。\n其餘行動待內政模組完成後陸續開放。", body);
+                $"點選我方城池後，於左側城池面板下達命令；條件不足的按鈕呈灰色。\n每季共 {BalanceConfig.CommandPointsPerSeason} 點號令，愈珍貴的行動愈要挑在對的季節做。", body);
         }
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)
         {
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "條約　（本局尚無任何條約）", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+                $"條約　（本局 {engine.State.Diplomacy.Treaties.Count} 條生效）", body);
             y += 26;
             PlannedLabel(new Rect(p.x + 36, y, 744, 40),
                 "可締結：互不侵犯 · 同盟 · 共同防禦 · 停戰 · 朝貢\n　　　　　割地 · 通商 · 借道 · 聯姻 · 稱臣", body);
@@ -648,9 +701,14 @@ namespace LuanShi
 
             GUI.Label(new Rect(p.x + 20, y, 760, 22), "勢力關係", body);
             y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 44),
-                "魏（玩家）　↔　蜀（腳本 AI）　　信任 —　　關係【未開放】\n威望 —　（待外交模組）", body);
-            y += 54;
+            var human = engine.State.FindFaction(HumanSeat);
+            // 信任/威望 are real state (ACTIONS.md §9); the relations screen is not built yet.
+            GUI.Label(new Rect(p.x + 36, y, 744, 22),
+                $"魏（玩家）　↔　蜀（腳本 AI）　　信任 {engine.State.Diplomacy.GetTrust(HumanSeat, AiSeat)}" +
+                $"　威望 {human.Prestige}", body);
+            y += 26;
+            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "關係等級 · 條約期限 · 背盟記錄　【未開放 · 待外交模組】", body);
+            y += 28;
 
             GUI.Label(new Rect(p.x + 20, y, 760, 22), "外交行動", body);
             y += 26;
