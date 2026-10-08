@@ -43,7 +43,7 @@ JSON object, adding two optional fields:
 
 | Rule | Value | Notes |
 |---|---|---|
-| Command points (號令) per season | **5** (design) — code currently 3 | ❓ confirm 5 vs 3 |
+| Command points (號令) per season | **5** (LOCKED, ADR-010 #1) | `BalanceConfig.CommandPointsPerSeason`; D1-D7/M1/M2/P4-P6 cost 1, M3 攻城 costs 2, 遣使/提案/回覆 cost 0 |
 | 遣使 / 提案 / 回覆 (talk, propose, reply) | **0 CP** | design §11: 說話永遠免費 |
 | Move points per army per season | 6 (cavalry 8 ⏸) | terrain cost via Dijkstra; 冬 ×0.7 ⏸ |
 | Once-per-season flags | per city （開墾…) / per army (marched) | reset in `BeginSeason()` |
@@ -56,48 +56,68 @@ JSON object, adding two optional fields:
 
 | # | id | 中文 | CP | Cost | Preconditions | Effect (state mutation) | Event | Status |
 |---|---|---|---|---|---|---|---|---|
-| D1 | `levy_tax` | 徵稅 | 1 | — | — | `Gold += TaxLevyAmount (待決)`; `民心 −5` | `tax_levied` public | 🎯 |
-| D2 | `lighten_labor` | 輕徭 | 1 | `Gold −LightenGoldCost (待決)` | enough gold | `民心 +8` | `labor_lightened` | 🎯 |
-| D3 | `reclaim` | 開墾 | 1 | — | `ReclaimPct < +60%` cap | city food yield `+15%` (cumulative, stored as `ReclaimPct`) | `land_reclaimed` | 🎯 **renames current `farm`** ❓ |
+| D1 | `levy_tax` | 徵稅 | 1 | — | — | `Gold += TaxLevyAmount (TBD 200)`; `民心 −5` | `tax_levied` public | ✅ |
+| D2 | `lighten_labor` | 輕徭 | 1 | `Gold −LightenLaborGoldCost (TBD 100)` | enough gold | `民心 +8` | `labor_lightened` | ✅ |
+| D3 | `reclaim` | 開墾 | 1 | — | `ReclaimPct < +60%` cap, once per city per season | city food yield `+15%` (cumulative, stored as `ReclaimPct`) | `land_reclaimed` | ✅ (renamed from `farm`, ADR-010 #2) |
 | D4 | `recruit` | 募兵 | 1 | 200 金， 1000 人口 | enough both | `Garrison += 1000` | `recruit` | ✅ |
-| D5 | `train` | 練兵 | 1 | — | `Training < 5` | `Training +1` (city garrison; +10% combat per level, §6.1) | `troops_trained` | 🎯 |
-| D6 | `fortify` | 修城 | 1 | — | `WallLevel < 5` | `城防 +1` (defence & siege duration, §4.1) | `city_fortified` | 🎯 |
-| D7 | `relief` | 賑災 | 1 | `糧 −ReliefFoodCost (待決)` | enough food | `民心 +15` | `disaster_relieved` | 🎯 |
+| D5 | `train` | 練兵 | 1 | — | `Training < 5` | `Training +1` (city garrison; +10% combat per level, §6.1) | `troops_trained` | ✅ |
+| D6 | `fortify` | 修城 | 1 | — | `城防 < 5` | `城防 +1` (defender 戰力 +15%/級, §4.1) | `city_fortified` | ✅ |
+| D7 | `relief` | 賑災 | 1 | `糧 −ReliefFoodCost (TBD 300)` | enough food | `民心 +15` | `disaster_relieved` | ✅ |
 | D8 | `build` | 建建築 | 1 | per building (§4.2: 市集800/農田700/兵營1000/學堂1200/諜樓1200/糧倉900/醫館900) | free slot (3–6/city), gold | building added; passive per §4.2 | `building_built` | ⏸ needs Building model + `args.building_type` |
 | D9 | `farm_garrison` | 屯田 | 1 | — | **農政 3** | garrison food self-supply 30% | `garrison_farmed` | ⏸ research-gated |
 | D10 | `move_capital` | 遷都 | 1 | — | owns ≥2 cities | capital changes; `威望 −5` | `capital_moved` public | ⏸ |
 
-**Naming reconciliation ❓:** the code's current `farm` (flat +400 food, no prereq) matches
-*neither* 開墾 (+15%, cap +60%) *nor* 屯田 (tech-gated self-supply). Proposal: current `farm`
-becomes D3 `reclaim` (+15% stacking, cap +60%); 屯田 becomes D9, deferred behind research.
+**Naming reconciliation ✅ (implemented):** the old `farm` (flat +400 food) is gone — it is now D3
+`reclaim` (+15% stacking, cap +60%). `farm` survives only as a deprecated alias that `Submit()` maps to
+`reclaim`, so a controller (or a stale UI build) still sending `farm` keeps working. 屯田 stays D9,
+deferred behind research. All seven domestic actions emit their event with the visibility noted above
+(D1 public per spec, the rest `owner_and_observers`); 民心/城防/訓練 changes clamp to the
+`BalanceConfig` ranges.
 
-## 4. 軍事 Military — `target_id` = own army (M1–M4)
+## 4. 軍事 Military — `target_id` = own army; `param_a`/`param_b` = the target hex
 
 | # | id | 中文 | CP | Preconditions | Effect | Event | Status |
 |---|---|---|---|---|---|---|---|
-| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6, dest walkable, no friendly army there | move; neutral city → **capture** | `army_moved` (+`city_captured` public) | ✅ |
-| M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; morale 0 → rout +30% | `battle_field` public | 🎯 minimal resolution first |
-| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city; 兵力 ≥3:1 或器械 | siege (per-season) or assault (fast, heavy losses), §4.3 | `battle_siege` public | 🎯 minimal: assault only? ❓ |
+| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6, dest walkable, no army on the destination | move; neutral city → **capture** | `army_moved` (+`city_captured` public) | ✅ |
+| M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; 士氣 0 → 潰散 +30% and retreat | `battle_field` public | ✅ |
+| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3:1** (no 器械 in MVP) | **assault only, single resolution** (ADR-010 #4): capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 | `battle_siege` public (+`city_captured`) | ✅ |
 | M4 | `massacre` | 屠城 | 0 | just captured a city | instant pacify; `民心 −30` perm, `威望 −20`, all factions' trust −35 | `city_massacred` public | ⏸ (designed §4.3/§7.3, missing from ch.11) |
-| — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ needs morale/supply |
+| — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ needs supply |
 | — | `ambush` | 設伏 | 1 | forest/hill | first-round dmg ×1.5, 敵士氣−20 | | ⏸ |
 | — | `raid_supply` / `cut_supply` | 劫糧 / 斷補 | 1 | 騎兵 | 補給−40 / 逃兵10%/季 | | ⏸ needs cavalry + supply |
 | — | `retreat` / `relieve` | 撤退 / 救援 | 1 | — | 士氣−10 / join ally battle (信任+20, 威望+8) | | ⏸ |
 
-## 5. 外交 Diplomacy — needs Trust (−100..+100 per ordered pair) + 威望 + Treaty model
+## 5. 外交 Diplomacy — `target_id` = a **seat** (never a hex); Trust (−100..+100 per ordered pair) + 威望 + Treaty model
 
 | # | id | 中文 | CP | Preconditions | Effect | Status |
 |---|---|---|---|---|---|---|
-| P1 | `send_message` | 遣使 | 0 | — | none (text logged) | 🎯 |
-| P2 | `propose_treaty` | 提出條約 | 0 | — | creates pending offer; `args.treaty_type` ∈ MVP {`nap` 互不侵犯， `alliance` 同盟， `truce` 停戰} | 🎯 (3 of 10 types) |
-| P3 | `respond_treaty` | 接受/拒絕/修改 | 0 | pending offer | `args.response` ∈ {`accept`,`reject`,`counter`} | 🎯 |
-| P4 | `gift` | 贈禮 | 1 | gold | per 1,000 金： 對方信任 +3, 自威望 +1 (§7.3) | 🎯 |
-| P5 | `declare_war` | 宣戰 | 1 | — | war state on; 威望 −5 | 🎯 |
-| P6 | `break_treaty` | 背盟/毀約 | 1 | treaty exists | 信任 −50 (停戰 −30), 威望 −15, 第三方 −15 (§7.3) | 🎯 |
+| P1 | `send_message` | 遣使 | 0 | — | none (text logged from the `text` field) | ✅ |
+| P2 | `propose_treaty` | 提出條約 | 0 | no same-type treaty in force and no offer pending with that seat | creates a pending offer; `args.treaty_type` ∈ {`nap` 互不侵犯， `alliance` 同盟， `truce` 停戰}, `args.duration` optional (default 6, clamped 1–12) | ✅ (3 of 10 types) |
+| P3 | `respond_treaty` | 接受/拒絕/修改 | 0 | pending offer **from** that seat | `args.response` ∈ {`accept`,`reject`,`counter`}; a counter needs `args.treaty_type` and replaces the offer with the reverse one | ✅ |
+| P4 | `gift` | 贈禮 | 1 | treasury gold ≥ 1,000 (`param_a` = amount) | per 1,000 金： 對方信任 +3, 自威望 +1 (§7.3) | ✅ |
+| P5 | `declare_war` | 宣戰 | 1 | not already at war | war state on; 威望 −5 | ✅ |
+| P6 | `break_treaty` | 背盟/毀約 | 1 | treaty of `args.treaty_type` in force | 信任 −50 (停戰 −30), 威望 −15, 第三方 −15 (§7.3); the treaty is removed | ✅ |
 | — | `demand_tribute` 索貢 / `trade` 通商 / `sever` 斷交 / `vassalize` 招降 / 聯姻 / 稱臣 / 割地 / 朝貢 / 借道 | | 1 | per §7 | per design | ⏸ |
-| — | `return_city` 歸還城池 / `sneak_attack` 偷襲 semantics | | — | — | trust +25/威望+10; 偷襲 = 未宣戰攻擊, 信任−40 威望−12 | ⏸ (derive from state, not separate action?) ❓ |
+| — | `return_city` 歸還城池 | | — | — | trust +25/威望+10 | ⏸ |
 
-**Timing ❓:** treaty effect immediately on acceptance, or next season? (OPEN_QUESTIONS #6)
+**Implemented command shapes — the LLM contract (ADR-012):**
+
+| action | `target_id` | params / args / text |
+|---|---|---|
+| `send_message` | recipient seat | `text` = the message |
+| `propose_treaty` | recipient seat | `args.treaty_type` ∈ `nap｜alliance｜truce`; `args.duration` (optional seasons) |
+| `respond_treaty` | **proposer** seat | `args.response` ∈ `accept｜reject｜counter` (+ `args.treaty_type`/`duration` when countering) |
+| `gift` | recipient seat | `param_a` = gold amount |
+| `declare_war` | seat | — |
+| `break_treaty` | seat | `args.treaty_type` |
+
+**Lifecycle ✅ (ADR-012):** propose → pending (visible to the two parties) → accept / reject / counter → at
+rollover unanswered offers **lapse** while accepted ones are **ratified** with
+`ExpirySeason = season + duration − 1`; treaties past that season expire. A ratified 停戰 ends the war.
+偷襲/背盟 stay derived from state at execution time (ADR-010 #7); 守約's +15/+5 is not implemented.
+
+**Timing ✅ (ADR-010 #5):** treaties take effect **next season** — proposals resolve at season rollover.
+Consequently 求和 (sue for peace) is the 停戰 proposal path, not a direct peace action (OPEN_QUESTIONS 16).
 
 ## 6. 諜報 Espionage — ⏸ ALL deferred post-MVP (needs Spy model + fog integration)
 
@@ -120,13 +140,14 @@ No CP cost stated in design ❓. Unlocks D9 屯田 (農政3), espionage (諜報1
 
 ## 9. State fields to add (MVP)
 
-| Model | Add | Used by |
+| Model | Add | Status |
 |---|---|---|
-| `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | D1/D2/D5-D7, M3 |
-| `FactionState` | `威望 (0-100, start 50 待決)` | P4-P6, D10 |
-| new | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set | §5 |
-| `GameState` | `Visibility` filter for observations (cities ±3, armies ±2) | fog, thesis |
-| 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | D1/D2/D7 |
+| `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | ✅ defaults in `BalanceConfig`, 民心 clamps 0–100 |
+| `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
+| `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |
+| `ArmyState` | `Morale (0-100, start 60 待決)` | ✅ P2: battle losses, 潰散 at 0, seasonal regrowth |
+| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011 |
+| 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | ✅ applied at season rollover; 民變 (design's <25) not implemented — OPEN_QUESTIONS 19 |
 
 ## 10. Decisions — LOCKED 2026-10-08 (recorded as ADR-010; team may supersede)
 

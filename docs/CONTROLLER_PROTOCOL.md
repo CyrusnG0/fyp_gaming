@@ -107,6 +107,8 @@ Handling rules:
 
 - `controller_type` on every action answers the thesis question directly from the log: *who was driving when this decision was made, and what happened next?*
 - `visibility` drives per-seat filtered observations; canonical state is never sent to any controller.
+- **Implemented event types (2026-10-08):** `season_start`, `season_end`, `city_resolved`, `starvation`, `action`, `action_rejected`, `tax_levied`, `labor_lightened`, `land_reclaimed`, `recruit`, `troops_trained`, `city_fortified`, `disaster_relieved`, `army_moved`, `city_captured`, `battle_field`, `battle_siege`, `army_routed`, `army_destroyed`, `war_declared`, `trust_changed`, `prestige_changed`, `message_sent`, `treaty_proposed`, `treaty_responded`, `treaty_lapsed`, `treaty_ratified`, `treaty_expired`, `treaty_broken`, `gift_sent`. Two-party events carry `to_seat_id`/`from_seat_id` in the payload — the three visibility values have no "both parties" case.
+- **Observation contract (ADR-011):** `GameEngine.Observe(seatId)` returns that seat's filtered world — own cities/armies in full, foreign ones only within 城市 ±3 / 軍隊 ±2 hexes of an own city/army (absent, not redacted, outside the radius), its own treaties and pending offers, and the filtered log (public · its own · addressed to it · `owner_and_observers` whose subject it can currently see). `Observation.ToJson()` is the payload the LLM adapter and HandoverBundle will carry; `ScriptedController` is the documented exception (a referee-grade baseline that reads canonical state).
 - Scripted-AI games with a fixed seed must replay bit-identical (ADR-005); LLM games replay identically up to LLM outputs, which are preserved in `LLMRun`s.
 
 ## 6. Delegation granularity (from design §12)
