@@ -534,8 +534,8 @@ namespace LuanShi
                 GUI.Label(new Rect(22, 84, 280, 80),
                     $"人口 {city.Population}\n糧食 {city.Food}\n金錢 {city.Gold}\n駐軍 {city.Garrison}", body);
                 var fac = engine.State.FindFaction(HumanSeat);
-                if (GUI.Button(new Rect(22, 172, 120, 34), "屯田", btn))
-                    SubmitHuman(new ActionCommand { Type = ActionType.Farm, TargetId = city.Id, Reason = "UI: farm order" });
+                if (GUI.Button(new Rect(22, 172, 120, 34), "開墾", btn))
+                    SubmitHuman(new ActionCommand { Type = ActionType.Reclaim, TargetId = city.Id, Reason = "UI: reclaim order" });
                 if (GUI.Button(new Rect(152, 172, 120, 34), "徵兵", btn))
                     SubmitHuman(new ActionCommand { Type = ActionType.Recruit, TargetId = city.Id, Reason = "UI: recruit order" });
             }
@@ -634,7 +634,7 @@ namespace LuanShi
 
             y += 10;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "已開放：屯田、徵兵 — 點選我方城池後，於左側城池面板下達命令。\n其餘行動待內政模組完成後陸續開放。", body);
+                "已開放：開墾、徵兵 — 點選我方城池後，於左側城池面板下達命令。\n其餘行動待內政模組完成後陸續開放。", body);
         }
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)

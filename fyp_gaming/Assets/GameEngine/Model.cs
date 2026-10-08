@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace LuanShi.Engine
 {
@@ -17,8 +18,22 @@ namespace LuanShi.Engine
         public string Name;            // 魏 / 蜀 / ...
         public string Controller;      // ControllerType.*
         public int CommandPoints;
+        public int Prestige = BalanceConfig.PrestigeStart;    // 威望, range PrestigeMin..PrestigeMax
 
         public bool IsHuman => Controller == ControllerType.Human;
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"seat_id\":").Append(MiniJson.Str(SeatId));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"controller_type\":").Append(MiniJson.Str(Controller));
+            sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
+            sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append('}');
+            return sb.ToString();
+        }
     }
 
     public sealed class CityState
@@ -31,9 +46,34 @@ namespace LuanShi.Engine
         public int Food;
         public int Gold;
         public int Garrison;
-        public bool FarmedThisSeason;
+        public bool ReclaimedThisSeason;
+        public int Morale = BalanceConfig.MoraleStart;          // 民心, range MoraleMin..MoraleMax
+        public int Defense = BalanceConfig.DefenseStart;        // 城防, range 0..DefenseMax
+        public int Training = BalanceConfig.TrainingStart;      // 練兵, range 0..TrainingMax
+        public int ReclaimPct = BalanceConfig.ReclaimPctStart;  // 開墾, range 0..ReclaimPctCap, scales food yield
 
         public bool IsNeutral => string.IsNullOrEmpty(OwnerSeatId);
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            sb.Append("\"id\":").Append(MiniJson.Str(Id));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append(",\"population\":").Append(MiniJson.Num(Population));
+            sb.Append(",\"food\":").Append(MiniJson.Num(Food));
+            sb.Append(",\"gold\":").Append(MiniJson.Num(Gold));
+            sb.Append(",\"garrison\":").Append(MiniJson.Num(Garrison));
+            sb.Append(",\"morale\":").Append(MiniJson.Num(Morale));
+            sb.Append(",\"defense\":").Append(MiniJson.Num(Defense));
+            sb.Append(",\"training\":").Append(MiniJson.Num(Training));
+            sb.Append(",\"reclaim_pct\":").Append(MiniJson.Num(ReclaimPct));
+            sb.Append('}');
+            return sb.ToString();
+        }
     }
 
     public sealed class ArmyState
@@ -112,12 +152,88 @@ namespace LuanShi.Engine
         }
     }
 
+    /// <summary>One treaty record (ACTIONS.md §5). Type ∈ nap 互不侵犯 | alliance 同盟 | truce 停戰.</summary>
+    public sealed class TreatyRecord
+    {
+        public string Type;
+        public string FactionA;        // seat id
+        public string FactionB;        // seat id
+        public int ExpirySeason;       // last season the treaty is in force
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"type\":").Append(MiniJson.Str(Type));
+            sb.Append(",\"faction_a\":").Append(MiniJson.Str(FactionA));
+            sb.Append(",\"faction_b\":").Append(MiniJson.Str(FactionB));
+            sb.Append(",\"expiry_season\":").Append(MiniJson.Num(ExpirySeason));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// 外交 state: per ordered-pair 信任, active treaties, and wars (ACTIONS.md §5, §9).
+    /// Everything is keyed by seat id, so nothing is sized by player count — seats enter
+    /// and leave through faction config, never through a hardcoded 3 or 8.
+    /// </summary>
+    public sealed class DiplomacyState
+    {
+        public readonly Dictionary<string, int> Trust = new Dictionary<string, int>();  // key: PairKey(from, to)
+        public readonly List<TreatyRecord> Treaties = new List<TreatyRecord>();
+        public readonly List<string> WarWith = new List<string>();                      // key: WarKey(a, b), unordered
+
+        /// <summary>Key of an ordered pair — 信任 is directional (A's view of B ≠ B's view of A).</summary>
+        public static string PairKey(string fromSeatId, string toSeatId) => fromSeatId + "|" + toSeatId;
+
+        /// <summary>Order-independent key, so a war between A and B is one fact rather than two.</summary>
+        public static string WarKey(string seatA, string seatB)
+            => string.CompareOrdinal(seatA, seatB) <= 0 ? seatA + "|" + seatB : seatB + "|" + seatA;
+
+        public int GetTrust(string fromSeatId, string toSeatId)
+            => Trust.TryGetValue(PairKey(fromSeatId, toSeatId), out int value) ? value : BalanceConfig.TrustStart;
+
+        public void SetTrust(string fromSeatId, string toSeatId, int value)
+            => Trust[PairKey(fromSeatId, toSeatId)] = Clamp(value, BalanceConfig.TrustMin, BalanceConfig.TrustMax);
+
+        public void AddTrust(string fromSeatId, string toSeatId, int delta)
+            => SetTrust(fromSeatId, toSeatId, GetTrust(fromSeatId, toSeatId) + delta);
+
+        public bool IsAtWar(string seatA, string seatB) => WarWith.Contains(WarKey(seatA, seatB));
+
+        public void DeclareWar(string seatA, string seatB)
+        {
+            string key = WarKey(seatA, seatB);
+            if (!WarWith.Contains(key)) WarWith.Add(key);
+        }
+
+        public void MakePeace(string seatA, string seatB) => WarWith.Remove(WarKey(seatA, seatB));
+
+        public string ToJson()
+        {
+            var treaties = new List<string>(Treaties.Count);
+            foreach (var t in Treaties) treaties.Add(t.ToJson());
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\"trust\":").Append(MiniJson.IntMap(Trust));
+            sb.Append(",\"treaties\":").Append(MiniJson.Array(treaties));
+            sb.Append(",\"war_with\":").Append(MiniJson.StrArray(WarWith));
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static int Clamp(int value, int min, int max)
+            => value < min ? min : value > max ? max : value;
+    }
+
     public sealed class GameState
     {
         public string GameId = "g-001";
         public int Season;                       // 1-based once the first season begins
         public string Phase = "setup";           // setup | player_orders | resolution
         public readonly List<FactionState> Factions = new List<FactionState>();
+        public readonly DiplomacyState Diplomacy = new DiplomacyState();
         public readonly List<CityState> Cities = new List<CityState>();
         public readonly List<ArmyState> Armies = new List<ArmyState>();
         public MapData Map;

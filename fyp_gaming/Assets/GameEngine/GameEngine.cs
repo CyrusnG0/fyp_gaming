@@ -32,7 +32,7 @@ namespace LuanShi.Engine
             State.Season++;
             State.Phase = "player_orders";
             foreach (var f in State.Factions) f.CommandPoints = BalanceConfig.CommandPointsPerSeason;
-            foreach (var c in State.Cities) c.FarmedThisSeason = false;
+            foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
             Emit(null, null, "season_start", "public", P("season", State.Season.ToString()), null);
         }
@@ -48,10 +48,16 @@ namespace LuanShi.Engine
                 if (city.IsNeutral) continue;
                 var fac = State.FindFaction(city.OwnerSeatId);
 
-                int taxes = (int)(city.Population * BalanceConfig.TaxGoldPerPop);
+                // 民心 below the threshold halves both yields (ADR-010, LOCKED).
+                bool disheartened = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold;
+                float yieldFactor = disheartened ? 1f - BalanceConfig.MoraleYieldPenalty : 1f;
+
+                int taxes = (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor);
                 city.Gold += taxes;
 
-                city.Food += BalanceConfig.CityBaseFoodYield;
+                int harvest = (int)(BalanceConfig.CityBaseFoodYield
+                                  * (1f + city.ReclaimPct / 100f) * yieldFactor);
+                city.Food += harvest;
                 int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
                                 + city.Garrison * BalanceConfig.FoodPerGarrisonTroop);
                 city.Food -= eaten;
@@ -73,12 +79,15 @@ namespace LuanShi.Engine
                     city.Population += (int)(city.Population * rate);
                 }
 
-                report.Lines.Add($"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}"
+                report.Lines.Add($"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}，民心{city.Morale}"
+                               + (disheartened ? $"（民心<{BalanceConfig.MoraleYieldPenaltyThreshold}，產出減半）" : "")
                                + (note != null ? $"。{note}" : ""));
                 Emit(city.OwnerSeatId, fac?.Controller, "city_resolved", "owner_and_observers",
                     P("city_id", city.Id, "pop", city.Population.ToString(),
                       "food", city.Food.ToString(), "gold", city.Gold.ToString(),
-                      "garrison", city.Garrison.ToString()), null);
+                      "garrison", city.Garrison.ToString(),
+                      "morale", city.Morale.ToString(),
+                      "reclaim_pct", city.ReclaimPct.ToString()), null);
             }
 
             Emit(null, null, "season_end", "public", P("season", State.Season.ToString()), null);
@@ -96,13 +105,14 @@ namespace LuanShi.Engine
             var fac = State.FindFaction(cmd.ActorSeatId);
             if (fac == null) return Reject(cmd, $"unknown seat '{cmd.ActorSeatId}'");
             cmd.ControllerType = fac.Controller;
+            if (cmd.Type == ActionType.Farm) cmd.Type = ActionType.Reclaim;   // legacy alias
             if (State.Phase != "player_orders") return Reject(cmd, $"not in orders phase ({State.Phase})");
             if (fac.CommandPoints <= 0) return Reject(cmd, "no command points left");
 
             ValidationResult r;
             switch (cmd.Type)
             {
-                case ActionType.Farm: r = DoFarm(fac, cmd); break;
+                case ActionType.Reclaim: r = DoReclaim(fac, cmd); break;
                 case ActionType.Recruit: r = DoRecruit(fac, cmd); break;
                 case ActionType.March: r = DoMarch(fac, cmd); break;
                 default: r = ValidationResult.Fail($"unknown action type '{cmd.Type}'"); break;
@@ -114,21 +124,27 @@ namespace LuanShi.Engine
             Emit(fac.SeatId, fac.Controller, "action", "public",
                 P("action", cmd.Type, "target_id", cmd.TargetId ?? "",
                   "param_a", cmd.ParamA.ToString(), "param_b", cmd.ParamB.ToString(),
-                  "reason", cmd.Reason ?? ""), cmd.ActionId);
+                  "reason", cmd.Reason ?? ""), cmd.ActionId, cmd.Args, cmd.Text);
             return r;
         }
 
-        private ValidationResult DoFarm(FactionState fac, ActionCommand cmd)
+        /// <summary>D3 開墾: +ReclaimPctPerUse food yield, cumulative up to ReclaimPctCap.</summary>
+        private ValidationResult DoReclaim(FactionState fac, ActionCommand cmd)
         {
             var city = State.FindCity(cmd.TargetId);
             if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
             if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("not your city");
-            if (city.FarmedThisSeason) return ValidationResult.Fail("city already farmed this season");
+            if (city.ReclaimedThisSeason) return ValidationResult.Fail("city already reclaimed this season");
+            if (city.ReclaimPct >= BalanceConfig.ReclaimPctCap)
+                return ValidationResult.Fail($"land fully reclaimed (cap {BalanceConfig.ReclaimPctCap}%)");
 
-            city.FarmedThisSeason = true;
-            city.Food += BalanceConfig.FarmFoodYield;
-            Emit(fac.SeatId, fac.Controller, "farm", "owner_and_observers",
-                P("city_id", city.Id, "food_gained", BalanceConfig.FarmFoodYield.ToString()), cmd.ActionId);
+            int gained = Math.Min(BalanceConfig.ReclaimPctPerUse,
+                                  BalanceConfig.ReclaimPctCap - city.ReclaimPct);
+            city.ReclaimPct += gained;
+            city.ReclaimedThisSeason = true;
+            Emit(fac.SeatId, fac.Controller, "land_reclaimed", "owner_and_observers",
+                P("city_id", city.Id, "gain_pct", gained.ToString(),
+                  "reclaim_pct", city.ReclaimPct.ToString()), cmd.ActionId);
             return ValidationResult.Success;
         }
 
@@ -191,14 +207,15 @@ namespace LuanShi.Engine
         private ValidationResult Reject(ActionCommand cmd, string why)
         {
             Emit(cmd?.ActorSeatId, cmd?.ControllerType, "action_rejected", "owner_only",
-                P("action", cmd?.Type ?? "", "reason", why), cmd?.ActionId);
+                P("action", cmd?.Type ?? "", "reason", why), cmd?.ActionId, cmd?.Args, cmd?.Text);
             return ValidationResult.Fail(why);
         }
 
         private EventRecord Emit(string seatId, string controller, string type,
-            string visibility, Dictionary<string, string> payload, string sourceActionId)
+            string visibility, Dictionary<string, string> payload, string sourceActionId,
+            Dictionary<string, string> args = null, string text = null)
             => Log.Emit(State.GameId, State.Season, State.Phase, seatId, controller, type,
-                        visibility, payload, sourceActionId);
+                        visibility, payload, sourceActionId, args, text);
 
         private static Dictionary<string, string> P(params string[] kv)
         {

@@ -16,6 +16,8 @@ namespace LuanShi.Engine
         public string Visibility;                 // "public" | "owner_and_observers" | "owner_only"
         public Dictionary<string, string> Payload = new Dictionary<string, string>();
         public string SourceActionId;
+        public Dictionary<string, string> Args;   // schema v2 command extras (ACTIONS.md §1); null when absent
+        public string Text;                       // schema v2 command free text; null when absent
 
         public string ToJson()
         {
@@ -31,6 +33,8 @@ namespace LuanShi.Engine
             sb.Append(",\"visibility\":").Append(MiniJson.Str(Visibility));
             sb.Append(",\"payload\":").Append(MiniJson.Dict(Payload));
             sb.Append(",\"source_action_id\":").Append(MiniJson.Str(SourceActionId));
+            if (Args != null) sb.Append(",\"args\":").Append(MiniJson.Dict(Args));
+            if (Text != null) sb.Append(",\"text\":").Append(MiniJson.Str(Text));
             sb.Append('}');
             return sb.ToString();
         }
@@ -50,7 +54,8 @@ namespace LuanShi.Engine
 
         public EventRecord Emit(string gameId, int season, string phase,
             string actorSeatId, string controllerType, string eventType,
-            string visibility, Dictionary<string, string> payload, string sourceActionId)
+            string visibility, Dictionary<string, string> payload, string sourceActionId,
+            Dictionary<string, string> args = null, string text = null)
         {
             var r = new EventRecord
             {
@@ -64,6 +69,8 @@ namespace LuanShi.Engine
                 Visibility = visibility,
                 Payload = payload ?? new Dictionary<string, string>(),
                 SourceActionId = sourceActionId,
+                Args = args,
+                Text = text,
             };
             records.Add(r);
             return r;

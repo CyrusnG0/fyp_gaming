@@ -1,4 +1,4 @@
-# ACTIONS.md — Canonical Action Spec (DRAFT v1, awaiting team sign-off)
+# ACTIONS.md — Canonical Action Spec (v1, decisions locked 2026-10-08 per ADR-010)
 
 > **Purpose.** One canonical catalog of every action a seat can take, with exact costs,
 > preconditions, and state effects. **Human UI buttons and LLM JSON emit the exact same
@@ -126,16 +126,16 @@ No CP cost stated in design ❓. Unlocks D9 屯田 (農政3), espionage (諜報1
 | `FactionState` | `威望 (0-100, start 50 待決)` | P4-P6, D10 |
 | new | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set | §5 |
 | `GameState` | `Visibility` filter for observations (cities ±3, armies ±2) | fog, thesis |
-| 待決 consequence | 民心 effect: propose 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) ❓ | D1/D2/D7 |
+| 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | D1/D2/D7 |
 
-## 10. Decisions needed from the team (add to OPEN_QUESTIONS on approval)
+## 10. Decisions — LOCKED 2026-10-08 (recorded as ADR-010; team may supersede)
 
-1. CP per season: design says **5**, demo used 3 → recommend **5**.
-2. `farm` → rename to `reclaim` with +15%/cap+60% semantics (D3); 屯田 deferred (D9).
-3. MVP tier approval: D1-D7, M1-M3, P1-P6, fog observations, control switch. Espionage,
-   research, buildings, generals, morale/supply → phase 2.
-4. 攻城 MVP: assault-only (single resolution) or full per-season siege?
-5. Treaty timing: immediate vs next-season.
-6. 民心 consequence rule (proposal in §9).
-7. 偷襲/背盟: derived reputation penalties from state (attacking without war / attacking
-   an ally) rather than separate actions — confirm.
+1. CP per season: **5** (design doc value; demo's 3 superseded).
+2. `farm` → renamed **`reclaim`**, +15% yield per use, cap +60% (D3); 屯田 deferred (D9).
+3. MVP tier locked: **D1-D7, M1-M3, P1-P6, fog observations, control switch.** Espionage,
+   research, buildings, generals, supply → phase 2.
+4. 攻城 MVP: **assault-only**, single resolution on the season it's launched.
+5. Treaty timing: **takes effect next season** (proposals resolve at season rollover).
+6. 民心 consequence: **民心<30 → city yields −50%** (LOCKED, see §9).
+7. 偷襲/背盟: **derived, not separate actions** — attacking without a declared war or
+   attacking an ally applies reputation/trust penalties computed from state at execution time.

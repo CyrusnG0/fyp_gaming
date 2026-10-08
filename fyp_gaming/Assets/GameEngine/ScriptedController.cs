@@ -19,14 +19,14 @@ namespace LuanShi.Engine
             int cp = fac.CommandPoints;
             var cities = state.CitiesOf(seatId);
 
-            // 屯田: farm every city that hasn't farmed yet.
+            // 開墾: reclaim every city that hasn't reclaimed yet.
             foreach (var city in cities)
             {
                 if (cp <= 0) break;
-                if (city.FarmedThisSeason) continue;
+                if (city.ReclaimedThisSeason) continue;
                 plan.Add(new ActionCommand
                 {
-                    Type = ActionType.Farm,
+                    Type = ActionType.Reclaim,
                     ActorSeatId = seatId,
                     ControllerType = ControllerType.ScriptedAi,
                     TargetId = city.Id,
