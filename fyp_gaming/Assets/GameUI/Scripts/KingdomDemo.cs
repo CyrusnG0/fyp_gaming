@@ -22,8 +22,9 @@ namespace LuanShi
         public string southCityObj = "City_South";
         public string weiArmyObj = "Wei_Army1";
         public string shuArmyObj = "Shu_Army1";
-        public string[] unusedArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
-                                           "Shu_Army2", "Shu_Army3", "Shu_Army4" };
+        [UnityEngine.FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
+        public string[] extraArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
+                                          "Shu_Army2", "Shu_Army3", "Shu_Army4" };
 
         [Header("Game setup")]
         public int randomSeed = 12345;
@@ -40,6 +41,15 @@ namespace LuanShi
         private const string SeatA = "seat-0";     // 魏 — scene roster, not "the human"
         private const string SeatB = "seat-1";     // 蜀
 
+        // panel & marker art: the demo skin's GUI.Box is see-through, so panels get their own
+        // opaque plate first (smoke-test finding); markers get a runtime tinted material.
+        private static readonly Color PanelColor = new Color(0.12f, 0.12f, 0.14f, 1f);
+        private static readonly Color NeutralColor = new Color(0.85f, 0.82f, 0.75f);
+        private static readonly Vector3 FallbackMarkerScale = new Vector3(0.7f, 0.28f, 0.7f);
+        private const float ReportLineHeight = 20f;
+        private const float ReportTextMaxHeight = 300f;
+        private const float HistorianViewMaxHeight = 300f;
+
         // hotseat state (CONTROLLER_PROTOCOL §2: each seat takes one ordered turn per season)
         private string currentSeat;                // whose turn the UI is showing right now
         private bool handoverShowing;              // full-screen blocker between human seats
@@ -49,6 +59,7 @@ namespace LuanShi
         private readonly Dictionary<string, GameObject> cityObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, GameObject> armyObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, Color> factionColors = new Dictionary<string, Color>();
+        private readonly Dictionary<Color, Material> markerMaterials = new Dictionary<Color, Material>();
 
         // selection & UI state
         private CityState selCity;
@@ -59,6 +70,7 @@ namespace LuanShi
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
         private string envoyText = "";        // 遣使 draft for the 外交 tab (never sent automatically)
+        private Vector2 reportScroll;         // 朝報 scroll offset when a season outruns its panel
 
         // concept tabs: 地圖 is the live view, the rest preview the full design
         // (doc/LuanShi-Game-Design-v1.md). 內政/外交 are live, 諜報/研究 previews, 史官 renders real data.
@@ -165,7 +177,7 @@ namespace LuanShi
 
             AddArmy(weiArmyObj, "army-wei-1", "魏軍", SeatA);
             AddArmy(shuArmyObj, "army-shu-1", "蜀軍", SeatB);
-            foreach (var name in unusedArmyObjs)
+            foreach (var name in extraArmyObjs)
             {
                 var go = FindSceneObject(name);
                 if (go == null || !go.activeInHierarchy) continue;
@@ -197,7 +209,8 @@ namespace LuanShi
 
         void AddCity(string objName, string id, string displayName, string ownerSeat)
         {
-            var go = FindOrCreateMarker(objName, id == "city-wei" ? 2 : id == "city-shu" ? 9 : 6, id == "city-wei" ? 2 : id == "city-shu" ? 6 : 4);
+            var go = FindOrCreateMarker(objName, id == "city-wei" ? 2 : id == "city-shu" ? 9 : 6,
+                                        id == "city-wei" ? 2 : id == "city-shu" ? 6 : 4, ownerSeat);
             if (go == null) throw new System.Exception("scene object missing: " + objName);
             var node = TBTK.GridManager.GetNode(go.transform.position, null);
             if (node == null) throw new System.Exception(objName + " is not on a grid node");
@@ -227,7 +240,7 @@ namespace LuanShi
 
         void AddArmy(string objName, string id, string displayName, string ownerSeat)
         {
-            var go = FindOrCreateMarker(objName, id == "army-wei-1" ? 2 : 9, id == "army-wei-1" ? 3 : 5);
+            var go = FindOrCreateMarker(objName, id == "army-wei-1" ? 2 : 9, id == "army-wei-1" ? 3 : 5, ownerSeat);
             if (go == null) throw new System.Exception("scene object missing: " + objName);
             if (!go.activeInHierarchy)
             {
@@ -250,7 +263,12 @@ namespace LuanShi
             armyObjs[id] = go;
         }
 
-        GameObject FindOrCreateMarker(string objName, int x, int z)
+        /// <summary>
+        /// The scene object if the scene has one, otherwise a runtime marker: a flat, faction-coloured
+        /// disc. The smoke test found plain grey cylinders where the scene has no object yet (all of 蜀
+        /// today), which read as debris — the marker now carries its owner's colour from the start.
+        /// </summary>
+        GameObject FindOrCreateMarker(string objName, int x, int z, string ownerSeat)
         {
             var go = FindSceneObject(objName);
             if (go != null) return go;
@@ -265,7 +283,14 @@ namespace LuanShi
             go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = objName;
             go.transform.position = node.GetPos();
-            go.transform.localScale = new Vector3(0.45f, 0.2f, 0.45f);
+            go.transform.localScale = FallbackMarkerScale;
+
+            var marker = go.GetComponentInChildren<MeshRenderer>();
+            if (marker != null)
+            {
+                var material = MarkerMaterial(OwnerColor(ownerSeat));
+                if (material != null) marker.sharedMaterial = material;
+            }
             return go;
         }
 
@@ -276,13 +301,49 @@ namespace LuanShi
             return null;
         }
 
+        /// <summary>Faction colour, neutral grey for unowned ground (ADR-008 palette).</summary>
+        Color OwnerColor(string seatId)
+            => seatId != null && factionColors.TryGetValue(seatId, out var color) ? color : NeutralColor;
+
+        /// <summary>
+        /// One runtime material per colour, cached, so a fallback marker shows its owner's colour.
+        /// Tries URP first (this project renders URP), then built-in unlit — no material assets added.
+        /// </summary>
+        Material MarkerMaterial(Color color)
+        {
+            if (markerMaterials.TryGetValue(color, out var cached)) return cached;
+
+            Material material = null;
+            foreach (var shaderName in new[] { "Universal Render Pipeline/Unlit", "Unlit/Color", "Sprites/Default" })
+            {
+                var shader = Shader.Find(shaderName);
+                if (shader == null) continue;
+                material = new Material(shader);
+                break;
+            }
+            if (material == null) return null;
+
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);   // URP/Unlit
+            if (material.HasProperty("_Color")) material.SetColor("_Color", color);           // built-in
+            markerMaterials[color] = material;
+            return material;
+        }
+
         void TintCity(string cityId)
         {
             var city = engine.State.FindCity(cityId);
-            var sr = cityObjs[cityId].GetComponentInChildren<SpriteRenderer>();
-            if (sr == null) return;
-            sr.color = city.OwnerSeatId != null && factionColors.TryGetValue(city.OwnerSeatId, out var c)
-                ? c : new Color(0.85f, 0.82f, 0.75f);
+            if (city == null) return;
+            var color = OwnerColor(city.OwnerSeatId);
+
+            var go = cityObjs[cityId];
+            var sprite = go.GetComponentInChildren<SpriteRenderer>();
+            if (sprite != null) { sprite.color = color; return; }
+
+            // the runtime fallback marker is a mesh, not a sprite
+            var marker = go.GetComponentInChildren<MeshRenderer>();
+            if (marker == null) return;
+            var material = MarkerMaterial(color);
+            if (material != null) marker.sharedMaterial = material;
         }
 
         // ------------------------------------------------------------------ input
@@ -671,6 +732,7 @@ namespace LuanShi
         void CloseReport()
         {
             reportShowing = false;
+            reportScroll = Vector2.zero;
             statusMsg = SeatTurnPrompt();
         }
 
@@ -710,7 +772,7 @@ namespace LuanShi
             // top bar
             var top = new Rect(10, 8, 1000, 34);
             uiRects.Add(top);
-            GUI.Box(top, GUIContent.none);
+            DrawBackdrop(top);
             GUI.Label(new Rect(22, 12, 980, 28),
                 $"第 {engine.State.Season} 季 · {fac.Name}（{(hotseat ? currentSeat + " · 玩家" : "玩家")}）" +
                 $" · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
@@ -745,7 +807,7 @@ namespace LuanShi
             // status + JSON command feed (the FYP artifact: UI clicks == LLM JSON)
             var feed = new Rect(10, 800, 1100, 92);
             uiRects.Add(feed);
-            GUI.Box(feed, GUIContent.none);
+            DrawBackdrop(feed);
             GUI.Label(new Rect(20, 804, 1080, 22), statusMsg, body);
             for (int i = 0; i < jsonFeed.Count; i++)
                 GUI.Label(new Rect(20, 826 + i * 16, 1080, 16), jsonFeed[i], mono);
@@ -754,6 +816,20 @@ namespace LuanShi
             if (reportShowing) DrawReport(body, btn, title);
 
             HandleClicks();
+        }
+
+        /// <summary>
+        /// Opaque plate behind a panel or modal. This skin's GUI.Box renders see-through, so map sprites
+        /// bled through and collided with panel text (smoke-test finding): plate the rect in solid
+        /// charcoal first and keep the box for its border. Every modal and side panel goes through here.
+        /// </summary>
+        void DrawBackdrop(Rect r)
+        {
+            var prev = GUI.color;
+            GUI.color = PanelColor;
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = prev;
+            GUI.Box(r, GUIContent.none);
         }
 
         /// <summary>
@@ -775,6 +851,7 @@ namespace LuanShi
                 return;
             }
 
+            // fully opaque (alpha 1) — the map, panels and report are all skipped while this is up
             var prevColor = GUI.color;
             GUI.color = new Color(0.07f, 0.07f, 0.09f, 1f);
             GUI.DrawTexture(new Rect(0, 0, 1600, 900), Texture2D.whiteTexture);
@@ -791,7 +868,7 @@ namespace LuanShi
             bool mine = city.OwnerSeatId == currentSeat;
             var p = new Rect(10, 50, 300, mine ? 400 : 120);
             uiRects.Add(p);
-            GUI.Box(p, GUIContent.none);
+            DrawBackdrop(p);
             GUI.Label(new Rect(22, 58, 280, 24), $"{city.Name}（{OwnerName(city)}）", body);
 
             if (mine)
@@ -860,7 +937,7 @@ namespace LuanShi
 
             var p = new Rect(10, 50, 300, orders > 0 ? 236 + orders * 38 : 150);
             uiRects.Add(p);
-            GUI.Box(p, GUIContent.none);
+            DrawBackdrop(p);
             GUI.Label(new Rect(22, 58, 280, 24), $"{army.Name} · 兵力 {army.Troops}", body);
             GUI.Label(new Rect(22, 86, 280, 66),
                 $"位置 ({army.X}, {army.Z})\n士氣 {army.Morale}\n" +
@@ -915,14 +992,32 @@ namespace LuanShi
 
         void DrawReport(GUIStyle body, GUIStyle btn, GUIStyle title)
         {
-            var p = new Rect(400, 150, 800, 420);
+            // the panel hugs its lines (capped at the old 420-tall size) instead of a fixed 800×420,
+            // and scrolls when a season was busier than the cap
+            int lines = System.Math.Max(1, reportLines.Count - 1);
+            float textHeight = System.Math.Min(ReportTextMaxHeight, lines * ReportLineHeight);
+            var p = new Rect(400, 150, 800, 116f + textHeight);
             uiRects.Add(p);
-            GUI.Box(p, GUIContent.none);
+            DrawBackdrop(p);
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), reportLines.Count > 0 ? reportLines[0] : "", title);
+
             var sb = new StringBuilder();
             for (int i = 1; i < reportLines.Count; i++) sb.AppendLine(reportLines[i]);
-            GUI.Label(new Rect(p.x + 20, p.y + 50, 760, 300), sb.ToString(), body);
-            if (GUI.Button(new Rect(p.x + 330, p.y + 360, 140, 40), "繼續", btn)) CloseReport();
+
+            var view = new Rect(p.x + 20, p.y + 50, 760, textHeight);
+            float contentHeight = lines * ReportLineHeight + 4f;
+            if (contentHeight > textHeight)
+            {
+                reportScroll = GUI.BeginScrollView(view, reportScroll, new Rect(0, 0, 740, contentHeight), false, true);
+                GUI.Label(new Rect(0, 0, 736, contentHeight), sb.ToString(), body);
+                GUI.EndScrollView();
+            }
+            else
+            {
+                GUI.Label(new Rect(view.x, view.y, 760, textHeight + 8f), sb.ToString(), body);
+            }
+
+            if (GUI.Button(new Rect(p.x + 330, p.y + 50 + textHeight + 14, 140, 40), "繼續", btn)) CloseReport();
         }
 
         // ------------------------------------------------------------ concept tabs
@@ -1028,7 +1123,7 @@ namespace LuanShi
         {
             var p = new Rect(400, 190, 800, 480);
             uiRects.Add(p);
-            GUI.Box(p, GUIContent.none);
+            DrawBackdrop(p);
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
 
             switch (activeTab)
@@ -1326,14 +1421,17 @@ namespace LuanShi
                 $"（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
 
             float lineH = 18f;
-            var view = new Rect(p.x + 20, p.y + 80, 760, 300);
-            var content = new Rect(0, 0, 744, Mathf.Max(view.height, records.Count * lineH + 8f));
-            historianScroll = GUI.BeginScrollView(view, historianScroll, content, false, true);
+            // hug the chronicle: the scroll view is as tall as its content, capped at the old height
+            float contentHeight = records.Count * lineH + 8f;
+            float viewHeight = Mathf.Min(HistorianViewMaxHeight, contentHeight);
+            var view = new Rect(p.x + 20, p.y + 80, 760, viewHeight);
+            historianScroll = GUI.BeginScrollView(view, historianScroll,
+                                                  new Rect(0, 0, 744, contentHeight), false, true);
             for (int i = 0; i < records.Count; i++)
                 GUI.Label(new Rect(4, 4 + i * lineH, 736, lineH), HistorianLine(records[i]), mono);
             GUI.EndScrollView();
 
-            GUI.Label(new Rect(p.x + 20, p.y + 388, 760, 22),
+            GUI.Label(new Rect(p.x + 20, p.y + 80 + viewHeight + 12, 760, 22),
                 $"史官記：本季共錄得 {CountSeasonEvents(engine.State.Season)} 事。", body);
         }
 
