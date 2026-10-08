@@ -936,6 +936,94 @@ namespace LuanShi
             activeTab = key;
         }
 
+        // ---- test hooks -------------------------------------------------------
+        // The smoke-test harness drives the running game through Unity's SendMessage, which can only
+        // reach public methods with at most one argument. These two hooks exist only for that: they do
+        // the same things a mouse would, nothing more.
+
+        /// <summary>
+        /// Test hook. Selects <c>"city:&lt;id&gt;"</c> or <c>"army:&lt;id&gt;"</c> exactly as a map
+        /// click would, fog included: anything the current seat cannot see is refused, and a foreign
+        /// army cannot be selected (only its own panel exists).
+        /// </summary>
+        public void DebugSelect(string kindAndId)
+        {
+            if (!ready || string.IsNullOrEmpty(kindAndId)) return;
+
+            int split = kindAndId.IndexOf(':');
+            if (split <= 0) return;
+            string kind = kindAndId.Substring(0, split);
+            string id = kindAndId.Substring(split + 1);
+
+            if (kind == "city")
+            {
+                var city = obs != null ? obs.FindCity(id) : null;          // fog rules apply
+                if (city == null)
+                {
+                    statusMsg = $"DebugSelect: city '{id}' is not visible to {currentSeat}";
+                    return;
+                }
+                ClearArmyMoveTargets();
+                selCity = city;
+                selArmy = null;
+                statusMsg = city.OwnerSeatId == currentSeat ? "已選擇 " + city.Name
+                    : city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市";
+                return;
+            }
+
+            if (kind == "army")
+            {
+                var army = obs != null ? obs.FindArmy(id) : null;
+                if (army == null)
+                {
+                    statusMsg = $"DebugSelect: army '{id}' is not visible to {currentSeat}";
+                    return;
+                }
+                if (army.OwnerSeatId != currentSeat)
+                {
+                    statusMsg = $"DebugSelect: '{id}' is not {currentSeat}'s army";
+                    return;
+                }
+                selArmy = army;
+                selCity = null;
+                TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
+                ShowArmyMoveTargets(army);
+                statusMsg = "已選擇 " + army.Name + " — 點選目的地";
+            }
+        }
+
+        /// <summary>
+        /// Test hook. Submits <c>"&lt;action_type&gt;|&lt;target_id&gt;"</c>, with an optional third
+        /// segment <c>"x,z"</c> for the hex-parameterised actions (<c>march</c>, <c>attack_army</c>,
+        /// <c>attack_city</c>), e.g. <c>"march|army-wei-1|4,3"</c>. Goes through the same
+        /// <see cref="SubmitHuman"/> path as the buttons, so the engine validates it identically.
+        /// </summary>
+        public void DebugOrder(string spec)
+        {
+            if (!ready || string.IsNullOrEmpty(spec)) return;
+
+            string[] parts = spec.Split('|');
+            if (parts.Length < 2 || string.IsNullOrEmpty(parts[0])) return;
+
+            var cmd = new ActionCommand
+            {
+                Type = parts[0].Trim(),
+                TargetId = parts[1].Trim(),
+                Reason = "debug hook",
+            };
+            if (parts.Length > 2)
+            {
+                string[] coords = parts[2].Split(',');
+                if (coords.Length == 2
+                    && int.TryParse(coords[0], out int x) && int.TryParse(coords[1], out int z))
+                {
+                    cmd.ParamA = x;
+                    cmd.ParamB = z;
+                }
+            }
+            SubmitHuman(cmd);
+        }
+
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
             var p = new Rect(400, 190, 800, 480);
@@ -1246,7 +1334,7 @@ namespace LuanShi
             GUI.EndScrollView();
 
             GUI.Label(new Rect(p.x + 20, p.y + 388, 760, 22),
-                $"史官記：本季共錄得 {CountSeasonEvents()} 事。", body);
+                $"史官記：本季共錄得 {CountSeasonEvents(engine.State.Season)} 事。", body);
         }
 
         string HistorianLine(EventRecord rec)
