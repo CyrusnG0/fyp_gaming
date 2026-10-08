@@ -49,6 +49,7 @@ namespace LuanShi
         private static readonly Vector3 FallbackMarkerScale = new Vector3(0.7f, 0.28f, 0.7f);
         private const float ReportLineHeight = 20f;
         private const float ReportTextMaxHeight = 300f;
+        private const float HistorianLineHeight = 18f;
         private const float HistorianViewMaxHeight = 300f;
 
         // hotseat state (CONTROLLER_PROTOCOL §2: each seat takes one ordered turn per season)
@@ -89,16 +90,24 @@ namespace LuanShi
 
         // ------------------------------------------------------------------ setup
 
-        void Awake()
+        /// <summary>
+        /// Frame 1, synchronous — deliberately not a coroutine. The demo used to disable TBTK and
+        /// initialise one frame later (<c>yield return null</c>), but an unfocused editor window never
+        /// delivers that second frame, so the demo silently never initialised (smoke-test finding #3).
+        ///
+        /// Ordering replaces the delay, guaranteed by [DefaultExecutionOrder(-100)] on this class:
+        /// <list type="number">
+        /// <item>every Awake has already run, so TBTK's grid exists — GameControl.Awake calls
+        /// GridManager.Init (Assets/TBTK/Scripts/GameControl.cs:67);</item>
+        /// <item>disabling GameControl here, before its own Start is reached, keeps that grid but stops
+        /// GameControl.Start — the 0.5s tactical flow whose last act, TBTK.OnGameStart(), is what would
+        /// switch the tactical UI back on (GameControl.cs:103);</item>
+        /// <item>the TBTK UI objects are hidden after their own Awake has run, so the static singletons
+        /// the still-enabled TBTK code may touch are already set.</item>
+        /// </list>
+        /// </summary>
+        void Start()
         {
-        }
-
-        System.Collections.IEnumerator Start()
-        {
-            // Let TBTK's Awake methods initialize the serialized grid before replacing
-            // its tactical flow with the kingdom controller.
-            yield return null;
-
             var gc = FindAnyObjectByType<TBTK.GameControl>();
             if (gc != null) gc.enabled = false;
 
@@ -1006,10 +1015,12 @@ namespace LuanShi
             for (int i = 1; i < reportLines.Count; i++) sb.AppendLine(reportLines[i]);
 
             var view = new Rect(p.x + 20, p.y + 50, 760, textHeight);
-            float contentHeight = lines * ReportLineHeight + 4f;
-            if (contentHeight > textHeight)
+            // scroll only when the cap actually bites, and without a permanently visible scrollbar
+            if (lines * ReportLineHeight > textHeight)
             {
-                reportScroll = GUI.BeginScrollView(view, reportScroll, new Rect(0, 0, 740, contentHeight), false, true);
+                float contentHeight = lines * ReportLineHeight + 4f;
+                reportScroll = GUI.BeginScrollView(view, reportScroll,
+                                                   new Rect(0, 0, 744, contentHeight), false, false);
                 GUI.Label(new Rect(0, 0, 736, contentHeight), sb.ToString(), body);
                 GUI.EndScrollView();
             }
@@ -1122,7 +1133,8 @@ namespace LuanShi
 
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
-            var p = new Rect(400, 190, 800, 480);
+            float height = TabPanelHeight();
+            var p = new Rect(400, 190, 800, height);
             uiRects.Add(p);
             DrawBackdrop(p);
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
@@ -1136,8 +1148,21 @@ namespace LuanShi
                 default:          DrawHistorianPanel(p, body, mono); break;
             }
 
-            if (GUI.Button(new Rect(p.x + 320, p.y + 424, 160, 40), "關閉", btn)) activeTab = "map";
+            // pinned to the panel bottom, so a content-sized panel keeps its button inside
+            if (GUI.Button(new Rect(p.x + 320, p.y + height - 56, 160, 40), "關閉", btn)) activeTab = "map";
         }
+
+        /// <summary>
+        /// Panel height per tab: the design previews keep the full shell; the 史官 chronicle hugs its
+        /// contents (capped) so a two-record log does not open an 80%-empty box.
+        /// </summary>
+        float TabPanelHeight()
+            => activeTab == "history" ? 178f + HistorianViewHeight() : 480f;
+
+        /// <summary>Height of the 史官 scroll view for the current seat: content-sized, capped.</summary>
+        float HistorianViewHeight()
+            => Mathf.Min(HistorianViewMaxHeight,
+                         (obs != null ? obs.Events.Count : 1) * HistorianLineHeight + 8f);
 
         string TabTitle()
         {
@@ -1421,15 +1446,16 @@ namespace LuanShi
                 $"本局史書（{engine.State.FindFaction(currentSeat)?.Name} 可見）— 共 {records.Count} 條" +
                 $"（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
 
-            float lineH = 18f;
-            // hug the chronicle: the scroll view is as tall as its content, capped at the old height
-            float contentHeight = records.Count * lineH + 8f;
-            float viewHeight = Mathf.Min(HistorianViewMaxHeight, contentHeight);
+            // hug the chronicle: the scroll view is as tall as its content (capped), and the
+            // scrollbar only appears when the cap actually bites
+            float viewHeight = HistorianViewHeight();
+            float contentHeight = records.Count * HistorianLineHeight + 8f;
             var view = new Rect(p.x + 20, p.y + 80, 760, viewHeight);
             historianScroll = GUI.BeginScrollView(view, historianScroll,
-                                                  new Rect(0, 0, 744, contentHeight), false, true);
+                                                  new Rect(0, 0, 744, contentHeight), false, false);
             for (int i = 0; i < records.Count; i++)
-                GUI.Label(new Rect(4, 4 + i * lineH, 736, lineH), HistorianLine(records[i]), mono);
+                GUI.Label(new Rect(4, 4 + i * HistorianLineHeight, 736, HistorianLineHeight),
+                          HistorianLine(records[i]), mono);
             GUI.EndScrollView();
 
             GUI.Label(new Rect(p.x + 20, p.y + 80 + viewHeight + 12, 760, 22),
