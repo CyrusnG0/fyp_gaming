@@ -88,6 +88,7 @@ namespace LuanShi
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
         private string envoyText = "";        // envoy draft for the diplomacy tab (never sent automatically)
+        private float envoyConfirmationUntil;
         private Vector2 reportScroll;         // court report scroll offset when a season outruns its panel
 
         // concept tabs: Map is the live view, the rest preview the full design
@@ -588,7 +589,7 @@ namespace LuanShi
 
         // ------------------------------------------------------------------ orders
 
-        void SubmitHuman(ActionCommand cmd)
+        bool SubmitHuman(ActionCommand cmd)
         {
             cmd.ActorSeatId = currentSeat;
             cmd.ControllerType = ControllerType.Human;
@@ -615,6 +616,8 @@ namespace LuanShi
                 statusMsg = LastBattleSummary() ?? "Order executed";
             else
                 statusMsg = "Order executed";
+
+            return r.Ok;
         }
 
         static bool IsBattle(string type)
@@ -983,7 +986,7 @@ namespace LuanShi
             var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
             for (int i = 0; i < Tabs.GetLength(0); i++)
             {
-                var r = new Rect(1020 + i * 66, 8, 62, 34);
+                var r = new Rect(1400, 60 + i * 46, 190, 40);
                 uiRects.Add(r);
                 var prevBg = GUI.backgroundColor;
                 if (activeTab == Tabs[i, 0]) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
@@ -1118,42 +1121,47 @@ namespace LuanShi
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
             bool mine = city.OwnerSeatId == currentSeat;
-            var p = new Rect(10, 50, 300, mine ? 400 : 120);
+            var p = new Rect(10, 50, 420, mine ? 400 : 120);
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 280, 24), $"{city.Name} ({OwnerName(city)})", body);
+            GUI.Label(new Rect(22, 58, 400, 24), $"{city.Name} ({OwnerName(city)})", body);
 
             if (mine)
             {
                 string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
-                GUI.Label(new Rect(22, 86, 280, 116),
+                GUI.Label(new Rect(22, 86, 400, 116),
                     $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison}\n" +
                     $"Morale {city.Morale}{moraleWarning}\n" +
                     $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{BalanceConfig.TrainingMax}",
                     body);
 
+                float buttonLeft = p.x + 12f;
+                float buttonTop = p.y + 160f;
+                float buttonGap = 12f;
+                float buttonWidth = (p.width - 24f - buttonGap) * 0.5f;
+                float rightButtonLeft = buttonLeft + buttonWidth + buttonGap;
                 string hint = null;
-                hint = FirstReason(hint, OrderButton(new Rect(22, 210, 120, 34), ActionType.LevyTax, city.Id, "Tax", null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 210, 120, 34), ActionType.LightenLabor, city.Id, "Lighten labor",
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop, buttonWidth, 34), ActionType.LevyTax, city.Id, "Tax", null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop, buttonWidth, 34), ActionType.LightenLabor, city.Id, "Lighten labor",
                     city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "Not enough gold", 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 248, 120, 34), ActionType.Reclaim, city.Id, "Reclaim",
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Reclaim, city.Id, "Reclaim",
                     city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "Limit reached"
                     : city.ReclaimedThisSeason ? "Already reclaimed this season" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 248, 120, 34), ActionType.Recruit, city.Id, "Recruit",
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Recruit, city.Id, "Recruit",
                     city.Gold < BalanceConfig.RecruitGoldCost ? "Not enough gold"
                     : city.Population < BalanceConfig.RecruitPopCost ? "Not enough population" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 286, 120, 34), ActionType.Train, city.Id, "Train",
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Train, city.Id, "Train",
                     city.Training >= BalanceConfig.TrainingMax ? "Limit reached" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 286, 120, 34), ActionType.Fortify, city.Id, "Fortify",
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Fortify, city.Id, "Fortify",
                     city.Defense >= BalanceConfig.DefenseMax ? "Limit reached" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 324, 120, 34), ActionType.Relief, city.Id, "Relief",
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
                     city.Food < BalanceConfig.ReliefFoodCost ? "Not enough food" : null, 0, 0, btn));
 
-                if (hint != null) GUI.Label(new Rect(22, 364, 280, 22), hint, body);
+                if (hint != null) GUI.Label(new Rect(22, 364, 400, 22), hint, body);
             }
             else
             {
-                GUI.Label(new Rect(22, 84, 280, 30), city.IsNeutral ? "Unclaimed land" : "Enemy territory — details unknown", body);
+                GUI.Label(new Rect(22, 84, 400, 30), city.IsNeutral ? "Unclaimed land" : "Enemy territory — details unknown", body);
             }
         }
 
@@ -1164,17 +1172,19 @@ namespace LuanShi
         /// </summary>
         string OrderButton(Rect r, string type, string targetId, string label, string blockedReason,
             int paramA, int paramB, GUIStyle btn,
-            Dictionary<string, string> args = null, string text = null)
+            Dictionary<string, string> args = null, string text = null, System.Action onSubmitted = null)
         {
             bool available = blockedReason == null;
+            string buttonText = $"{label} {BalanceConfig.CommandPointCost(type)} orders";
+            r.width = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
             var prev = GUI.enabled;
             GUI.enabled = available;
-            if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointCost(type)} orders", btn))
-                SubmitHuman(new ActionCommand
+            if (GUI.Button(r, buttonText, btn) && SubmitHuman(new ActionCommand
                 {
                     Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB,
                     Args = args, Text = text, Reason = "UI: " + type,
-                });
+                }))
+                onSubmitted?.Invoke();
             GUI.enabled = prev;
             return available ? null : label + "：" + blockedReason;
         }
@@ -1187,25 +1197,28 @@ namespace LuanShi
             var enemyCities = AdjacentEnemyCities(army);
             int orders = enemyArmies.Count + enemyCities.Count;
 
-            var p = new Rect(10, 50, 300, orders > 0 ? 236 + orders * 38 : 150);
+            var p = new Rect(10, 50, 330, orders > 0 ? 236 + orders * 38 : 150);
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 280, 24), $"{army.Name} · Troops {army.Troops}", body);
-            GUI.Label(new Rect(22, 86, 280, 66),
+            GUI.Label(new Rect(22, 58, 308, 24), $"{army.Name} · Troops {army.Troops}", body);
+            GUI.Label(new Rect(22, 86, 308, 66),
                 $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
                 (army.MarchedThisSeason ? "Already marched this season" : "Select a hex to march"), body);
 
             if (orders == 0)
             {
-                GUI.Label(new Rect(22, 156, 280, 22), "No enemy armies or cities nearby", body);
+                GUI.Label(new Rect(22, 156, 308, 22), "No enemy armies or cities nearby", body);
                 return;
             }
 
             string hint = null;
             int row = 0;
+            float buttonLeft = p.x + 12f;
+            float buttonTop = p.y + 110f;
+            float buttonWidth = p.width - 24f;
             foreach (var enemy in enemyArmies)
             {
-                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackArmy,
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackArmy,
                     army.Id, $"Attack {enemy.Name} · Troops {enemy.Troops}",
                     army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight" : null,
                     enemy.X, enemy.Z, btn));
@@ -1216,12 +1229,12 @@ namespace LuanShi
                 string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight"
                     : army.Troops < BalanceConfig.AssaultTroopRatio * city.Garrison
                         ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio (garrison {city.Garrison})" : null;
-                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackCity,
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackCity,
                     army.Id, "Assault " + city.Name, blocked, city.X, city.Z, btn));
                 row++;
             }
 
-            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 280, 22), hint, body);
+            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 308, 22), hint, body);
         }
 
         List<ArmyState> AdjacentEnemyArmies(ArmyState army)
@@ -1477,6 +1490,8 @@ namespace LuanShi
             // Envoy message: type here, then press Send message on a faction row to submit it.
             GUI.Label(new Rect(p.x + 36, y, 120, 22), "Envoy message", body);
             envoyText = GUI.TextField(new Rect(p.x + 160, y, 604, 24), envoyText, 120);
+            if (envoyConfirmationUntil > Time.unscaledTime)
+                GUI.Box(new Rect(p.x + 270, y + 34, 300, 52), "Message sent successfully");
             y += 34;
 
             // Incoming offers first: they are the only diplomacy that demands an answer.
@@ -1535,7 +1550,11 @@ namespace LuanShi
                     BalanceConfig.GiftGoldPerTrustUnit, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 400, y, 176, 30), ActionType.SendMessage,
                     other.SeatId, "Send message", string.IsNullOrEmpty(envoyText) ? "Enter a message first" : null,
-                    0, 0, btn, null, envoyText));
+                    0, 0, btn, null, envoyText, () =>
+                    {
+                        envoyText = "";
+                        envoyConfirmationUntil = Time.unscaledTime + 2f;
+                    }));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 582, y, 182, 30), ActionType.BreakTreaty,
                     other.SeatId, "Break treaty", BreakBlocked(other.SeatId), 0, 0, btn,
                     new Dictionary<string, string> { { "treaty_type", BreakableType(other.SeatId) } }));
