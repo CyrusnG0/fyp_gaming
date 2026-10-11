@@ -50,6 +50,8 @@ JSON object, adding two optional fields:
 | Seasonal harvest multiplier | 春 ×0.7 · 夏 ×1.0 · 秋 ×2.0 · 冬 ×0.3 | applied to every city's harvest at `EndSeason()` ✅ (P6 §8b); seasons cycle 春→夏→秋→冬 by `(Season−1) % 4` |
 | 研究 points per season | **15** (TBD) | `BalanceConfig.ResearchPointsPerSeason`; ×1.25 with 吏治 L4 學堂 → 19; paid at every rollover (`BeginSeason()`), no building income yet |
 | Research line level | 1–5 per line, price 20 / 40 / 70 / 110 / 160 | LOCKED (design §9); `research` costs **1 號令** (TBD — design ch.11 does not price it), §7 |
+| 諜報 mission | **1 號令** + gold (偵察 200 / 散播謠言 500 / 挑撥離間 800, LOCKED design §8.2) | LOCKED (design §11 #30/#32): 偵察/挑撥離間 cost 1 號令; `scout`/`rumor`/`sow_distrust` — §6 |
+| Covert orders | a mission's own `action` record is **owner-only** | ADR-015: only a *failed* mission (`spy_exposed`, public) puts the attacker's name in the world's log |
 | Event log | every accepted action emits an event with `visibility` (public / owner_and_observers / owner_only); rejections emit `action_rejected` (owner_only) | CONTROLLER_PROTOCOL §5 |
 | World events (no action behind them) | `season_start`/`season_end`, `city_resolved`, `starvation`, `revolt`, `desertion`, `game_over` — emitted by `BeginSeason()`/`EndSeason()` | P6 §8b: `revolt`/`game_over` public, `desertion` owner-only |
 | Execution | immediate on `Submit()`; economy/combat resolve at season end or per action as specified | |
@@ -114,6 +116,10 @@ deferred behind research. All seven domestic actions emit their event with the v
 | `gift` | recipient seat | `param_a` = gold amount |
 | `declare_war` | seat | — |
 | `break_treaty` | seat | `args.treaty_type` |
+| `research` | — | `args.line` ∈ `agri｜military｜espionage｜governance` |
+| `scout` | foreign or neutral **city id** | — (200 金, 諜報 1) |
+| `rumor` | foreign **city id** | — (500 金, 諜報 1; neutral cities refused) |
+| `sow_distrust` | seat **A** | `args.target_b` = seat **B** (800 金, 諜報 2) |
 
 **Lifecycle ✅ (ADR-012):** propose → pending (visible to the two parties) → accept / reject / counter → at
 rollover unanswered offers **lapse** while accepted ones are **ratified** with
@@ -123,11 +129,45 @@ rollover unanswered offers **lapse** while accepted ones are **ratified** with
 **Timing ✅ (ADR-010 #5):** treaties take effect **next season** — proposals resolve at season rollover.
 Consequently 求和 (sue for peace) is the 停戰 proposal path, not a direct peace action (OPEN_QUESTIONS 16).
 
-## 6. 諜報 Espionage — ⏸ ALL deferred post-MVP (needs Spy model + fog integration)
+## 6. 諜報 Espionage — 🟡 P8 lite (3 of 7 missions, ADR-015)
 
-派間諜 (needs 諜報1) · 偵察 200金 · 竊取軍報 400金 · 散播謠言 500金 (民心−10) ·
-偽造軍報 600金 (諜報3) · 挑撥離間 800金 (信任−10) · 收買將領 1000金+ · 暗殺 1500金 (諜報4) ·
-巡查 0金 (+15% 暴露) / 清查 300金 (嫌疑−30). Exposure formula §8.3.
+**MVP slice (locked in ADR-015):** no persistent spy entity, no 嫌疑 accumulation, no 偽造軍報 and no
+秘密反用. A mission is an **instant action** gated by 諜報 research with **one** seeded success roll; a
+failure does nothing and exposes the attacker (§8.3 公開處決 path). Gold is spent either way.
+
+| # | id | 中文 | CP | Cost | Gate | Effect (on success) | Event | Status |
+|---|---|---|---|---|---|---|---|---|
+| E1 | `scout` | 偵察 | **1** | 200 金 | 諜報 1 | the target city joins the caller's observation for this season and the next: 兵力/糧草 as a 少/中/多 band below 諜報 3, exact numbers at 3+ | `scout_report` owner-only | ✅ |
+| E2 | `rumor` | 散播謠言 | **1** | 500 金 | 諜報 1 | 目標城民心 **−10** (clamped); the record names no author — a success is deniable | `rumor` (target owner only) | ✅ |
+| E3 | `sow_distrust` | 挑撥離間 | **1** | 800 金 | 諜報 2 (TBD; design §11 #32 asks 3 — OPEN_QUESTIONS 21) | 目標兩國 信任 **−10 in both directions** (clamped); both victims see their own trust move, nobody sees who paid | `sow_distrust` (the two victims only) | ✅ |
+| — | 竊取軍報 | | 1 | 400 金 | — | learn a target army's movement | | ⏸ needs army-level intel |
+| — | 偽造軍報 | | 1 | 600 金 | 諜報 3 | poison the target's intel for a season | | ⏸ needs per-seat false reports |
+| — | 收買將領 / 暗殺 | | 1 | 1000+ / 1500 金 | 諜報 4 | general loyalty / death | | ⏸ needs generals |
+| — | 巡查 / 清查 | | 1 | 0 / 300 金 | — | 境內暴露率 +15% / 單城嫌疑 −30 | | ⏸ needs the 治安 field + suspicion |
+
+**Covert logging ✅ (ADR-015):** a mission's generic `action` log entry is **owner-only** for E1-E3, so a
+successful mission never names its author to anyone else; the failure event `spy_exposed` is public and
+names both the attacker and the mission. This is the one place where the "everything is logged" invariant
+(AGENTS.md #4) is satisfied by a private record rather than a public one.
+
+**Exposure roll ✅ (simplified §8.3).** `success chance = BalanceConfig.SpyBaseSuccessChance (70%, TBD)
++ 諜報 level × SpySuccessPerLevel (5%, TBD)` → **75/80/85/90/95%** at L1-L5, one seeded roll per mission.
+The design's 暴露率 formula (base 5% + 治安 × 0.3% + target 諜報 × 4% + 嫌疑 × 0.2% − 掩護) needs 治安,
+suspicion and cover types that do not exist yet, so it is replaced by `1 − success chance`.
+On exposure: public `spy_exposed` (`attacker_seat_id`, `mission`, `detected_by_seat_id`), attacker 威望
+**−8** (LOCKED, design §7.3 table 散播謠言被識破), and the victim's 信任 toward the attacker **−10** (TBD;
+the same design row prices the rumour case at −20 — OPEN_QUESTIONS 22); 挑撥離間 exposes to *both* seats it
+manipulated. The design's paired 對方威望 +5 for choosing 公開處決 is **not** paid out yet.
+
+**Scout accuracy & window ✅.** `scouted_cities` in the observation carries `accuracy: "band" | "exact"`,
+`scouted_until` (season), and either `garrison_band`/`food_band` or the exact fields. A city already inside
+the fog radius stays in `cities` at full detail (ADR-011) and is not duplicated. Accuracy is read from the
+seat's current 諜報 level when the report is used, so researching further upgrades live reports.
+**Deferred:** 諜報 L2 反諜 (境內暴露率 +10%), L3 偽報, L4 諜網, L5 無間 are all still no-ops that can be
+purchased (they gate the missions above), and the demo UI can only *offer* targets it can name — cities in
+sight or already scouted — because ADR-011 keeps no "known cities" memory (OPEN_QUESTIONS 23). The engine
+itself accepts any city id, so an LLM may target a city its chronicle has named.
+
 **But:** fog-of-war *observation filtering* (cities ±3格, armies ±2格, §8.1) is 🎯 MVP —
 it is observation-side, not an action, and the thesis needs it.
 
@@ -149,7 +189,7 @@ One action, four lines. `target_id` is unused; `args.line` is required.
 |---|---|---|---|---|---|
 | 農政 agri | ✅ harvest ×1.10 | ⏸ 水利 (drought halving — no 天時 events) | ⏸ 屯田 (D9 自給 30%) | ⏸ 常平倉 (food cap — no cap modelled) | ✅ all harvests ×1.25 (stacks with L1) |
 | 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ⏸ 騎兵 (no unit types) | ⏸ 器械 (no siege weapons) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) |
-| 諜報 espionage | ⏸ 細作 | ⏸ 反諜 | ⏸ 偽報 | ⏸ 諜網 | ⏸ 無間 | (all five gate the espionage phase, §6) |
+| 諜報 espionage | 🟡 細作 → gates `scout`/`rumor` (P8) | 🟡 反諜 → gates `sow_distrust` (P8, TBD); the +10% 境內暴露率 effect is ⏸ | ⏸ 偽報 | ⏸ 諜網 | ⏸ 無間 | L1/L2 are the gates for the three P8 missions (§6); the defensive effects still need 治安/suspicion |
 | 吏治 governance | ✅ tax ×1.10 | ✅ 民心 +5/季 per city | ✅ 叛變機率 −50% (`RevoltChanceMult = 0.5`, synced at rollover) | ✅ research +25% (→19/season) | ✅ 威望 +10 one-time, on purchase |
 
 **Timing (ADR-014):** point-of-use effects (harvest, tax, combat, training cap, the 民心 grant) apply as
@@ -195,7 +235,8 @@ game always opens in 春 and always has the same season sequence for a given see
 | `ArmyState` | `Morale (0-100, start 60 待決)` | ✅ P2: battle losses, 潰散 at 0, seasonal regrowth |
 | `GameState` | `WinnerSeatId` (null while live) | ✅ P6 §8b — set by `CheckVictory()`, blocks `Submit()`, exposed in the observation |
 | `FactionState` | `ResearchPoints` (int) + `Research` (4 lines → level 0-5, keys `agri/military/espionage/governance`) | ✅ P7 §7 — income at rollover, levels bought by `research`; **private to the seat** |
-| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011; P6 adds `season_name` + `winner_seat_id`; P7 adds `research_points` + `research` (own levels only) |
+| `FactionState` | `ScoutedCities` (`cityId → untilSeason`) | ✅ P8 §6 — written by `scout`, pruned at rollover; accuracy is read from the 諜報 level, never stored |
+| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011; P6 adds `season_name` + `winner_seat_id`; P7 adds `research_points` + `research` (own levels only); P8 adds `scouted_cities` (the caller's 偵察 reports, banded or exact) |
 | 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | ✅ applied at season rollover; the design's second threshold (民心<25 → 民變) landed in P6 as §8b — both numbers stand (ADR-013, OPEN_QUESTIONS 19) |
 
 ## 10. Decisions — LOCKED 2026-10-08 (recorded as ADR-010; team may supersede)
@@ -228,3 +269,15 @@ game always opens in 春 and always has the same season sequence for a given see
 >     seat's own `research_points`/`research` and nobody else's.
 > 14. 兵法 L1 (design: 「練兵（訓練 +1）」) is implemented as **訓練 cap 5→6** for that faction, not as a
 >     free training level — the reading the P7 brief locked; flagged for the team.
+
+> **P8 additions (2026-10-12, ADR-015 — supersedes #3's "espionage → phase 2": three of the seven §8.2
+> missions are live, the other four and every defensive §8.4 tool stay ⏸):**
+> 15. Mission costs are the design's (偵察 200 / 散播謠言 500 / 挑撥離間 800 金) plus **1 號令** (LOCKED,
+>     design §11 #30/#32). Gates: 偵察 諜報 1, 散播謠言 諜報 1 (TBD), 挑撥離間 諜報 2 (TBD).
+> 16. One seeded roll per mission: `70% + 諜報 level × 5%` (both TBD — the design gives 難度 words only).
+>     Failure does nothing, spends the gold and exposes the attacker: public `spy_exposed`, 威望 **−8**
+>     (LOCKED, design §7.3 散播謠言被識破) and the victim's 信任 **−10** (TBD; the same design row says −20).
+> 17. Covert orders are logged **owner-only** — a successful mission is deniable and only a failure names
+>     its author. `scout`/`rumor` target a city id, `sow_distrust` takes a seat pair (§5 shapes table).
+> 18. 偵察 reports are banded (少/中/多) below 諜報 3 and exact at 3+; a report lives for the season it was
+>     taken plus the next one (TBD). No spy entity, no 嫌疑, no 偽造軍報, no 秘密反用, no 巡查/清查.

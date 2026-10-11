@@ -51,3 +51,19 @@
 20. **Visible ⇒ full detail vs estimation levels**: an in-radius foreign city/army currently exposes all
     fields (troops, garrison, 民心, food…). The design §8.1 implies estimated enemy strength. Keep exact
     values for MVP, or introduce coarse estimation bands before the LLM comparison?
+
+## Raised during P8 implementation (2026-10-12)
+
+21. **挑撥離間 research gate: 諜報 2 (P8 brief) vs 諜報 3 (design §11 #32).** Implemented at **L2** per the
+    P8 brief (`BalanceConfig.SowDistrustResearchLevel`, TBD). The design's action table asks for 諜報 3,
+    which would make the mission a late-game tool. Team: keep 2, or restore the design's 3?
+22. **Exposure trust penalty is flat −10, but the design prices the rumour case at −20.** Design §7.3's
+    reputation table has a row for 散播謠言被識破 → 信任 −20 / 威望 −8; this phase uses the LOCKED 威望 −8 but a
+    single flat `SpyExposedTrustPenalty = 10` (TBD) for all three missions because 偵察 and 挑撥離間 have no
+    row of their own. Related and also un-paid: the design gives the exposed victim **威望 +5** for choosing
+    公開處決 — nothing is awarded yet. Team: one flat number, per-mission numbers, or the design's table?
+23. **The 諜報 UI cannot target a city the seat has never seen.** ADR-011 deliberately keeps no "known
+    cities" memory (absent, not redacted), so the intel panel can only offer cities in sight or already
+    scouted, while the engine accepts any city id. That makes 偵察 useful mainly for *keeping* eyes on a
+    city (its report outlives the vision radius) rather than for reaching out to an unseen one. Team: add a
+    per-seat "known city" memory (last-seen map + names) so agents can be sent into the fog?

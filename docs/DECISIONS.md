@@ -204,3 +204,76 @@ comment; values the design does not state are marked TBD.
   when rich and none when poor; two runs of an 8-season research replay on one seed are byte-identical and a
   different seed diverges. Engine + `KingdomDemo` also compile clean against Unity's managed assemblies
   (0 warnings / 0 errors); the editor compile and play-mode smoke are still pending.
+
+## ADR-015 — Espionage lite: three gated missions, one seeded roll, deniable on success
+**Date:** 2026-10-12 · **Status:** accepted · **Phase:** P8
+
+Design §8.2 lists seven spy missions and §8.3–§8.4 a 暴露率 formula, suspicion accumulation, cover types and
+two counter-intelligence tools. This phase ships the **MVP slice** the P8 brief locked: **three missions,
+no persistent spy entity, no 嫌疑, no 偽造軍報, no 秘密反用, no 巡查/清查.** Rationale: the thesis needs
+espionage to exist as a *deniable, research-gated action* on the same validation path as everything else,
+and each deferred piece needs a model that does not exist yet (spies as entities, 治安, generals,
+per-seat false reports).
+
+- **Missions (design §8.2 + §11 #30/#32).** `scout` 偵察 200 金 (諜報 L1), `rumor` 散播謠言 500 金
+  (諜報 L1 — gate TBD, §8.2 lists 難度 中 but §11 gives no research gate), `sow_distrust` 挑撥離間 800 金
+  (諜報 L2 per the brief; **design §11 #32 says 諜報 3** → OPEN_QUESTIONS 21). Each costs **1 號令**
+  (LOCKED, design §11 #30/#32). Gold comes out of the faction treasury through `PayFromTreasury` — the same
+  "gold is national in the design, per-city in the model" rule 贈禮 uses (ADR-012): the cities pay in state
+  order, and a mission refused at the gate pays nothing before the roll.
+- **Success/exposure (simplified §8.3).** One seeded `rng.NextDouble()` per mission:
+  `chance = 70% (TBD) + 諜報 level × 5% (TBD)` → 75/80/85/90/95% at L1-L5. The design's 暴露率 formula
+  (base 5% + 所在城治安 × 0.3% + 目標國諜報等級 × 4% + 嫌疑 × 0.2% − 掩護) is **replaced by
+  `1 − success chance`**, because 治安, suspicion and cover types do not exist. On failure the mission does
+  nothing, the gold is gone anyway, and the attacker is exposed by the §8.3 公開處決 path: a **public**
+  `spy_exposed` naming `attacker_seat_id` and `mission`, the attacker's 威望 **−8** (LOCKED — design §7.3's
+  散播謠言被識破 row says 威望 −8), and the victim's 信任 toward the attacker **−10** (TBD; the same row says
+  −20 for the rumour case → OPEN_QUESTIONS 22). For 挑撥離間 both manipulated seats take the −10. The
+  design's paired 對方威望 +5 (the executor's reward) is **not** paid out, so exposure is a pure loss.
+- **Covert logging (the one place the log is private).** AGENTS.md #4 says everything is logged; it does not
+  say everything is logged *publicly*. Espionage is worthless if the target can read who sent the agent, so
+  `ActionType.IsCovert` makes the generic `action` record **owner-only** for the three missions, and a
+  successful mission's own event is constructed with **no actor**: `rumor` names only the victim seat
+  (`to_seat_id`) and `sow_distrust` only the two victims, so `SeesEvent` reaches them and nobody else. A
+  failure is public by design — that *is* the §8.3 consequence. Consequence for the thesis: the canonical log
+  still holds the full truth (the researcher can read every mission), while each seat's *filtered* log holds
+  only what it earned — the human/LLM information symmetry the project needs.
+- **偵察 as a report, not a leak.** A successful scout writes `FactionState.ScoutedCities` (city id →
+  `untilSeason = season + ScoutReportExtraSeasons`), pruned at rollover. `Observe()` adds the city to
+  `ScoutedCities` **only when it is not already in sight** — inside the fog radius `Cities` still carries the
+  canonical `CityState` at full detail (ADR-011), and duplicating it as a second, weaker entry would be
+  incoherent. Accuracy is **not stored on the report**: it is read from the seat's current 諜報 level when
+  the observation is built, so researching 諜報 3 upgrades reports already held (the same "read the level at
+  the point of use" rule as P7). At L1-2 the report is `accuracy: "band"` with `garrison_band`/`food_band`
+  (few/some/many; thresholds TBD — 少 <1,000 ≤ 中 <3,000 ≤ 多 troops, a separate TBD pair for 糧草) and the
+  exact fields **are not present at all**; at L3+ it is `accuracy: "exact"` with the real numbers. The
+  canonical `CityState` is never touched by a mission except through the effects of `rumor` (民心 −10,
+  clamped) and `sow_distrust` (信任 −10 both ways, clamped by `DiplomacyState`).
+- **Where the value is.** In this fog model a scout is worth 200 gold because the report **outlives the
+  vision radius**: nothing of yours must stay near the city, and next season you still hold the numbers (or
+  the bands) after your army has marched on. The UI can only *offer* cities the seat can name — in sight or
+  already scouted — because ADR-011 keeps no "known cities" memory; the engine accepts any city id, so an
+  LLM may target a city named in its own chronicle (OPEN_QUESTIONS 23).
+- **Scripted baseline.** Deliberately un-clever and readable: when the seat is at war, its treasury is above
+  `ScriptedSpyGoldThreshold` and 諜報 L1 is researched, it spreads rumours in the enemy's **least loyal**
+  city — every third season only (`ScriptedSpyRumorEveryNthSeason`, TBD), once a season at most, as the last
+  thing in its plan. It never sows distrust (the brief's call: an AI that manipulates third parties is
+  harder to read in the human-vs-LLM comparison).
+- **UI (KingdomDemo).** The 諜報 tab is live: seat-level header (諜報 level, success rate, gold, orders), the
+  three missions with cost/gate/effect, a target list of the foreign cities the seat can name with `Scout`
+  and `Rumours` buttons (greyed with *needs Espionage n* / *needs n gold* / *no orders left* / *no faction to
+  undermine* for a neutral city), a "Live reports" block showing band or exact detail with its expiry season
+  **and the same two buttons** — re-scouting there is the only way to keep an eye on a city outside the fog —
+  and 挑撥離間 seat-pair buttons. All of it is rendered from the seat's own observation and submits real
+  commands through `SubmitHuman`.
+- **Verified** headless 2026-10-12: **175/175 assertions** (109 from P6/P7 still green + 66 for P8) —
+  every gate (諜報 level, gold, own city, neutral city, own seat, duplicate target seats, missing
+  `args.target_b`), a refused mission spending nothing, the scout window (live this season and the next,
+  gone one season later) and band-vs-exact reporting at L1/L3 with the canonical city untouched, `rumor`
+  −10 with clamping and a nameless record only the victim sees, `sow_distrust` −10 both directions with
+  exactly the two victims informed, the failure path (nothing happens, gold gone anyway, public `spy_exposed`
+  naming attacker + mission + detector, 威望 −8, victim 信任 −10), treasury payment spread over cities in
+  state order, the scripted seat's one-in-three-seasons rumour aimed at the weakest enemy city (and never
+  挑撥離間), and byte-identical replays for identical seeds. Engine + `KingdomDemo` compile clean against
+  Unity's managed assemblies (0 warnings / 0 errors); the editor compile and a play-mode smoke of the live
+  諜報 tab are still pending.

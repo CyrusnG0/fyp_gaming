@@ -175,6 +175,28 @@ namespace LuanShi.Engine
                 }
             }
 
+            // 諜報 (design §8.2, P8): the baseline is deliberately un-clever — when it is already at war, the
+            // treasury is comfortable and 諜報 L1 is researched, it spreads rumours in the enemy's least
+            // loyal city. Every third season (TBD), so it never floods the log; it never sows distrust.
+            if (cp > 0 && state.Season % BalanceConfig.ScriptedSpyRumorEveryNthSeason == 0)
+            {
+                int treasury = 0;
+                foreach (var c in cities) treasury += c.Gold;
+                if (treasury > BalanceConfig.ScriptedSpyGoldThreshold
+                    && fac.ResearchLevel(ResearchLine.Espionage) >= BalanceConfig.RumorResearchLevel)
+                {
+                    CityState weakest = null;
+                    foreach (var c in state.Cities)
+                    {
+                        if (c.IsNeutral || c.OwnerSeatId == seatId) continue;
+                        if (!state.Diplomacy.IsAtWar(seatId, c.OwnerSeatId)) continue;
+                        if (weakest == null || c.Morale < weakest.Morale) weakest = c;
+                    }
+                    if (weakest != null)
+                        plan.Add(Order(ActionType.Rumor, seatId, weakest.Id, "Undermine the enemy's resolve"));
+                }
+            }
+
             return plan;
         }
 

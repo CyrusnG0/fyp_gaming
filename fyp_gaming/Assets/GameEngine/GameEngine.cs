@@ -40,6 +40,9 @@ namespace LuanShi.Engine
                 // out — and 律法 takes hold — from the next one (ADR-014; cf. treaties, ADR-010 #5).
                 f.ResearchPoints += BalanceConfig.ResearchIncome(f.ResearchLevel(ResearchLine.Governance));
                 f.SyncResearchDerived();
+                // 偵察 reports lapse here: a report covers the season it was taken and the next one
+                // (design §8.2, window TBD), so nothing stale survives a rollover.
+                f.ScoutedCities.RemoveAll(r => r.UntilSeason < State.Season);
             }
             foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
@@ -312,13 +315,20 @@ namespace LuanShi.Engine
                 case ActionType.DeclareWar: r = DoDeclareWar(fac, cmd); break;
                 case ActionType.BreakTreaty: r = DoBreakTreaty(fac, cmd); break;
                 case ActionType.Research: r = DoResearch(fac, cmd); break;
+                case ActionType.Scout: r = DoScout(fac, cmd); break;
+                case ActionType.Rumor: r = DoRumor(fac, cmd); break;
+                case ActionType.SowDistrust: r = DoSowDistrust(fac, cmd); break;
                 default: r = ValidationResult.Fail($"unknown action type '{cmd.Type}'"); break;
             }
 
             if (!r.Ok) return Reject(cmd, r.Error);
 
             fac.CommandPoints -= cpCost;
-            Emit(fac.SeatId, fac.Controller, "action", "public",
+            // A covert order is logged for its author only (ADR-015): espionage is worth nothing if the
+            // target can read who sent the agent. A failed mission becomes public on its own via
+            // `spy_exposed`; a successful one stays deniable.
+            Emit(fac.SeatId, fac.Controller, "action",
+                ActionType.IsCovert(cmd.Type) ? "owner_only" : "public",
                 P("action", cmd.Type, "target_id", cmd.TargetId ?? "",
                   "param_a", cmd.ParamA.ToString(), "param_b", cmd.ParamB.ToString(),
                   "reason", cmd.Reason ?? ""), cmd.ActionId, cmd.Args, cmd.Text);
@@ -477,6 +487,142 @@ namespace LuanShi.Engine
             return ValidationResult.Success;
         }
 
+        // ---- 諜報 E1-E3 (design §8.2/§8.3, ACTIONS.md §6, ADR-015) ---------------
+
+        /// <summary>
+        /// E1 偵察 (design §8.2, 200 金): learn a foreign or neutral city's 兵力/糧草 — as a 少/中/多 band at
+        /// 諜報 L1-2, exact numbers at L3+. The report stays in the caller's observation for this season and
+        /// the next (ADR-015), which is what makes an agent worth 200 gold once your army marches away.
+        /// </summary>
+        private ValidationResult DoScout(FactionState fac, ActionCommand cmd)
+        {
+            var city = State.FindCity(cmd.TargetId);
+            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
+            if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
+
+            ValidationResult gate = SpyGate(fac, BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost);
+            if (!gate.Ok) return gate;
+
+            if (!SpyRoll(fac, ActionType.Scout, city.OwnerSeatId, null, cmd))
+                return ValidationResult.Success;      // exposed instead — gold is already gone
+
+            int level = fac.ResearchLevel(ResearchLine.Espionage);
+            int until = State.Season + BalanceConfig.ScoutReportExtraSeasons;
+            fac.AddScoutReport(city.Id, until);
+            Emit(fac.SeatId, fac.Controller, "scout_report", "owner_only",
+                P("city_id", city.Id, "accuracy", BalanceConfig.ScoutAccuracy(level),
+                  "scouted_until", until.ToString(), "espionage_level", level.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>
+        /// E2 散播謠言 (design §8.2, 500 金): 目標城民心 −10. A success is deniable — the log record names no
+        /// actor, and only the city's owner is told that rumours are circulating (ADR-015).
+        /// </summary>
+        private ValidationResult DoRumor(FactionState fac, ActionCommand cmd)
+        {
+            var city = State.FindCity(cmd.TargetId);
+            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
+            if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
+            if (city.IsNeutral) return ValidationResult.Fail("a neutral city has no faction to undermine");
+
+            ValidationResult gate = SpyGate(fac, BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost);
+            if (!gate.Ok) return gate;
+
+            if (!SpyRoll(fac, ActionType.Rumor, city.OwnerSeatId, null, cmd))
+                return ValidationResult.Success;
+
+            AddMorale(city, -BalanceConfig.RumorMoraleLoss);
+            Emit(null, null, "rumor", "owner_only",
+                P("to_seat_id", city.OwnerSeatId, "city_id", city.Id,
+                  "morale_lost", BalanceConfig.RumorMoraleLoss.ToString(),
+                  "morale", city.Morale.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>
+        /// E3 挑撥離間 (design §8.2, 800 金): 目標兩國之間的信任 −10 in both directions. The two victims see
+        /// their own trust move (and the `sow_distrust` note); nobody sees who paid for it (ADR-015).
+        /// </summary>
+        private ValidationResult DoSowDistrust(FactionState fac, ActionCommand cmd)
+        {
+            var targetA = State.FindFaction(cmd.TargetId);
+            if (targetA == null) return ValidationResult.Fail($"unknown seat '{cmd.TargetId}'");
+            if (targetA.SeatId == fac.SeatId) return ValidationResult.Fail("pick two other seats");
+
+            string targetBId = Arg(cmd, "target_b");
+            if (string.IsNullOrEmpty(targetBId))
+                return ValidationResult.Fail("args.target_b is required (the second seat)");
+            var targetB = State.FindFaction(targetBId);
+            if (targetB == null) return ValidationResult.Fail($"unknown seat '{targetBId}'");
+            if (targetB.SeatId == fac.SeatId) return ValidationResult.Fail("pick two other seats");
+            if (targetB.SeatId == targetA.SeatId)
+                return ValidationResult.Fail("the two targets must be different seats");
+
+            ValidationResult gate = SpyGate(fac, BalanceConfig.SowDistrustResearchLevel,
+                                            BalanceConfig.SowDistrustGoldCost);
+            if (!gate.Ok) return gate;
+
+            if (!SpyRoll(fac, ActionType.SowDistrust, targetA.SeatId, targetB.SeatId, cmd))
+                return ValidationResult.Success;
+
+            AddTrustEvent(targetA.SeatId, targetB.SeatId,
+                          -BalanceConfig.SowDistrustTrustPenalty, "sow_distrust", cmd);
+            AddTrustEvent(targetB.SeatId, targetA.SeatId,
+                          -BalanceConfig.SowDistrustTrustPenalty, "sow_distrust", cmd);
+            Emit(null, null, "sow_distrust", "owner_only",
+                P("from_seat_id", targetA.SeatId, "to_seat_id", targetB.SeatId,
+                  "delta", (-BalanceConfig.SowDistrustTrustPenalty).ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        /// <summary>Shared mission preconditions: the 諜報 level, then the gold — which is spent either way.</summary>
+        private ValidationResult SpyGate(FactionState fac, int requiredLevel, int goldCost)
+        {
+            int level = fac.ResearchLevel(ResearchLine.Espionage);
+            if (level < requiredLevel)
+                return ValidationResult.Fail($"needs Espionage {requiredLevel} research (have {level})");
+            if (!PayFromTreasury(fac, goldCost))
+                return ValidationResult.Fail($"not enough gold (needs {goldCost})");
+            return ValidationResult.Success;
+        }
+
+        /// <summary>
+        /// The single seeded roll behind every mission (design §8.3, MVP form — no 嫌疑, no counter-intel):
+        /// success chance = `BalanceConfig.SpySuccessChance(諜報 level)`. A failure exposes the attacker.
+        /// </summary>
+        private bool SpyRoll(FactionState fac, string mission, string victimSeatId, string secondVictimSeatId,
+            ActionCommand cmd)
+        {
+            float chance = BalanceConfig.SpySuccessChance(fac.ResearchLevel(ResearchLine.Espionage));
+            if (rng.NextDouble() < chance) return true;
+            ExposeSpy(fac, mission, victimSeatId, secondVictimSeatId, cmd);
+            return false;
+        }
+
+        /// <summary>
+        /// §8.3 公開處決 path: the mission fails, the agent is caught, and the world is told — a public
+        /// `spy_exposed` naming the attacker and the mission, 威望 −8 (LOCKED, design §7.3 table) and the
+        /// victim's 信任 −10 (TBD). The design's paired 對方威望 +5 for choosing to execute is not paid out.
+        /// </summary>
+        private void ExposeSpy(FactionState fac, string mission, string victimSeatId, string secondVictimSeatId,
+            ActionCommand cmd)
+        {
+            var victim = victimSeatId != null ? State.FindFaction(victimSeatId) : null;
+            Emit(fac.SeatId, fac.Controller, "spy_exposed", "public",
+                P("attacker_seat_id", fac.SeatId, "mission", mission,
+                  "detected_by_seat_id", victimSeatId ?? "",
+                  "prestige_lost", BalanceConfig.SpyExposedPrestigePenalty.ToString()), cmd.ActionId);
+            AddPrestige(fac, -BalanceConfig.SpyExposedPrestigePenalty, "spy_exposed", cmd);
+            if (victim != null)
+                AddTrustEvent(victim.SeatId, fac.SeatId, -BalanceConfig.SpyExposedTrustPenalty,
+                              "spy_exposed", cmd);
+            var secondVictim = secondVictimSeatId != null ? State.FindFaction(secondVictimSeatId) : null;
+            if (secondVictim != null)
+                AddTrustEvent(secondVictim.SeatId, fac.SeatId, -BalanceConfig.SpyExposedTrustPenalty,
+                              "spy_exposed", cmd);
+        }
+
         private ValidationResult DoMarch(FactionState fac, ActionCommand cmd)
         {
             var army = State.FindArmy(cmd.TargetId);
@@ -573,6 +719,18 @@ namespace LuanShi.Engine
 
             foreach (var city in State.Cities)
                 if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
+
+            // 偵察 reports (design §8.2, ADR-015): a scouted city is in the observation even when nothing of
+            // ours is near it — that is the whole point of paying for an agent. Cities already in sight stay
+            // in `Cities` at full detail and are not duplicated here; the report carries its own accuracy.
+            string scoutAccuracy = BalanceConfig.ScoutAccuracy(fac.ResearchLevel(ResearchLine.Espionage));
+            foreach (var report in fac.ScoutedCities)
+            {
+                if (report.UntilSeason < State.Season) continue;
+                var scouted = State.FindCity(report.CityId);
+                if (scouted == null || InSight(seatId, scouted.X, scouted.Z)) continue;
+                obs.ScoutedCities.Add(ScoutedCityView.From(scouted, scoutAccuracy, report.UntilSeason));
+            }
             foreach (var army in State.Armies)
                 if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(army);
             foreach (var tower in State.WatchTowers)

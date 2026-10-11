@@ -22,8 +22,20 @@ namespace LuanShi.Engine
         public float RevoltChanceMult = 1.0f;                 // 吏治 3 律法 → 0.5; synced at rollover (ADR-014)
         public int ResearchPoints;                            // 研究點 (design §9), accrued at rollover
         public readonly Dictionary<string, int> Research = new Dictionary<string, int>();  // ResearchLine.* → 0..5
+        public readonly List<ScoutReport> ScoutedCities = new List<ScoutReport>();          // 偵察 reports (§8.2)
 
         public bool IsHuman => Controller == ControllerType.Human;
+
+        /// <summary>
+        /// 偵察 (design §8.2): remember a city until `untilSeason` (inclusive, ADR-015). Re-scouting the same
+        /// city refreshes the window instead of stacking entries.
+        /// </summary>
+        public void AddScoutReport(string cityId, int untilSeason)
+        {
+            var existing = ScoutedCities.Find(r => r.CityId == cityId);
+            if (existing != null) { existing.UntilSeason = Math.Max(existing.UntilSeason, untilSeason); return; }
+            ScoutedCities.Add(new ScoutReport { CityId = cityId, UntilSeason = untilSeason });
+        }
 
         /// <summary>Level of one 研究 line (0 = not started). Unknown keys read as 0.</summary>
         public int ResearchLevel(string line)
@@ -93,6 +105,87 @@ namespace LuanShi.Engine
             {
                 if (i > 0) sb.Append(',');
                 sb.Append(MiniJson.Str(All[i])).Append(':').Append(MiniJson.Num(levelOf(All[i])));
+            }
+            return sb.Append('}').ToString();
+        }
+    }
+
+    /// <summary>
+    /// One 偵察 report (design §8.2 探得目標城兵力與糧草): the seat keeps sight of that city until
+    /// `UntilSeason` inclusive. Accuracy is not stored — it is read from the seat's 諜報 level when the
+    /// report is used, so researching espionage upgrades old reports instead of freezing them (ADR-015).
+    /// </summary>
+    public sealed class ScoutReport
+    {
+        public string CityId;
+        public int UntilSeason;      // last season the report is usable, inclusive
+    }
+
+    /// <summary>
+    /// A city a 偵察 mission brought into a seat's observation. This is a **view**: the canonical
+    /// `CityState` is never modified, and at 諜報 L1-2 the exact numbers are never handed over at all —
+    /// only the 少/中/多 band (ADR-015). `accuracy` says which of the two the reader is holding.
+    /// </summary>
+    public sealed class ScoutedCityView
+    {
+        public string CityId, Name, OwnerSeatId;
+        public int X, Z;
+        public int UntilSeason;
+        public string Accuracy;            // BalanceConfig.ScoutAccuracyBand | ScoutAccuracyExact
+
+        public int Population, Food, Gold, Garrison, Morale, Defense, Training, ReclaimPct;  // exact reports only
+        public string GarrisonBand, FoodBand;                                                // banded reports only
+
+        public static ScoutedCityView From(CityState city, string accuracy, int untilSeason)
+        {
+            var view = new ScoutedCityView
+            {
+                CityId = city.Id, Name = city.Name, OwnerSeatId = city.OwnerSeatId,
+                X = city.X, Z = city.Z, UntilSeason = untilSeason, Accuracy = accuracy,
+            };
+            if (accuracy == BalanceConfig.ScoutAccuracyExact)
+            {
+                view.Population = city.Population; view.Food = city.Food; view.Gold = city.Gold;
+                view.Garrison = city.Garrison; view.Morale = city.Morale; view.Defense = city.Defense;
+                view.Training = city.Training; view.ReclaimPct = city.ReclaimPct;
+            }
+            else
+            {
+                view.GarrisonBand = BalanceConfig.BandLabel(city.Garrison,
+                    BalanceConfig.ScoutBandLowTroops, BalanceConfig.ScoutBandMidTroops);
+                view.FoodBand = BalanceConfig.BandLabel(city.Food,
+                    BalanceConfig.ScoutBandLowFood, BalanceConfig.ScoutBandMidFood);
+            }
+            return view;
+        }
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            sb.Append("\"city_id\":").Append(MiniJson.Str(CityId));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"scouted_until\":").Append(MiniJson.Num(UntilSeason));
+            sb.Append(",\"accuracy\":").Append(MiniJson.Str(Accuracy));
+            if (Accuracy == BalanceConfig.ScoutAccuracyExact)
+            {
+                sb.Append(",\"population\":").Append(MiniJson.Num(Population));
+                sb.Append(",\"food\":").Append(MiniJson.Num(Food));
+                sb.Append(",\"gold\":").Append(MiniJson.Num(Gold));
+                sb.Append(",\"garrison\":").Append(MiniJson.Num(Garrison));
+                sb.Append(",\"morale\":").Append(MiniJson.Num(Morale));
+                sb.Append(",\"defense\":").Append(MiniJson.Num(Defense));
+                sb.Append(",\"training\":").Append(MiniJson.Num(Training));
+                sb.Append(",\"reclaim_pct\":").Append(MiniJson.Num(ReclaimPct));
+            }
+            else
+            {
+                // a low-level agent brings back words, not numbers — the fields above simply do not exist
+                sb.Append(",\"garrison_band\":").Append(MiniJson.Str(GarrisonBand));
+                sb.Append(",\"food_band\":").Append(MiniJson.Str(FoodBand));
             }
             return sb.Append('}').ToString();
         }
@@ -550,6 +643,7 @@ namespace LuanShi.Engine
             => Research.TryGetValue(line, out int level) ? level : 0;
 
         public readonly List<CityState> Cities = new List<CityState>();
+        public readonly List<ScoutedCityView> ScoutedCities = new List<ScoutedCityView>();   // 偵察 reports (§8.2)
         public readonly List<ArmyState> Armies = new List<ArmyState>();
         public readonly List<WatchTowerState> WatchTowers = new List<WatchTowerState>();
         public readonly List<FactionView> Factions = new List<FactionView>();
@@ -559,6 +653,7 @@ namespace LuanShi.Engine
         public readonly List<EventRecord> Events = new List<EventRecord>();
 
         public CityState FindCity(string id) => Cities.Find(c => c.Id == id);
+        public ScoutedCityView FindScoutedCity(string id) => ScoutedCities.Find(c => c.CityId == id);
         public ArmyState FindArmy(string id) => Armies.Find(a => a.Id == id);
         public WatchTowerState FindWatchTower(string id) => WatchTowers.Find(t => t.Id == id);
         public List<WatchTowerState> WatchTowersOf(string seatId) => WatchTowers.FindAll(t => t.OwnerSeatId == seatId);
@@ -571,6 +666,8 @@ namespace LuanShi.Engine
         {
             var cities = new List<string>(Cities.Count);
             foreach (var c in Cities) cities.Add(c.ToJson());
+            var scouted = new List<string>(ScoutedCities.Count);
+            foreach (var c in ScoutedCities) scouted.Add(c.ToJson());
             var armies = new List<string>(Armies.Count);
             foreach (var a in Armies) armies.Add(a.ToJson());
             var watchTowers = new List<string>(WatchTowers.Count);
@@ -597,6 +694,7 @@ namespace LuanShi.Engine
             sb.Append(",\"research\":").Append(ResearchLine.MapToJson(ResearchLevel));
             sb.Append(",\"winner_seat_id\":").Append(MiniJson.Str(WinnerSeatId));
             sb.Append(",\"cities\":").Append(MiniJson.Array(cities));
+            sb.Append(",\"scouted_cities\":").Append(MiniJson.Array(scouted));
             sb.Append(",\"armies\":").Append(MiniJson.Array(armies));
             sb.Append(",\"watch_towers\":").Append(MiniJson.Array(watchTowers));
             sb.Append(",\"factions\":").Append(MiniJson.Array(factions));

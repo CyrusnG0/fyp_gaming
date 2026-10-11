@@ -112,9 +112,17 @@ namespace LuanShi.Engine
         public const string DeclareWar = "declare_war";     // Declare war P5: target_id = seat
         public const string BreakTreaty = "break_treaty";   // Break treaty P6: target_id = seat, args.treaty_type
         public const string Research = "research";          // Research R1: args.line ∈ agri|military|espionage|governance
+        public const string Scout = "scout";                // Espionage E1 偵察: target_id = foreign/neutral city
+        public const string Rumor = "rumor";                // Espionage E2 散播謠言: target_id = foreign city
+        public const string SowDistrust = "sow_distrust";   // Espionage E3 挑撥離間: target_id = seat, args.target_b = seat
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";
+
+        /// <summary>Mission types whose order itself is a secret (ADR-015) — their `action` log entry is
+        /// owner-only, so a successful mission never names its author to anyone else.</summary>
+        public static bool IsCovert(string actionType)
+            => actionType == Scout || actionType == Rumor || actionType == SowDistrust;
     }
 
     /// <summary>

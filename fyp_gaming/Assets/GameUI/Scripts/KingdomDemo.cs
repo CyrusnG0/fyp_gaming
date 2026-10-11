@@ -1314,7 +1314,7 @@ namespace LuanShi
         }
 
         // ------------------------------------------------------------ concept tabs
-        // Domestic / Diplomacy / Intel / Research are display-only previews of the full design;
+        // Domestic / Diplomacy / Intelligence / Research are all live now;
         // History renders the real in-memory event log.
 
         /// <summary>Opens a concept panel by tab key. Same entry point the tab bar uses,
@@ -1424,7 +1424,7 @@ namespace LuanShi
             {
                 case "domestic":  DrawDomesticPanel(p, body); break;
                 case "diplomacy": DrawDiplomacyPanel(p, body); break;
-                case "intel":     DrawIntelPanel(p, body); break;
+                case "intel":     DrawIntelPanel(p, body, btn); break;
                 case "research":  DrawResearchPanel(p, body, btn); break;
                 default:          DrawHistorianPanel(p, body, mono); break;
             }
@@ -1451,7 +1451,7 @@ namespace LuanShi
             {
                 case "domestic":  return "Domestic · Orders";
                 case "diplomacy": return "Diplomacy · Orders";
-                case "intel":     return "Intel · Planned";
+                case "intel":     return "Intel · Orders";
                 case "research":  return "Research · Orders";
                 default:           return "History · Chronicle";
             }
@@ -1686,28 +1686,136 @@ namespace LuanShi
             return gold;
         }
 
-        void DrawIntelPanel(Rect p, GUIStyle body)
+        /// <summary>
+        /// 諜報 (design §8.2, P8/ADR-015): three missions, each an instant action gated by 諜報 research and
+        /// paid from the treasury. Rows submit real commands through the shared OrderButton pipeline, so the
+        /// engine stays the only authority; the targets are the foreign cities this seat can actually name
+        /// (in sight, or already scouted) and the seat pairs for 挑撥離間.
+        /// </summary>
+        void DrawIntelPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
+            int espionage = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "Fog of war: 3 hexes around our cities and 2 around our armies are visible; everything else is obscured.\nNo spies are active — enemy positions and troop counts are estimates.", body);
-            y += 52;
-
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Spy missions", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+                $"Intelligence ({engine.State.FindFaction(currentSeat)?.Name})  Espionage level {espionage}" +
+                $"  ·  success {BalanceConfig.SpySuccessChance(espionage) * 100f:F0}% per mission" +
+                $"  ·  gold {Treasury()}  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}", body);
+            y += 24;
+            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+                "Fog of war: 3 hexes around our cities, 2 around our armies. A failed mission exposes the agent publicly (prestige −8).", body);
             y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 66),
-                "[Planned] Scout 200 gold    [Planned] Steal reports 400 gold\n" +
-                "[Planned] Spread rumors 500 gold    [Planned] Forge reports 600 gold\n" +
-                "[Planned] Sow discord 800 gold    [Planned] Bribe general 1000 gold", body);
-            y += 74;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Counter-intelligence", body);
-            y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "[Planned] Patrol    [Planned] Investigate", body);
-            y += 30;
+            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Missions", body);
+            y += 20;
+            string[] missions =
+            {
+                $"Scout {BalanceConfig.ScoutGoldCost} gold · Espionage {BalanceConfig.ScoutResearchLevel} — target city's garrison and food (banded below Espionage {BalanceConfig.ScoutExactAccuracyLevel})",
+                $"Spread rumours {BalanceConfig.RumorGoldCost} gold · Espionage {BalanceConfig.RumorResearchLevel} — target city loses {BalanceConfig.RumorMoraleLoss} morale, deniably",
+                $"Sow distrust {BalanceConfig.SowDistrustGoldCost} gold · Espionage {BalanceConfig.SowDistrustResearchLevel} — two other seats lose {BalanceConfig.SowDistrustTrustPenalty} trust in each other",
+            };
+            foreach (string mission in missions)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 20), mission, body);
+                y += 20;
+            }
+            y += 8;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 40),
-                "Exposure check: base 5% + city security + target intelligence; suspicion >= 80 guarantees exposure.", body);
+            // targets: the foreign cities this seat can see right now
+            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Targets (foreign cities in sight)", body);
+            y += 22;
+            var targets = new List<CityState>();
+            if (obs != null)
+                foreach (var city in obs.Cities)
+                    if (city.OwnerSeatId != currentSeat) targets.Add(city);
+            if (targets.Count == 0)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 20),
+                    "No foreign city is in sight — march an army closer, then send an agent.", body);
+                y += 22;
+            }
+            int shown = 0;
+            foreach (var city in targets)
+            {
+                if (shown == 2) { GUI.Label(new Rect(p.x + 36, y, 744, 20), "... (remaining cities omitted)", body); y += 22; break; }
+                shown++;
+                var report = obs.FindScoutedCity(city.Id);
+                GUI.Label(new Rect(p.x + 36, y, 384, 20),
+                    $"{city.Name} ({OwnerName(city)})  garrison {city.Garrison}, morale {city.Morale}" +
+                    (report != null ? $", report until season {report.UntilSeason}" : ""), body);
+                OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, city.Id, "Scout",
+                    SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
+                OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, city.Id, "Rumours",
+                    city.IsNeutral ? "no faction to undermine"
+                                   : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
+                    0, 0, btn);
+                y += 26;
+            }
+
+            // live reports on cities nothing of ours can see — and the way to extend them, since a report
+            // is the only handle a seat has on a city outside its fog (ADR-015)
+            if (obs != null && obs.ScoutedCities.Count > 0)
+            {
+                GUI.Label(new Rect(p.x + 20, y, 760, 20), "Live reports", body);
+                y += 22;
+                foreach (var report in obs.ScoutedCities)
+                {
+                    string detail = report.Accuracy == "exact"
+                        ? $"exact · garrison {report.Garrison}, food {report.Food}, morale {report.Morale}"
+                        : $"band · troops {report.GarrisonBand}, food {report.FoodBand}";
+                    GUI.Label(new Rect(p.x + 36, y, 384, 20),
+                        $"{report.Name} ({SeatShort(report.OwnerSeatId)})  {detail}  ·  to season {report.UntilSeason}", body);
+                    OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, report.CityId, "Scout",
+                        SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
+                    OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, report.CityId, "Rumours",
+                        string.IsNullOrEmpty(report.OwnerSeatId) ? "no faction to undermine"
+                            : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
+                        0, 0, btn);
+                    y += 26;
+                }
+                y += 4;
+            }
+
+            // 挑撥離間 needs two other seats: offer the first pairs and say so when there are more
+            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Sow distrust between", body);
+            y += 22;
+            var others = new List<string>();
+            if (obs != null)
+                foreach (var view in obs.Factions)
+                    if (view.SeatId != currentSeat) others.Add(view.SeatId);
+            int pairs = 0;
+            for (int i = 0; i < others.Count; i++)
+            {
+                for (int j = i + 1; j < others.Count; j++)
+                {
+                    if (pairs == 2) break;
+                    pairs++;
+                    OrderButton(new Rect(p.x + 36, y, 300, 24), ActionType.SowDistrust, others[i],
+                        $"{SeatShort(others[i])} ↔ {SeatShort(others[j])}",
+                        SpyBlocked(BalanceConfig.SowDistrustResearchLevel, BalanceConfig.SowDistrustGoldCost),
+                        0, 0, btn, new Dictionary<string, string> { { "target_b", others[j] } });
+                    y += 28;
+                }
+                if (pairs == 2) break;
+            }
+            if (pairs == 0)
+            {
+                GUI.Label(new Rect(p.x + 36, y, 744, 20), "No other seat is known yet.", body);
+                y += 20;
+            }
+            else if (others.Count > 2)
+            {
+                GUI.Label(new Rect(p.x + 348, y - 26, 420, 20), "... (remaining pairs omitted)", body);
+            }
+        }
+
+        /// <summary>Why a mission cannot be ordered right now (mirrors the engine's SpyGate), or null.</summary>
+        string SpyBlocked(int requiredLevel, int goldCost)
+        {
+            int level = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
+            if (level < requiredLevel) return $"needs Espionage {requiredLevel}";
+            if (Treasury() < goldCost) return $"needs {goldCost} gold";
+            if (obs.CommandPoints < BalanceConfig.CommandPointsPerSpyMission) return "no orders left";
+            return null;
         }
 
         /// <summary>
@@ -1753,7 +1861,7 @@ namespace LuanShi
             y += 6;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
                 "Points arrive at every season rollover. Harvest, tax, combat and training-cap effects apply as soon as they resolve;\n" +
-                "律法 (level 3) and the income bonus settle at the next rollover. 學堂 the building (+3/season) and all Intelligence levels are deferred.", body);
+                "律法 (level 3) and the income bonus settle at the next rollover. 學堂 the building (+3/season) and Intelligence 3-5 effects are deferred.", body);
         }
 
         /// <summary>
@@ -1801,11 +1909,11 @@ namespace LuanShi
                 case ResearchLine.Espionage:
                     switch (level)
                     {
-                        case 1: return "Spies — deploy agents (deferred: espionage phase)";
-                        case 2: return "Counter-intelligence — domestic exposure +10% (deferred)";
-                        case 3: return "Forged reports (deferred)";
-                        case 4: return "Spy network — +2 agent slots (deferred)";
-                        case 5: return "No shadows — capture chance +25% (deferred)";
+                        case 1: return "Spies — unlocks Scout and Spread rumours missions (intel tab)";
+                        case 2: return "Counter-intelligence — unlocks Sow distrust missions (the +10% exposure bonus is deferred)";
+                        case 3: return "Forged reports (deferred: needs per-seat poisoned intel)";
+                        case 4: return "Spy network — +2 agent slots (deferred: no spy entities)";
+                        case 5: return "No shadows — capture chance +25% (deferred: no counter-intelligence)";
                     }
                     break;
                 default:

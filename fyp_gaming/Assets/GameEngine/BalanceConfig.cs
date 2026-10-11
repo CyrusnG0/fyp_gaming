@@ -111,6 +111,8 @@ namespace LuanShi.Engine
         public const int ScriptedNapTrustThreshold = 0;        // AI signs/offers 互不侵犯 at or above this 信任
         public const int ScriptedAllianceTrustThreshold = 30;  // TBD
         public const int ScriptedTruceTrustThreshold = -50;    // AI signs/offers 停戰 at or above this 信任
+        public const int ScriptedSpyGoldThreshold = 1000;      // TBD: spare gold before the baseline pays for a mission
+        public const int ScriptedSpyRumorEveryNthSeason = 3;   // TBD: baseline restraint — missions are occasional
 
         // ---- 天時 seasonal modifiers (design §3 「季節對糧食的影響」 table) --------
         // Seasons cycle 春 → 夏 → 秋 → 冬 by (Season − 1) % 4; SeasonReport/observation carry the name.
@@ -215,6 +217,51 @@ namespace LuanShi.Engine
             => (int)System.Math.Round(ResearchPointsPerSeason
                                       * (governanceLevel >= 4 ? 1f + ResearchGovIncomeBonus : 1f));
 
+        // ---- 諜報 espionage lite (design §8.2 missions, §8.3 exposure, §11 #30/#32) ---------
+        // MVP slice (ADR-015): no persistent spy entity, no 嫌疑 accumulation, no 秘密反用. A mission is an
+        // instant action gated by 諜報 research with **one** seeded success/failure roll; a failed mission
+        // does nothing and exposes the attacker (§8.3 公開處決 path). Gold is spent either way.
+
+        public const int CommandPointsPerSpyMission = 1;   // LOCKED (design §11 #30/#32): 偵察/挑撥離間 cost 1 號令
+        public const int ScoutGoldCost = 200;              // LOCKED (design §8.2 偵察)
+        public const int RumorGoldCost = 500;              // LOCKED (design §8.2 散播謠言)
+        public const int SowDistrustGoldCost = 800;        // LOCKED (design §8.2 挑撥離間)
+
+        public const int ScoutResearchLevel = 1;           // LOCKED (design §8.2 難度低 + §9 諜報 L1 細作可派間諜)
+        public const int RumorResearchLevel = 1;           // TBD: design §11 gives 散播謠言 no research gate
+        public const int SowDistrustResearchLevel = 2;     // TBD (P8 brief); design §11 #32 asks 諜報 3 — OPEN_QUESTIONS 21
+
+        public const float SpyBaseSuccessChance = 0.70f;   // TBD: the design gives 難度 words (低/中/高), no numbers
+        public const float SpySuccessPerLevel = 0.05f;     // TBD: +5 percentage points per 諜報 level
+
+        public const int ScoutExactAccuracyLevel = 3;      // TBD: design §8.2 「準確度依諜報等級」 → L1-2 banded, L3+ exact
+        public const int ScoutBandLowTroops = 1000;        // TBD: 少 < 1,000 兵力
+        public const int ScoutBandMidTroops = 3000;        // TBD: 中 < 3,000, 多 ≥ 3,000
+        public const int ScoutBandLowFood = 500;           // TBD: the same 少/中/多 idea applied to 糧草
+        public const int ScoutBandMidFood = 2000;          // TBD
+        public const int ScoutReportExtraSeasons = 1;      // TBD: a 偵察 report covers this season and the next
+        public const string ScoutAccuracyBand = "band";    // 少/中/多 words, never the numbers
+        public const string ScoutAccuracyExact = "exact";  // 諜報 L3+ reports the real numbers
+
+        public const int RumorMoraleLoss = 10;             // LOCKED (design §8.2 散播謠言): 目標城民心 −10
+        public const int SowDistrustTrustPenalty = 10;     // LOCKED (design §8.2 挑撥離間): 兩國之間信任 −10
+        public const int SpyExposedPrestigePenalty = 8;    // LOCKED (design §7.3 table: 散播謠言被識破 → 威望 −8)
+        public const int SpyExposedTrustPenalty = 10;      // TBD: one flat penalty for all three missions — the
+                                                          // design's table prices 散播謠言被識破 at 信任 −20 (OPEN_QUESTIONS 22)
+
+        /// <summary>§8.2/§8.3: chance a mission succeeds = base + 諜報 level × per-level, capped at certainty.
+        /// L1 75% · L2 80% · L3 85% · L4 90% · L5 95%.</summary>
+        public static float SpySuccessChance(int espionageLevel)
+            => System.Math.Min(1f, SpyBaseSuccessChance + espionageLevel * SpySuccessPerLevel);
+
+        /// <summary>§8.2 準確度依諜報等級: L3+ reports exact numbers, below that only the 少/中/多 band.</summary>
+        public static string ScoutAccuracy(int espionageLevel)
+            => espionageLevel >= ScoutExactAccuracyLevel ? ScoutAccuracyExact : ScoutAccuracyBand;
+
+        /// <summary>The 少/中/多 words (thresholds TBD): what a low-level 偵察 can actually report.</summary>
+        public static string BandLabel(int value, int low, int mid)
+            => value < low ? "few" : value < mid ? "some" : "many";
+
         /// <summary>
         /// 號令 cost of an action — the spec's "CP" column lives here so neither a handler nor a UI
         /// label hardcodes it (ACTIONS.md §3–§5). Anything the spec does not price costs the default.
@@ -229,6 +276,9 @@ namespace LuanShi.Engine
                 case ActionType.RespondTreaty: return CommandPointsPerTalk;
                 case ActionType.AttackCity: return CommandPointsPerAttackCity;
                 case ActionType.Research: return ResearchCommandPoints;
+                case ActionType.Scout:
+                case ActionType.Rumor:
+                case ActionType.SowDistrust: return CommandPointsPerSpyMission;
                 default: return CommandPointsPerOrder;
             }
         }
