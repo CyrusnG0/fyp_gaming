@@ -39,7 +39,7 @@ namespace LuanShi.Engine
                     int attackCost = BalanceConfig.CommandPointCost(ActionType.AttackArmy);
                     if (cp < attackCost) break;
                     if (army.Troops * 100 < enemy.Troops * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
-                    plan.Add(Order(ActionType.AttackArmy, seatId, army.Id, "決戰", enemy.X, enemy.Z));
+                    plan.Add(Order(ActionType.AttackArmy, seatId, army.Id, "Fight decisive battle", enemy.X, enemy.Z));
                     cp -= attackCost;
                     committed.Add(army.Id);
                     break;
@@ -55,7 +55,7 @@ namespace LuanShi.Engine
                     if (cp < assaultCost) break;
                     if (army.Troops * 100 < city.Garrison * BalanceConfig.AssaultTroopRatio
                                                             * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
-                    plan.Add(Order(ActionType.AttackCity, seatId, army.Id, "攻取城池", city.X, city.Z));
+                    plan.Add(Order(ActionType.AttackCity, seatId, army.Id, "Capture city", city.X, city.Z));
                     cp -= assaultCost;
                     committed.Add(army.Id);
                     break;
@@ -68,7 +68,7 @@ namespace LuanShi.Engine
                 if (cp <= 0) break;
                 if (city.Gold >= BalanceConfig.RecruitGoldCost) continue;
                 if (city.Morale - BalanceConfig.TaxLevyMoraleCost < BalanceConfig.MoraleYieldPenaltyThreshold) continue;
-                plan.Add(Order(ActionType.LevyTax, seatId, city.Id, "國庫空虛"));
+                plan.Add(Order(ActionType.LevyTax, seatId, city.Id, "Treasury is empty"));
                 cp--;
             }
 
@@ -78,7 +78,7 @@ namespace LuanShi.Engine
                 if (cp <= 0) break;
                 if (city.ReclaimedThisSeason) continue;
                 if (city.ReclaimPct >= BalanceConfig.ReclaimPctCap) continue;
-                plan.Add(Order(ActionType.Reclaim, seatId, city.Id, "積穀防饑"));
+                plan.Add(Order(ActionType.Reclaim, seatId, city.Id, "Build food reserves"));
                 cp--;
             }
 
@@ -89,7 +89,7 @@ namespace LuanShi.Engine
                 if (capital.Gold >= BalanceConfig.RecruitGoldCost
                     && capital.Population >= BalanceConfig.RecruitPopCost)
                 {
-                    plan.Add(Order(ActionType.Recruit, seatId, capital.Id, "擴軍備戰"));
+                    plan.Add(Order(ActionType.Recruit, seatId, capital.Id, "Expand and prepare the army"));
                     cp--;
                 }
             }
@@ -100,7 +100,7 @@ namespace LuanShi.Engine
                 if (cp <= 0) break;
                 if (city.Morale >= BalanceConfig.MoraleYieldPenaltyThreshold) continue;
                 if (city.Food < BalanceConfig.ReliefFoodCost) continue;
-                plan.Add(Order(ActionType.Relief, seatId, city.Id, "安撫百姓"));
+                plan.Add(Order(ActionType.Relief, seatId, city.Id, "Reassure the people"));
                 cp--;
             }
 
@@ -109,7 +109,7 @@ namespace LuanShi.Engine
             {
                 if (cp <= 0) break;
                 if (city.Training >= BalanceConfig.TrainingMax) continue;
-                plan.Add(Order(ActionType.Train, seatId, city.Id, "練兵備戰"));
+                plan.Add(Order(ActionType.Train, seatId, city.Id, "Train for war"));
                 cp--;
             }
 
@@ -117,7 +117,7 @@ namespace LuanShi.Engine
             {
                 if (cp <= 0) break;
                 if (city.Defense >= BalanceConfig.DefenseMax) continue;
-                plan.Add(Order(ActionType.Fortify, seatId, city.Id, "鞏固城防"));
+                plan.Add(Order(ActionType.Fortify, seatId, city.Id, "Strengthen city defenses"));
                 cp--;
             }
 
@@ -142,7 +142,7 @@ namespace LuanShi.Engine
                     }
                     if (target != null)
                     {
-                        plan.Add(Order(ActionType.March, seatId, best.Id, "開拓疆土",
+                        plan.Add(Order(ActionType.March, seatId, best.Id, "Expand territory",
                             target.X, target.Z));
                     }
                 }
@@ -188,7 +188,7 @@ namespace LuanShi.Engine
                     default: accept = false; break;
                 }
                 plan.Add(Order(ActionType.RespondTreaty, seatId, proposal.FromSeatId,
-                    accept ? "締約" : "婉拒",
+                    accept ? "Sign treaty" : "Decline treaty",
                     args: new Dictionary<string, string> { { "response", accept ? "accept" : "reject" } }));
             }
 
@@ -202,14 +202,14 @@ namespace LuanShi.Engine
                 if (dip.IsAtWar(seatId, other.SeatId))
                 {
                     if (dip.GetTrust(seatId, other.SeatId) < BalanceConfig.ScriptedTruceTrustThreshold) continue;
-                    plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "求成",
+                    plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "Seek peace",
                         args: new Dictionary<string, string> { { "treaty_type", TreatyType.Truce } }));
                     return;
                 }
 
                 if (dip.GetTrust(seatId, other.SeatId) < BalanceConfig.ScriptedNapTrustThreshold) continue;
                 if (dip.HasTreaty(TreatyType.Nap, seatId, other.SeatId)) continue;
-                plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "和好",
+                plan.Add(Order(ActionType.ProposeTreaty, seatId, other.SeatId, "Make peace",
                     args: new Dictionary<string, string> { { "treaty_type", TreatyType.Nap } }));
                 return;
             }

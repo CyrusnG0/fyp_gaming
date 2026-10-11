@@ -73,7 +73,7 @@ namespace LuanShi.Engine
                     int lost = (int)(city.Population * BalanceConfig.StarvationPopLoss);
                     city.Population -= lost;
                     city.Food = 0;
-                    note = $"饑荒！人口減{lost}";
+                    note = $"Famine! Population reduced by {lost}";
                     Emit(city.OwnerSeatId, fac?.Controller, "starvation", "public",
                         P("city_id", city.Id, "pop_lost", lost.ToString()), null);
                 }
@@ -84,8 +84,8 @@ namespace LuanShi.Engine
                     city.Population += (int)(city.Population * rate);
                 }
 
-                string line = $"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}，民心{city.Morale}"
-                            + (disheartened ? $"（民心<{BalanceConfig.MoraleYieldPenaltyThreshold}，產出減半）" : "")
+                string line = $"{city.Name}: population {city.Population}, food {city.Food}, gold {city.Gold}, garrison {city.Garrison}, morale {city.Morale}"
+                            + (disheartened ? $" (morale < {BalanceConfig.MoraleYieldPenaltyThreshold}, yields halved)" : "")
                             + (note != null ? $"。{note}" : "");
                 report.Lines.Add(line);
                 report.CityLines[city.Id] = line;      // keyed so a seat can read only the cities it can see

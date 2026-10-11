@@ -95,22 +95,22 @@ namespace LuanShi.Engine
     /// <summary>Action vocabulary for the MVP strategic layer (ACTIONS.md §3–§4).</summary>
     public static class ActionType
     {
-        public const string LevyTax = "levy_tax";           // 徵稅 D1: target_id = city
-        public const string LightenLabor = "lighten_labor"; // 輕徭 D2: target_id = city
-        public const string Reclaim = "reclaim";            // 開墾 D3: target_id = city, food yield +ReclaimPctPerUse%
-        public const string Recruit = "recruit";            // 募兵 D4: target_id = city
-        public const string Train = "train";                // 練兵 D5: target_id = city, Training +1
-        public const string Fortify = "fortify";            // 修城 D6: target_id = city, Defense +1
-        public const string Relief = "relief";              // 賑災 D7: target_id = city, 民心 +ReliefMoraleGain
-        public const string March = "march";                // 行軍 M1: target_id = army, param_a/b = dest hex x,z
-        public const string AttackArmy = "attack_army";     // 野戰 M2: target_id = own army, param_a/b = enemy army hex
-        public const string AttackCity = "attack_city";     // 攻城 M3: target_id = own army, param_a/b = enemy city hex
-        public const string SendMessage = "send_message";   // 遣使 P1: target_id = recipient seat, text = 訊息
-        public const string ProposeTreaty = "propose_treaty";  // 提出條約 P2: target_id = seat, args.treaty_type/duration
-        public const string RespondTreaty = "respond_treaty";  // 接受/拒絕 P3: target_id = proposer seat, args.response
-        public const string Gift = "gift";                  // 贈禮 P4: target_id = seat, param_a = gold amount
-        public const string DeclareWar = "declare_war";     // 宣戰 P5: target_id = seat
-        public const string BreakTreaty = "break_treaty";   // 背盟/毀約 P6: target_id = seat, args.treaty_type
+        public const string LevyTax = "levy_tax";           // Tax D1: target_id = city
+        public const string LightenLabor = "lighten_labor"; // Lighten labor D2: target_id = city
+        public const string Reclaim = "reclaim";            // Reclaim D3: target_id = city, food yield +ReclaimPctPerUse%
+        public const string Recruit = "recruit";            // Recruit D4: target_id = city
+        public const string Train = "train";                // Train D5: target_id = city, Training +1
+        public const string Fortify = "fortify";            // Fortify D6: target_id = city, Defense +1
+        public const string Relief = "relief";              // Relief D7: target_id = city, morale +ReliefMoraleGain
+        public const string March = "march";                // March M1: target_id = army, param_a/b = dest hex x,z
+        public const string AttackArmy = "attack_army";     // Field battle M2: target_id = own army, param_a/b = enemy army hex
+        public const string AttackCity = "attack_city";     // Siege M3: target_id = own army, param_a/b = enemy city hex
+        public const string SendMessage = "send_message";   // Send message P1: target_id = recipient seat, text = message
+        public const string ProposeTreaty = "propose_treaty";  // Propose treaty P2: target_id = seat, args.treaty_type/duration
+        public const string RespondTreaty = "respond_treaty";  // Accept/reject P3: target_id = proposer seat, args.response
+        public const string Gift = "gift";                  // Gift P4: target_id = seat, param_a = gold amount
+        public const string DeclareWar = "declare_war";     // Declare war P5: target_id = seat
+        public const string BreakTreaty = "break_treaty";   // Break treaty P6: target_id = seat, args.treaty_type
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";
@@ -131,7 +131,7 @@ namespace LuanShi.Engine
         public int ParamA;              // march: dest x
         public int ParamB;              // march: dest z
         public Dictionary<string, string> Args;   // schema v2 extras, e.g. treaty_type; null when unused
-        public string Text;             // 遣使/條約附言, logged but never executed; null when unused
+        public string Text;             // envoy/treaty note, logged but never executed; null when unused
         public string Reason;           // free text, stored as research data, never executed
 
         public string ToJson()
