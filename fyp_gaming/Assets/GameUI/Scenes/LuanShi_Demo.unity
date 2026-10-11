@@ -226,8 +226,10 @@ MonoBehaviour:
   weiCityObj: City_Wei
   shuCityObj: City_Shu
   southCityObj: City_South
+  watchTowerObj: Watch Tower
   weiArmyObj: Wei_Army1
   shuArmyObj: Shu_Army1
+  watchTowerImage: {fileID: 2800000, guid: 3010459a209c597469d2915330a7324c, type: 3}
   unusedArmyObjs:
   - Wei_Army2
   - Wei_Army3

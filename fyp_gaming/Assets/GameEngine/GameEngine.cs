@@ -306,6 +306,13 @@ namespace LuanShi.Engine
                 Emit(fac.SeatId, fac.Controller, "city_captured", "public",
                     P("city_id", cityAtDest.Id, "army_id", army.Id), cmd.ActionId);
             }
+            var towerAtDest = State.WatchTowerAt(tx, tz);
+            if (towerAtDest != null && towerAtDest.IsNeutral)
+            {
+                towerAtDest.OwnerSeatId = fac.SeatId;
+                Emit(fac.SeatId, fac.Controller, "watch_tower_captured", "public",
+                    P("watch_tower_id", towerAtDest.Id, "army_id", army.Id), cmd.ActionId);
+            }
             return ValidationResult.Success;
         }
 
@@ -352,6 +359,8 @@ namespace LuanShi.Engine
                 if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
             foreach (var army in State.Armies)
                 if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(army);
+            foreach (var tower in State.WatchTowers)
+                if (InSight(seatId, tower.X, tower.Z)) obs.WatchTowers.Add(tower);
 
             foreach (var other in State.Factions)
             {
@@ -383,8 +392,9 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Fog ranges (ACTIONS.md §9): a hex within FogCityRange of an own city, or FogArmyRange of an own
-        /// army, is seen regardless of who stands there. Terrain does not block sight (a radius, not a line).
+        /// Fog ranges (ACTIONS.md §9): a hex within FogCityRange of an own city, FogArmyRange of an own
+        /// army, or FogWatchTowerRange of an own watchtower is seen regardless of who stands there. Terrain
+        /// does not block sight (a radius, not a line).
         /// </summary>
         public bool InSight(string seatId, int x, int z)
         {
@@ -394,6 +404,9 @@ namespace LuanShi.Engine
             foreach (var army in State.Armies)
                 if (army.OwnerSeatId == seatId
                     && State.Map.HexDistance(army.X, army.Z, x, z, BalanceConfig.FogArmyRange) >= 0) return true;
+            foreach (var tower in State.WatchTowers)
+                if (tower.OwnerSeatId == seatId
+                    && State.Map.HexDistance(tower.X, tower.Z, x, z, BalanceConfig.FogWatchTowerRange) >= 0) return true;
             return false;
         }
 

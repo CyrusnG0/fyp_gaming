@@ -21,14 +21,22 @@ namespace LuanShi
         public string weiCityObj = "City_Wei";
         public string shuCityObj = "City_Shu";
         public string southCityObj = "City_South";
+        public string watchTowerObj = "Watch Tower";
         public string weiArmyObj = "Wei_Army1";
         public string shuArmyObj = "Shu_Army1";
+        public Texture2D watchTowerImage;
         [FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
         public string[] extraArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
                                           "Shu_Army2", "Shu_Army3", "Shu_Army4" };
 
         [Header("Game setup")]
         public int randomSeed = 12345;
+
+        [Header("Fog of war")]
+        [Tooltip("Photo used to cover grid cells outside the current seat's vision. Defaults to Assets/GameUI/Art/fog.png.")]
+        public Texture2D fogPhoto;
+        public Color fogPhotoTint = Color.white;
+        public float fogPhotoHeight = 0.08f;
 
         [Header("Seats (data-driven; the engine supports up to 8, AGENTS.md #6)")]
         [Tooltip("Seat ids played by people at this keyboard. Every other seat is scripted. " +
@@ -60,8 +68,16 @@ namespace LuanShi
 
         private readonly Dictionary<string, GameObject> cityObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, GameObject> armyObjs = new Dictionary<string, GameObject>();
+        private readonly Dictionary<string, GameObject> watchTowerObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, Color> factionColors = new Dictionary<string, Color>();
         private readonly Dictionary<Color, Material> markerMaterials = new Dictionary<Color, Material>();
+
+        private bool locationChoiceOpen;
+        private int locationChoiceX;
+        private int locationChoiceZ;
+        private Rect locationChoiceRect;
+        private readonly List<SpriteRenderer> fogOverlays = new List<SpriteRenderer>();
+        private Transform fogOverlayRoot;
 
         // selection & UI state
         private CityState selCity;
@@ -174,6 +190,7 @@ namespace LuanShi
 
             engine = new GameEngine(randomSeed);
             engine.State.Map = map;
+            InitializeFogOverlays(nodes, w, h);
 
             factionColors[SeatA] = new Color(0.40f, 0.55f, 0.95f);   // 魏 blue
             factionColors[SeatB] = new Color(0.45f, 0.80f, 0.45f);   // 蜀 green
@@ -184,6 +201,7 @@ namespace LuanShi
             AddCity(weiCityObj, "city-wei", "魏都", SeatA);
             AddCity(shuCityObj, "city-shu", "成都", SeatB);
             AddCity(southCityObj, "city-south", "南城", null);
+            AddWatchTower(watchTowerObj, "watch-tower-1", "Watch Tower", 6, 2);
 
             AddArmy(weiArmyObj, "army-wei-1", "魏軍", SeatA);
             AddArmy(shuArmyObj, "army-shu-1", "蜀軍", SeatB);
@@ -246,6 +264,47 @@ namespace LuanShi
             engine.State.Cities.Add(city);
             cityObjs[id] = go;
             TintCity(id);
+        }
+
+        void AddWatchTower(string objName, string id, string displayName, int x, int z)
+        {
+            var node = TBTK.GridManager.GetNode(x, z);
+            if (node == null) throw new System.Exception("watch tower is not on a grid node");
+
+            var go = FindSceneObject(objName);
+            if (go == null)
+            {
+                go = new GameObject(objName);
+                go.transform.position = node.GetPos();
+                var renderer = go.AddComponent<SpriteRenderer>();
+                if (watchTowerImage != null)
+                    renderer.sprite = Sprite.Create(watchTowerImage,
+                        new Rect(0f, 0f, watchTowerImage.width, watchTowerImage.height),
+                        new Vector2(0.5f, 0.5f), 100f);
+            }
+            else
+            {
+                var sceneNode = TBTK.GridManager.GetNode(go.transform.position, null);
+                if (sceneNode == null) throw new System.Exception(objName + " is not on a grid node");
+                node = sceneNode;
+                go.transform.position = node.GetPos();
+            }
+
+            go.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
+            go.transform.localEulerAngles = new Vector3(45f, 0f, 0f);
+            var towerPosition = go.transform.position;
+            towerPosition.y = 0.55f;
+            go.transform.position = towerPosition;
+
+            engine.State.WatchTowers.Add(new WatchTowerState
+            {
+                Id = id,
+                Name = displayName,
+                X = node.idxX,
+                Z = node.idxZ,
+                OwnerSeatId = null,
+            });
+            watchTowerObjs[id] = go;
         }
 
         void AddArmy(string objName, string id, string displayName, string ownerSeat)
@@ -376,13 +435,58 @@ namespace LuanShi
             if (cam == null) return;
             var ray = cam.ScreenPointToRay(Input.mousePosition);
             var node = ResolveClickedNode(ray);
-            if (node == null) return;
+            if (node == null)
+            {
+                locationChoiceOpen = false;
+                ClearArmyMoveTargets();
+                selCity = null;
+                selArmy = null;
+                e.Use();
+                return;
+            }
 
             var city = engine.State.CityAt(node.idxX, node.idxZ);
             var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
+            bool citySelectable = city != null && (city.OwnerSeatId == currentSeat
+                || (obs != null && obs.FindCity(city.Id) != null));
+
+            if (locationChoiceOpen && node.idxX == locationChoiceX && node.idxZ == locationChoiceZ)
+            {
+                locationChoiceOpen = false;
+                e.Use();
+                return;
+            }
+
+            locationChoiceOpen = false;
+
+            if (selCity != null && city == null && army == null)
+            {
+                selCity = null;
+                e.Use();
+                return;
+            }
+
+            if (army != null && citySelectable)
+            {
+                locationChoiceOpen = true;
+                locationChoiceX = node.idxX;
+                locationChoiceZ = node.idxZ;
+                selCity = null;
+                selArmy = null;
+                ClearArmyMoveTargets();
+                e.Use();
+                return;
+            }
 
             if (army != null)
             {
+                if (selArmy != null && selArmy.Id == army.Id)
+                {
+                    selArmy = null;
+                    ClearArmyMoveTargets();
+                    e.Use();
+                    return;
+                }
                 selArmy = army;
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
@@ -400,12 +504,24 @@ namespace LuanShi
             if (city != null && city.OwnerSeatId == currentSeat)
             {
                 ClearArmyMoveTargets();
+                if (selCity != null && selCity.Id == city.Id)
+                {
+                    selCity = null;
+                    e.Use();
+                    return;
+                }
                 selCity = city; selArmy = null; e.Use(); return;
             }
             // a foreign city can only be selected while the current seat can actually see it (fog)
             if (city != null && obs != null && obs.FindCity(city.Id) != null)
             {
                 ClearArmyMoveTargets();
+                if (selCity != null && selCity.Id == city.Id)
+                {
+                    selCity = null;
+                    e.Use();
+                    return;
+                }
                 selCity = city; selArmy = null;
                 statusMsg = city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市";
                 e.Use();
@@ -482,6 +598,7 @@ namespace LuanShi
             {
                 ClearArmyMoveTargets();
                 SyncArmyVisual(cmd.TargetId);
+                selArmy = null;
             }
             if (r.Ok && IsBattle(cmd.Type))
             {
@@ -571,6 +688,85 @@ namespace LuanShi
         {
             obs = engine.Observe(currentSeat);
             ApplyFog();
+            RefreshFogOverlays();
+        }
+
+        void InitializeFogOverlays(TBTK.Node[,] nodes, int width, int height)
+        {
+#if UNITY_EDITOR
+            if (fogPhoto == null)
+                fogPhoto = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/GameUI/Art/fog.png");
+            if (fogPhoto == null)
+            {
+                string fogPath = Path.Combine(Application.dataPath, "GameUI/Art/fog.png");
+                if (File.Exists(fogPath))
+                {
+                    fogPhoto = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    fogPhoto.name = "fog_runtime";
+                    if (!fogPhoto.LoadImage(File.ReadAllBytes(fogPath), false))
+                        fogPhoto = null;
+                }
+            }
+#endif
+            if (fogPhoto == null)
+            {
+                Debug.LogWarning("[KingdomDemo] Fog photo is not assigned; grid fog overlays are disabled.");
+                return;
+            }
+
+            var root = new GameObject("FogOfWarOverlays");
+            fogOverlayRoot = root.transform;
+            var fogSprite = Sprite.Create(fogPhoto, new Rect(0f, 0f, fogPhoto.width, fogPhoto.height),
+                                          new Vector2(0.5f, 0.5f), 100f);
+
+            float nodeSize = TBTK.GridManager.GetNodeSize();
+            float spriteSize = Mathf.Max(fogSprite.bounds.size.x, fogSprite.bounds.size.y);
+            float overlayScale = spriteSize > 0f ? nodeSize * 1.08f / spriteSize : 1f;
+
+            for (int x = 0; x < width; x++)
+                for (int z = 0; z < height; z++)
+                {
+                    var node = nodes[x, z];
+                    if (node == null) continue;
+
+                    var overlay = new GameObject("Fog_" + x + "_" + z);
+                    overlay.transform.SetParent(fogOverlayRoot, true);
+                    overlay.transform.position = node.GetPos() + Vector3.up * fogPhotoHeight;
+                    overlay.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    overlay.transform.localScale = Vector3.one * overlayScale;
+
+                    var renderer = overlay.AddComponent<SpriteRenderer>();
+                    renderer.sprite = fogSprite;
+                    renderer.color = fogPhotoTint;
+                    renderer.sortingOrder = 100;
+                    renderer.enabled = false;
+                    fogOverlays.Add(renderer);
+                }
+
+                    Debug.Log("[KingdomDemo] Created " + fogOverlays.Count + " fog overlays from " + fogPhoto.name + ".");
+        }
+
+        void RefreshFogOverlays()
+        {
+            if (fogOverlayRoot == null || engine == null || currentSeat == null) return;
+
+            int index = 0;
+            int hiddenCount = 0;
+            int width = engine.State.Map.Width;
+            int height = engine.State.Map.Height;
+            for (int x = 0; x < width; x++)
+                for (int z = 0; z < height; z++)
+                {
+                    var node = TBTK.GridManager.GetNode(x, z);
+                    if (node == null) continue;
+
+                        bool hidden = !engine.InSight(currentSeat, x, z);
+                        fogOverlays[index].enabled = hidden;
+                        if (hidden) hiddenCount++;
+                    index++;
+                }
+
+                    Debug.Log("[KingdomDemo] Fog refresh: " + hiddenCount + " hidden cells for " + currentSeat + ".");
         }
 
         /// <summary>
@@ -580,11 +776,6 @@ namespace LuanShi
         /// </summary>
         void ApplyFog()
         {
-            foreach (var kv in cityObjs)
-            {
-                bool visible = obs != null && obs.FindCity(kv.Key) != null;
-                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
-            }
             foreach (var kv in armyObjs)
             {
                 bool visible = obs != null && obs.FindArmy(kv.Key) != null;
@@ -806,11 +997,16 @@ namespace LuanShi
                 if (selCity != null) DrawCityPanel(selCity, body, btn);
                 else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
             }
+            DrawLocationChoice(body, btn);
 
             // end this seat's turn (single-human mode ends the season, as before)
             var end = new Rect(1400, 8, 190, 44);
             uiRects.Add(end);
-            if (GUI.Button(end, hotseat ? $"結束 {fac.Name} 回合" : "結束季節", btn)) EndTurn();
+            if (GUI.Button(end, hotseat ? $"結束 {fac.Name} 回合" : "結束季節", btn))
+            {
+                locationChoiceOpen = false;
+                EndTurn();
+            }
             if (hotseat)
                 GUI.Label(new Rect(1400, 56, 190, 22), $"回合：{fac.Name}", mono);
 
@@ -826,6 +1022,52 @@ namespace LuanShi
             if (reportShowing) DrawReport(body, btn, title);
 
             HandleClicks();
+        }
+
+        void DrawLocationChoice(GUIStyle body, GUIStyle btn)
+        {
+            if (!locationChoiceOpen || activeTab != "map") return;
+
+            var node = TBTK.GridManager.GetNode(locationChoiceX, locationChoiceZ);
+            var city = engine.State.CityAt(locationChoiceX, locationChoiceZ);
+            var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == locationChoiceX && a.Z == locationChoiceZ);
+            if (node == null || city == null || army == null)
+            {
+                locationChoiceOpen = false;
+                return;
+            }
+
+            float scale = Screen.width / 1600f;
+            Vector3 screenPoint = Camera.main != null
+                ? Camera.main.WorldToScreenPoint(node.GetPos())
+                : new Vector3(800f * scale, Screen.height * 0.5f, 1f);
+            float x = screenPoint.x / scale + 24f;
+            float y = (Screen.height - screenPoint.y) / scale - 42f;
+            const float width = 220f;
+            const float height = 112f;
+            x = Mathf.Clamp(x, 8f, 1600f - width - 8f);
+            y = Mathf.Clamp(y, 50f, 900f - height - 8f);
+
+            locationChoiceRect = new Rect(x, y, width, height);
+            uiRects.Add(locationChoiceRect);
+            DrawBackdrop(locationChoiceRect);
+            GUI.Label(new Rect(x + 12f, y + 8f, width - 24f, 22f), "選擇要查看的目標", body);
+
+            if (GUI.Button(new Rect(x + 12f, y + 42f, width - 24f, 28f), city.Name, btn))
+            {
+                locationChoiceOpen = false;
+                selCity = city;
+                selArmy = null;
+            }
+            if (GUI.Button(new Rect(x + 12f, y + 76f, width - 24f, 28f), army.Name, btn))
+            {
+                locationChoiceOpen = false;
+                selArmy = army;
+                selCity = null;
+                TBTK.GridIndicator.SetSelect(node);
+                ShowArmyMoveTargets(army);
+                statusMsg = "已選擇 " + army.Name + " — 點選目的地";
+            }
         }
 
         /// <summary>
