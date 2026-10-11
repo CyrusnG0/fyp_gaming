@@ -102,6 +102,29 @@ namespace LuanShi.Engine
         }
     }
 
+    public sealed class WatchTowerState
+    {
+        public string Id;
+        public string Name;
+        public int X, Z;
+        public string OwnerSeatId;
+
+        public bool IsNeutral => string.IsNullOrEmpty(OwnerSeatId);
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"id\":").Append(MiniJson.Str(Id));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
     /// <summary>
     /// Engine-owned copy of the strategic map. The Unity adapter builds this once from
     /// the TBTK grid; the engine never touches Unity types. Neighbors are hex-adjacency
@@ -384,6 +407,7 @@ namespace LuanShi.Engine
         public readonly DiplomacyState Diplomacy = new DiplomacyState();
         public readonly List<CityState> Cities = new List<CityState>();
         public readonly List<ArmyState> Armies = new List<ArmyState>();
+        public readonly List<WatchTowerState> WatchTowers = new List<WatchTowerState>();
         public MapData Map;
 
         public FactionState FindFaction(string seatId) => Factions.Find(f => f.SeatId == seatId);
@@ -391,6 +415,7 @@ namespace LuanShi.Engine
         public ArmyState FindArmy(string id) => Armies.Find(a => a.Id == id);
         public CityState CityAt(int x, int z) => Cities.Find(c => c.X == x && c.Z == z);
         public ArmyState ArmyAt(int x, int z) => Armies.Find(a => a.X == x && a.Z == z);
+        public WatchTowerState WatchTowerAt(int x, int z) => WatchTowers.Find(t => t.X == x && t.Z == z);
 
         public List<CityState> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
         public List<ArmyState> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
@@ -456,6 +481,7 @@ namespace LuanShi.Engine
 
         public readonly List<CityState> Cities = new List<CityState>();
         public readonly List<ArmyState> Armies = new List<ArmyState>();
+        public readonly List<WatchTowerState> WatchTowers = new List<WatchTowerState>();
         public readonly List<FactionView> Factions = new List<FactionView>();
         public readonly List<RelationView> Relations = new List<RelationView>();
         public readonly List<TreatyRecord> Treaties = new List<TreatyRecord>();
@@ -464,6 +490,8 @@ namespace LuanShi.Engine
 
         public CityState FindCity(string id) => Cities.Find(c => c.Id == id);
         public ArmyState FindArmy(string id) => Armies.Find(a => a.Id == id);
+        public WatchTowerState FindWatchTower(string id) => WatchTowers.Find(t => t.Id == id);
+        public List<WatchTowerState> WatchTowersOf(string seatId) => WatchTowers.FindAll(t => t.OwnerSeatId == seatId);
         public List<CityState> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
         public List<ArmyState> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
         public FactionView Faction(string seatId) => Factions.Find(f => f.SeatId == seatId);
@@ -475,6 +503,8 @@ namespace LuanShi.Engine
             foreach (var c in Cities) cities.Add(c.ToJson());
             var armies = new List<string>(Armies.Count);
             foreach (var a in Armies) armies.Add(a.ToJson());
+            var watchTowers = new List<string>(WatchTowers.Count);
+            foreach (var tower in WatchTowers) watchTowers.Add(tower.ToJson());
             var factions = new List<string>(Factions.Count);
             foreach (var f in Factions) factions.Add(f.ToJson());
             var relations = new List<string>(Relations.Count);
@@ -494,6 +524,7 @@ namespace LuanShi.Engine
             sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
             sb.Append(",\"cities\":").Append(MiniJson.Array(cities));
             sb.Append(",\"armies\":").Append(MiniJson.Array(armies));
+            sb.Append(",\"watch_towers\":").Append(MiniJson.Array(watchTowers));
             sb.Append(",\"factions\":").Append(MiniJson.Array(factions));
             sb.Append(",\"relations\":").Append(MiniJson.Array(relations));
             sb.Append(",\"treaties\":").Append(MiniJson.Array(treaties));

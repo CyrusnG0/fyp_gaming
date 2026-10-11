@@ -73,7 +73,7 @@ namespace LuanShi.Engine
                     int lost = (int)(city.Population * BalanceConfig.StarvationPopLoss);
                     city.Population -= lost;
                     city.Food = 0;
-                    note = $"饑荒！人口減{lost}";
+                    note = $"Famine! Population reduced by {lost}";
                     Emit(city.OwnerSeatId, fac?.Controller, "starvation", "public",
                         P("city_id", city.Id, "pop_lost", lost.ToString()), null);
                 }
@@ -84,8 +84,8 @@ namespace LuanShi.Engine
                     city.Population += (int)(city.Population * rate);
                 }
 
-                string line = $"{city.Name}：人口{city.Population}，糧{city.Food}，金{city.Gold}，駐軍{city.Garrison}，民心{city.Morale}"
-                            + (disheartened ? $"（民心<{BalanceConfig.MoraleYieldPenaltyThreshold}，產出減半）" : "")
+                string line = $"{city.Name}: population {city.Population}, food {city.Food}, gold {city.Gold}, garrison {city.Garrison}, morale {city.Morale}"
+                            + (disheartened ? $" (morale < {BalanceConfig.MoraleYieldPenaltyThreshold}, yields halved)" : "")
                             + (note != null ? $"。{note}" : "");
                 report.Lines.Add(line);
                 report.CityLines[city.Id] = line;      // keyed so a seat can read only the cities it can see
@@ -306,6 +306,13 @@ namespace LuanShi.Engine
                 Emit(fac.SeatId, fac.Controller, "city_captured", "public",
                     P("city_id", cityAtDest.Id, "army_id", army.Id), cmd.ActionId);
             }
+            var towerAtDest = State.WatchTowerAt(tx, tz);
+            if (towerAtDest != null && towerAtDest.IsNeutral)
+            {
+                towerAtDest.OwnerSeatId = fac.SeatId;
+                Emit(fac.SeatId, fac.Controller, "watch_tower_captured", "public",
+                    P("watch_tower_id", towerAtDest.Id, "army_id", army.Id), cmd.ActionId);
+            }
             return ValidationResult.Success;
         }
 
@@ -352,6 +359,8 @@ namespace LuanShi.Engine
                 if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
             foreach (var army in State.Armies)
                 if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(army);
+            foreach (var tower in State.WatchTowers)
+                if (InSight(seatId, tower.X, tower.Z)) obs.WatchTowers.Add(tower);
 
             foreach (var other in State.Factions)
             {
@@ -383,8 +392,9 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Fog ranges (ACTIONS.md §9): a hex within FogCityRange of an own city, or FogArmyRange of an own
-        /// army, is seen regardless of who stands there. Terrain does not block sight (a radius, not a line).
+        /// Fog ranges (ACTIONS.md §9): a hex within FogCityRange of an own city, FogArmyRange of an own
+        /// army, or FogWatchTowerRange of an own watchtower is seen regardless of who stands there. Terrain
+        /// does not block sight (a radius, not a line).
         /// </summary>
         public bool InSight(string seatId, int x, int z)
         {
@@ -394,6 +404,9 @@ namespace LuanShi.Engine
             foreach (var army in State.Armies)
                 if (army.OwnerSeatId == seatId
                     && State.Map.HexDistance(army.X, army.Z, x, z, BalanceConfig.FogArmyRange) >= 0) return true;
+            foreach (var tower in State.WatchTowers)
+                if (tower.OwnerSeatId == seatId
+                    && State.Map.HexDistance(tower.X, tower.Z, x, z, BalanceConfig.FogWatchTowerRange) >= 0) return true;
             return false;
         }
 

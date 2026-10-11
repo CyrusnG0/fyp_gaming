@@ -186,7 +186,14 @@ namespace TBTK{
 		}
 		
 		public static void SetSelect(Node node){
-			instance.select.position=node!=null ? node.GetPos() : new Vector3(0, 9999, 0);
+			if(node==null){
+				instance.select.position=new Vector3(0, 9999, 0);
+				return;
+			}
+
+			Vector3 position=node.GetPos();
+			if(GridManager.IsHexGrid()) position.y=0.02f;
+			instance.select.position=position;
 		}
 		
 		
@@ -279,7 +286,10 @@ namespace TBTK{
 				}
 				
 				for(int i=0; i<hexMovableList.Count; i++){
-					if(i<nList.Count) hexMovableList[i].position=nList[i].GetPos();
+					if(i<nList.Count){
+						Vector3 position=nList[i].GetPos();
+						hexMovableList[i].position=new Vector3(position.x, 0.02f, position.z);
+					}
 					hexMovableList[i].gameObject.SetActive(i<nList.Count);
 				}
 			}

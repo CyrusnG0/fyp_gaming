@@ -42,7 +42,7 @@ namespace LuanShi.Engine
 
     /// <summary>
     /// Append-only event log — the canonical memory of the game. Powers replay,
-    /// the 史官 chronicle, and LLM handover catch-up. Records are never mutated
+    /// the historian chronicle, and LLM handover catch-up. Records are never mutated
     /// or removed once emitted.
     /// </summary>
     public sealed class EventLog

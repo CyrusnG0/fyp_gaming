@@ -21,14 +21,22 @@ namespace LuanShi
         public string weiCityObj = "City_Wei";
         public string shuCityObj = "City_Shu";
         public string southCityObj = "City_South";
+        public string watchTowerObj = "Watch Tower";
         public string weiArmyObj = "Wei_Army1";
         public string shuArmyObj = "Shu_Army1";
+        public Texture2D watchTowerImage;
         [FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
         public string[] extraArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
                                           "Shu_Army2", "Shu_Army3", "Shu_Army4" };
 
         [Header("Game setup")]
         public int randomSeed = 12345;
+
+        [Header("Fog of war")]
+        [Tooltip("Photo used to cover grid cells outside the current seat's vision. Defaults to Assets/GameUI/Art/fog.png.")]
+        public Texture2D fogPhoto;
+        public Color fogPhotoTint = Color.white;
+        public float fogPhotoHeight = 0.08f;
 
         [Header("Seats (data-driven; the engine supports up to 8, AGENTS.md #6)")]
         [Tooltip("Seat ids played by people at this keyboard. Every other seat is scripted. " +
@@ -39,8 +47,8 @@ namespace LuanShi
         private bool ready;
         private string initError;
 
-        private const string SeatA = "seat-0";     // 魏 — scene roster, not "the human"
-        private const string SeatB = "seat-1";     // 蜀
+        private const string SeatA = "seat-0";     // Wei — scene roster, not "the human"
+        private const string SeatB = "seat-1";     // Shu
 
         // panel & marker art: the demo skin's GUI.Box is see-through, so panels get their own
         // opaque plate first (smoke-test finding); markers get a runtime tinted material.
@@ -55,13 +63,21 @@ namespace LuanShi
         // hotseat state (CONTROLLER_PROTOCOL §2: each seat takes one ordered turn per season)
         private string currentSeat;                // whose turn the UI is showing right now
         private bool handoverShowing;              // full-screen blocker between human seats
-        private bool pendingReport;                // 朝報 queued behind the handover screen
+        private bool pendingReport;                // court report queued behind the handover screen
         private Observation obs;                   // the current seat's filtered world (AGENTS.md #3)
 
         private readonly Dictionary<string, GameObject> cityObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, GameObject> armyObjs = new Dictionary<string, GameObject>();
+        private readonly Dictionary<string, GameObject> watchTowerObjs = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, Color> factionColors = new Dictionary<string, Color>();
         private readonly Dictionary<Color, Material> markerMaterials = new Dictionary<Color, Material>();
+
+        private bool locationChoiceOpen;
+        private int locationChoiceX;
+        private int locationChoiceZ;
+        private Rect locationChoiceRect;
+        private readonly List<SpriteRenderer> fogOverlays = new List<SpriteRenderer>();
+        private Transform fogOverlayRoot;
 
         // selection & UI state
         private CityState selCity;
@@ -71,21 +87,22 @@ namespace LuanShi
         private bool reportShowing;
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
-        private string envoyText = "";        // 遣使 draft for the 外交 tab (never sent automatically)
-        private Vector2 reportScroll;         // 朝報 scroll offset when a season outruns its panel
+        private string envoyText = "";        // envoy draft for the diplomacy tab (never sent automatically)
+        private float envoyConfirmationUntil;
+        private Vector2 reportScroll;         // court report scroll offset when a season outruns its panel
 
-        // concept tabs: 地圖 is the live view, the rest preview the full design
-        // (doc/LuanShi-Game-Design-v1.md). 內政/外交 are live, 諜報/研究 previews, 史官 renders real data.
+        // concept tabs: Map is the live view, the rest preview the full design
+        // (doc/LuanShi-Game-Design-v1.md). Domestic/Diplomacy are live, Intel/Research are previews, History renders real data.
         private string activeTab = "map";
         private Vector2 historianScroll;
         private static readonly string[,] Tabs =
         {
-            { "map",       "地圖" },
-            { "domestic",  "內政" },
-            { "diplomacy", "外交" },
-            { "intel",     "諜報" },
-            { "research",  "研究" },
-            { "history",   "史官" },
+            { "map",       "Map" },
+            { "domestic",  "Domestic" },
+            { "diplomacy", "Diplomacy" },
+            { "intel",     "Intel" },
+            { "research",  "Research" },
+            { "history",   "History" },
         };
 
         // ------------------------------------------------------------------ setup
@@ -174,19 +191,21 @@ namespace LuanShi
 
             engine = new GameEngine(randomSeed);
             engine.State.Map = map;
+            InitializeFogOverlays(nodes, w, h);
 
-            factionColors[SeatA] = new Color(0.40f, 0.55f, 0.95f);   // 魏 blue
-            factionColors[SeatB] = new Color(0.45f, 0.80f, 0.45f);   // 蜀 green
+            factionColors[SeatA] = new Color(0.40f, 0.55f, 0.95f);   // Wei blue
+            factionColors[SeatB] = new Color(0.45f, 0.80f, 0.45f);   // Shu green
 
-            engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "魏", Controller = ControlOf(SeatA) });
-            engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "蜀", Controller = ControlOf(SeatB) });
+            engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "Wei", Controller = ControlOf(SeatA) });
+            engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "Shu", Controller = ControlOf(SeatB) });
 
-            AddCity(weiCityObj, "city-wei", "魏都", SeatA);
-            AddCity(shuCityObj, "city-shu", "成都", SeatB);
-            AddCity(southCityObj, "city-south", "南城", null);
+            AddCity(weiCityObj, "city-wei", "Wei Capital", SeatA);
+            AddCity(shuCityObj, "city-shu", "Chengdu", SeatB);
+            AddCity(southCityObj, "city-south", "Southern City", null);
+            AddWatchTower(watchTowerObj, "watch-tower-1", "Watch Tower", 6, 2);
 
-            AddArmy(weiArmyObj, "army-wei-1", "魏軍", SeatA);
-            AddArmy(shuArmyObj, "army-shu-1", "蜀軍", SeatB);
+            AddArmy(weiArmyObj, "army-wei-1", "Wei Army", SeatA);
+            AddArmy(shuArmyObj, "army-shu-1", "Shu Army", SeatB);
             foreach (var name in extraArmyObjs)
             {
                 var go = FindSceneObject(name);
@@ -196,14 +215,14 @@ namespace LuanShi
                 string faction = isWei ? "wei" : "shu";
                 string seat = isWei ? SeatA : SeatB;
                 string number = name.Substring(name.Length - 1);
-                AddArmy(name, "army-" + faction + "-" + number, isWei ? "魏軍" : "蜀軍", seat);
+                AddArmy(name, "army-" + faction + "-" + number, isWei ? "Wei Army" : "Shu Army", seat);
             }
 
             engine.BeginSeason();
             currentSeat = SeatRotation.FirstSeat(engine.State);
             RefreshObservation();
             string humans = string.Join(",", SeatRotation.HumanSeats(engine.State).ToArray());
-            statusMsg = $"第一季開始 — 由 {currentSeat} 執政；點選城市或部隊下達命令";
+            statusMsg = $"Season 1 begins — {currentSeat} rules; select a city or army to issue orders";
             Debug.Log($"[KingdomDemo] game started, season 1, human seats: {humans}");
         }
 
@@ -248,6 +267,47 @@ namespace LuanShi
             TintCity(id);
         }
 
+        void AddWatchTower(string objName, string id, string displayName, int x, int z)
+        {
+            var node = TBTK.GridManager.GetNode(x, z);
+            if (node == null) throw new System.Exception("watch tower is not on a grid node");
+
+            var go = FindSceneObject(objName);
+            if (go == null)
+            {
+                go = new GameObject(objName);
+                go.transform.position = node.GetPos();
+                var renderer = go.AddComponent<SpriteRenderer>();
+                if (watchTowerImage != null)
+                    renderer.sprite = Sprite.Create(watchTowerImage,
+                        new Rect(0f, 0f, watchTowerImage.width, watchTowerImage.height),
+                        new Vector2(0.5f, 0.5f), 100f);
+            }
+            else
+            {
+                var sceneNode = TBTK.GridManager.GetNode(go.transform.position, null);
+                if (sceneNode == null) throw new System.Exception(objName + " is not on a grid node");
+                node = sceneNode;
+                go.transform.position = node.GetPos();
+            }
+
+            go.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
+            go.transform.localEulerAngles = new Vector3(45f, 0f, 0f);
+            var towerPosition = go.transform.position;
+            towerPosition.y = 0.55f;
+            go.transform.position = towerPosition;
+
+            engine.State.WatchTowers.Add(new WatchTowerState
+            {
+                Id = id,
+                Name = displayName,
+                X = node.idxX,
+                Z = node.idxZ,
+                OwnerSeatId = null,
+            });
+            watchTowerObjs[id] = go;
+        }
+
         void AddArmy(string objName, string id, string displayName, string ownerSeat)
         {
             var go = FindOrCreateMarker(objName, id == "army-wei-1" ? 2 : 9, id == "army-wei-1" ? 3 : 5, ownerSeat);
@@ -275,7 +335,7 @@ namespace LuanShi
 
         /// <summary>
         /// The scene object if the scene has one, otherwise a runtime marker: a flat, faction-coloured
-        /// disc. The smoke test found plain grey cylinders where the scene has no object yet (all of 蜀
+        /// disc. The smoke test found plain grey cylinders where the scene has no object yet (all of Shu
         /// today), which read as debris — the marker now carries its owner's colour from the start.
         /// </summary>
         GameObject FindOrCreateMarker(string objName, int x, int z, string ownerSeat)
@@ -365,7 +425,7 @@ namespace LuanShi
         {
             var e = Event.current;
             if (e.type != EventType.MouseDown) return;
-            // a concept tab is modal over the map, exactly like the 朝報 report
+            // a concept tab is modal over the map, exactly like the court report
             if (!ready || reportShowing || handoverShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
@@ -376,18 +436,63 @@ namespace LuanShi
             if (cam == null) return;
             var ray = cam.ScreenPointToRay(Input.mousePosition);
             var node = ResolveClickedNode(ray);
-            if (node == null) return;
+            if (node == null)
+            {
+                locationChoiceOpen = false;
+                ClearArmyMoveTargets();
+                selCity = null;
+                selArmy = null;
+                e.Use();
+                return;
+            }
 
             var city = engine.State.CityAt(node.idxX, node.idxZ);
             var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
+            bool citySelectable = city != null && (city.OwnerSeatId == currentSeat
+                || (obs != null && obs.FindCity(city.Id) != null));
+
+            if (locationChoiceOpen && node.idxX == locationChoiceX && node.idxZ == locationChoiceZ)
+            {
+                locationChoiceOpen = false;
+                e.Use();
+                return;
+            }
+
+            locationChoiceOpen = false;
+
+            if (selCity != null && city == null && army == null)
+            {
+                selCity = null;
+                e.Use();
+                return;
+            }
+
+            if (army != null && citySelectable)
+            {
+                locationChoiceOpen = true;
+                locationChoiceX = node.idxX;
+                locationChoiceZ = node.idxZ;
+                selCity = null;
+                selArmy = null;
+                ClearArmyMoveTargets();
+                e.Use();
+                return;
+            }
 
             if (army != null)
             {
+                if (selArmy != null && selArmy.Id == army.Id)
+                {
+                    selArmy = null;
+                    ClearArmyMoveTargets();
+                    e.Use();
+                    return;
+                }
                 selArmy = army;
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "已選擇 " + army.Name + " — 點選目的地";
+                statusMsg = "Selected " + army.Name + " — choose a destination";
                 e.Use();
                 return;
             }
@@ -400,14 +505,26 @@ namespace LuanShi
             if (city != null && city.OwnerSeatId == currentSeat)
             {
                 ClearArmyMoveTargets();
+                if (selCity != null && selCity.Id == city.Id)
+                {
+                    selCity = null;
+                    e.Use();
+                    return;
+                }
                 selCity = city; selArmy = null; e.Use(); return;
             }
             // a foreign city can only be selected while the current seat can actually see it (fog)
             if (city != null && obs != null && obs.FindCity(city.Id) != null)
             {
                 ClearArmyMoveTargets();
+                if (selCity != null && selCity.Id == city.Id)
+                {
+                    selCity = null;
+                    e.Use();
+                    return;
+                }
                 selCity = city; selArmy = null;
-                statusMsg = city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市";
+                statusMsg = city.IsNeutral ? "Neutral city — send an army to occupy it" : "Enemy city";
                 e.Use();
                 return;
             }
@@ -472,7 +589,7 @@ namespace LuanShi
 
         // ------------------------------------------------------------------ orders
 
-        void SubmitHuman(ActionCommand cmd)
+        bool SubmitHuman(ActionCommand cmd)
         {
             cmd.ActorSeatId = currentSeat;
             cmd.ControllerType = ControllerType.Human;
@@ -482,6 +599,7 @@ namespace LuanShi
             {
                 ClearArmyMoveTargets();
                 SyncArmyVisual(cmd.TargetId);
+                selArmy = null;
             }
             if (r.Ok && IsBattle(cmd.Type))
             {
@@ -492,12 +610,14 @@ namespace LuanShi
 
             if (!r.Ok)
                 statusMsg = r.Error == "no command points left"
-                    ? "行動點不足：本季已沒有可用行動點"
-                    : "命令被拒：" + r.Error;
+                    ? "Not enough command points: no command points remain this season"
+                    : "Order rejected: " + r.Error;
             else if (IsBattle(cmd.Type))
-                statusMsg = LastBattleSummary() ?? "命令已執行";
+                statusMsg = LastBattleSummary() ?? "Order executed";
             else
-                statusMsg = "命令已執行";
+                statusMsg = "Order executed";
+
+            return r.Ok;
         }
 
         static bool IsBattle(string type)
@@ -563,7 +683,7 @@ namespace LuanShi
         string SeatTurnPrompt()
         {
             var fac = engine.State.FindFaction(currentSeat);
-            return $"{fac?.Name} 的回合（第 {engine.State.Season} 季）— 點選城池或部隊下達命令";
+            return $"{fac?.Name}'s turn (season {engine.State.Season}) — select a city or army to issue orders";
         }
 
         /// <summary>The only world the UI draws: the current seat's filtered observation.</summary>
@@ -571,6 +691,85 @@ namespace LuanShi
         {
             obs = engine.Observe(currentSeat);
             ApplyFog();
+            RefreshFogOverlays();
+        }
+
+        void InitializeFogOverlays(TBTK.Node[,] nodes, int width, int height)
+        {
+#if UNITY_EDITOR
+            if (fogPhoto == null)
+                fogPhoto = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/GameUI/Art/fog.png");
+            if (fogPhoto == null)
+            {
+                string fogPath = Path.Combine(Application.dataPath, "GameUI/Art/fog.png");
+                if (File.Exists(fogPath))
+                {
+                    fogPhoto = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    fogPhoto.name = "fog_runtime";
+                    if (!fogPhoto.LoadImage(File.ReadAllBytes(fogPath), false))
+                        fogPhoto = null;
+                }
+            }
+#endif
+            if (fogPhoto == null)
+            {
+                Debug.LogWarning("[KingdomDemo] Fog photo is not assigned; grid fog overlays are disabled.");
+                return;
+            }
+
+            var root = new GameObject("FogOfWarOverlays");
+            fogOverlayRoot = root.transform;
+            var fogSprite = Sprite.Create(fogPhoto, new Rect(0f, 0f, fogPhoto.width, fogPhoto.height),
+                                          new Vector2(0.5f, 0.5f), 100f);
+
+            float nodeSize = TBTK.GridManager.GetNodeSize();
+            float spriteSize = Mathf.Max(fogSprite.bounds.size.x, fogSprite.bounds.size.y);
+            float overlayScale = spriteSize > 0f ? nodeSize * 1.08f / spriteSize : 1f;
+
+            for (int x = 0; x < width; x++)
+                for (int z = 0; z < height; z++)
+                {
+                    var node = nodes[x, z];
+                    if (node == null) continue;
+
+                    var overlay = new GameObject("Fog_" + x + "_" + z);
+                    overlay.transform.SetParent(fogOverlayRoot, true);
+                    overlay.transform.position = node.GetPos() + Vector3.up * fogPhotoHeight;
+                    overlay.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    overlay.transform.localScale = Vector3.one * overlayScale;
+
+                    var renderer = overlay.AddComponent<SpriteRenderer>();
+                    renderer.sprite = fogSprite;
+                    renderer.color = fogPhotoTint;
+                    renderer.sortingOrder = 100;
+                    renderer.enabled = false;
+                    fogOverlays.Add(renderer);
+                }
+
+                    Debug.Log("[KingdomDemo] Created " + fogOverlays.Count + " fog overlays from " + fogPhoto.name + ".");
+        }
+
+        void RefreshFogOverlays()
+        {
+            if (fogOverlayRoot == null || engine == null || currentSeat == null) return;
+
+            int index = 0;
+            int hiddenCount = 0;
+            int width = engine.State.Map.Width;
+            int height = engine.State.Map.Height;
+            for (int x = 0; x < width; x++)
+                for (int z = 0; z < height; z++)
+                {
+                    var node = TBTK.GridManager.GetNode(x, z);
+                    if (node == null) continue;
+
+                        bool hidden = !engine.InSight(currentSeat, x, z);
+                        fogOverlays[index].enabled = hidden;
+                        if (hidden) hiddenCount++;
+                    index++;
+                }
+
+                    Debug.Log("[KingdomDemo] Fog refresh: " + hiddenCount + " hidden cells for " + currentSeat + ".");
         }
 
         /// <summary>
@@ -580,11 +779,6 @@ namespace LuanShi
         /// </summary>
         void ApplyFog()
         {
-            foreach (var kv in cityObjs)
-            {
-                bool visible = obs != null && obs.FindCity(kv.Key) != null;
-                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
-            }
             foreach (var kv in armyObjs)
             {
                 bool visible = obs != null && obs.FindArmy(kv.Key) != null;
@@ -621,7 +815,7 @@ namespace LuanShi
             if (selCity != null && engine.State.FindCity(selCity.Id) == null) selCity = null;
         }
 
-        // ---- 戰報: read the last battle back out of the log (design §6.4) ------
+        // ---- Battle report: read the last battle back out of the log (design §6.4) ------
 
         string LastBattleSummary()
         {
@@ -635,14 +829,14 @@ namespace LuanShi
         }
 
         string FieldSummary(EventRecord rec)
-            => $"野戰 {rec.Payload["rounds"]}輪：{SeatShort(rec.Payload["attacker_seat_id"])}" +
-               $"{rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} 對 " +
+                => $"Field battle, {rec.Payload["rounds"]} rounds: {SeatShort(rec.Payload["attacker_seat_id"])}" +
+                    $" {rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} vs. " +
                $"{SeatShort(rec.Payload["defender_seat_id"])}" +
-               $"{rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]}　{OutcomeLabel(rec.Payload["outcome"])}";
+                    $" {rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
 
         string SiegeSummary(EventRecord rec)
-            => $"攻城 {CityName(rec.Payload["city_id"])} {rec.Payload["rounds"]}輪：" +
-               $"攻方{rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}、守軍{rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]}　{OutcomeLabel(rec.Payload["outcome"])}";
+                => $"Siege of {CityName(rec.Payload["city_id"])} for {rec.Payload["rounds"]} rounds: " +
+                    $"attacker {rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}, garrison {rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
 
         string CityName(string cityId)
         {
@@ -654,16 +848,16 @@ namespace LuanShi
         {
             switch (outcome)
             {
-                case "defender_destroyed": return "敵軍覆沒";
-                case "attacker_destroyed": return "我軍覆沒";
-                case "mutual_destruction": return "兩敗俱傷";
-                case "defender_routed":    return "敵軍潰散";
-                case "attacker_routed":    return "我軍潰散";
-                case "mutual_rout":        return "兩軍潰散";
-                case "defender_holds":     return "守方留場";
-                case "captured":           return "城破佔領";
-                case "city_held":          return "守城成功";
-                case "assault_failed":     return "攻方覆沒";
+                case "defender_destroyed": return "Defender destroyed";
+                case "attacker_destroyed": return "Attacker destroyed";
+                case "mutual_destruction": return "Mutual destruction";
+                case "defender_routed":    return "Defender routed";
+                case "attacker_routed":    return "Attacker routed";
+                case "mutual_rout":        return "Both sides routed";
+                case "defender_holds":     return "Defender holds";
+                case "captured":           return "City captured";
+                case "city_held":          return "City held";
+                case "assault_failed":     return "Assault failed";
                 default:                   return outcome;
             }
         }
@@ -674,7 +868,7 @@ namespace LuanShi
             if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
         }
 
-        /// <summary>Season rollover: resolve the world, then open the next seat's 朝報 (design §2 ①).</summary>
+        /// <summary>Season rollover: resolve the world, then open the next seat's court report (design §2 ①).</summary>
         void ResolveSeason()
         {
             var report = engine.EndSeason();
@@ -689,13 +883,13 @@ namespace LuanShi
         }
 
         /// <summary>
-        /// The 朝報 is the reader's own ministry report: public news plus only the city lines this seat
+        /// The court report is the reader's own ministry report: public news plus only the city lines this seat
         /// can see (the engine keeps the canonical report; the observation does the filtering).
         /// </summary>
         void BuildReport(SeasonReport report)
         {
             reportLines.Clear();
-            reportLines.Add($"—— 第{report.Season}季 · 朝報（{engine.State.FindFaction(currentSeat)?.Name}）——");
+            reportLines.Add($"-- Season {report.Season} court report ({engine.State.FindFaction(currentSeat)?.Name}) --");
             reportLines.Add("");
 
             foreach (var rec in obs.Events)
@@ -705,27 +899,27 @@ namespace LuanShi
                 {
                     var city = engine.State.FindCity(rec.Payload["city_id"]);
                     var fac = engine.State.FindFaction(city.OwnerSeatId);
-                    reportLines.Add($"★ {fac.Name}軍進駐{city.Name}，開拓版圖！");
+                    reportLines.Add($"* {fac.Name} army occupied {city.Name}, expanding its territory!");
                 }
                 else if (rec.EventType == "battle_field")
-                    reportLines.Add("戰報：" + FieldSummary(rec));
+                    reportLines.Add("Battle report: " + FieldSummary(rec));
                 else if (rec.EventType == "battle_siege")
-                    reportLines.Add("戰報：" + SiegeSummary(rec));
+                    reportLines.Add("Battle report: " + SiegeSummary(rec));
                 else if (rec.EventType == "war_declared")
-                    reportLines.Add($"外交：{SeatShort(rec.Payload["attacker_seat_id"])}向" +
-                                    $"{SeatShort(rec.Payload["defender_seat_id"])}宣戰");
+                    reportLines.Add($"Diplomacy: {SeatShort(rec.Payload["attacker_seat_id"])} declared war on " +
+                                    $"{SeatShort(rec.Payload["defender_seat_id"])}");
                 else if (rec.EventType == "treaty_broken")
-                    reportLines.Add($"外交：{SeatShort(rec.Payload["breaker_seat_id"])}毀棄與" +
-                                    $"{SeatShort(rec.Payload["counterpart_seat_id"])}的{TreatyLabel(rec.Payload["treaty_type"])}條約");
+                    reportLines.Add($"Diplomacy: {SeatShort(rec.Payload["breaker_seat_id"])} broke the " +
+                                    $"{TreatyLabel(rec.Payload["treaty_type"])} treaty with {SeatShort(rec.Payload["counterpart_seat_id"])}");
                 else if (rec.EventType == "message_sent")
-                    reportLines.Add($"外交：{SeatShort(rec.ActorSeatId)}來使 — {rec.Payload["text"]}");
+                    reportLines.Add($"Diplomacy: message from {SeatShort(rec.ActorSeatId)} — {rec.Payload["text"]}");
             }
 
             foreach (var kv in report.CityLines)
                 if (obs.FindCity(kv.Key) != null) reportLines.Add(kv.Value);
 
             reportLines.Add("");
-            reportLines.Add($"史官記：本季共錄得 {CountSeasonEvents(report.Season)} 事。");
+            reportLines.Add($"Historian: {CountSeasonEvents(report.Season)} events recorded this season.");
 
             File.WriteAllText(Path.Combine(Application.persistentDataPath, "luanshi_log.jsonl"),
                               engine.Log.ToJsonLines());
@@ -784,15 +978,15 @@ namespace LuanShi
             uiRects.Add(top);
             DrawBackdrop(top);
             GUI.Label(new Rect(22, 12, 980, 28),
-                $"第 {engine.State.Season} 季 · {fac.Name}（{(hotseat ? currentSeat + " · 玩家" : "玩家")}）" +
-                $" · 令 {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
-                $" · 威望 {fac.Prestige} · 人口 {pop} · 糧 {food} · 金 {gold}", title);
+                $"Season {engine.State.Season} · {fac.Name} ({(hotseat ? currentSeat + " · Player" : "Player")})" +
+                $" · Orders {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
+                $" · Prestige {fac.Prestige} · Population {pop} · Food {food} · Gold {gold}", title);
 
-            // tab bar — 地圖 is the live view; the others preview the full design concept
+            // tab bar — Map is the live view; the others preview the full design concept
             var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
             for (int i = 0; i < Tabs.GetLength(0); i++)
             {
-                var r = new Rect(1020 + i * 66, 8, 62, 34);
+                var r = new Rect(1400, 60 + i * 46, 190, 40);
                 uiRects.Add(r);
                 var prevBg = GUI.backgroundColor;
                 if (activeTab == Tabs[i, 0]) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
@@ -806,13 +1000,18 @@ namespace LuanShi
                 if (selCity != null) DrawCityPanel(selCity, body, btn);
                 else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
             }
+            DrawLocationChoice(body, btn);
 
             // end this seat's turn (single-human mode ends the season, as before)
             var end = new Rect(1400, 8, 190, 44);
             uiRects.Add(end);
-            if (GUI.Button(end, hotseat ? $"結束 {fac.Name} 回合" : "結束季節", btn)) EndTurn();
+            if (GUI.Button(end, hotseat ? $"End {fac.Name}'s turn" : "End season", btn))
+            {
+                locationChoiceOpen = false;
+                EndTurn();
+            }
             if (hotseat)
-                GUI.Label(new Rect(1400, 56, 190, 22), $"回合：{fac.Name}", mono);
+                GUI.Label(new Rect(1400, 56, 190, 22), $"Turn: {fac.Name}", mono);
 
             // status + JSON command feed (the FYP artifact: UI clicks == LLM JSON)
             var feed = new Rect(10, 800, 1100, 92);
@@ -826,6 +1025,52 @@ namespace LuanShi
             if (reportShowing) DrawReport(body, btn, title);
 
             HandleClicks();
+        }
+
+        void DrawLocationChoice(GUIStyle body, GUIStyle btn)
+        {
+            if (!locationChoiceOpen || activeTab != "map") return;
+
+            var node = TBTK.GridManager.GetNode(locationChoiceX, locationChoiceZ);
+            var city = engine.State.CityAt(locationChoiceX, locationChoiceZ);
+            var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == locationChoiceX && a.Z == locationChoiceZ);
+            if (node == null || city == null || army == null)
+            {
+                locationChoiceOpen = false;
+                return;
+            }
+
+            float scale = Screen.width / 1600f;
+            Vector3 screenPoint = Camera.main != null
+                ? Camera.main.WorldToScreenPoint(node.GetPos())
+                : new Vector3(800f * scale, Screen.height * 0.5f, 1f);
+            float x = screenPoint.x / scale + 24f;
+            float y = (Screen.height - screenPoint.y) / scale - 42f;
+            const float width = 220f;
+            const float height = 112f;
+            x = Mathf.Clamp(x, 8f, 1600f - width - 8f);
+            y = Mathf.Clamp(y, 50f, 900f - height - 8f);
+
+            locationChoiceRect = new Rect(x, y, width, height);
+            uiRects.Add(locationChoiceRect);
+            DrawBackdrop(locationChoiceRect);
+            GUI.Label(new Rect(x + 12f, y + 8f, width - 24f, 22f), "Choose a target to inspect", body);
+
+            if (GUI.Button(new Rect(x + 12f, y + 42f, width - 24f, 28f), city.Name, btn))
+            {
+                locationChoiceOpen = false;
+                selCity = city;
+                selArmy = null;
+            }
+            if (GUI.Button(new Rect(x + 12f, y + 76f, width - 24f, 28f), army.Name, btn))
+            {
+                locationChoiceOpen = false;
+                selArmy = army;
+                selCity = null;
+                TBTK.GridIndicator.SetSelect(node);
+                ShowArmyMoveTargets(army);
+                statusMsg = "Selected " + army.Name + " — choose a destination";
+            }
         }
 
         /// <summary>
@@ -868,71 +1113,78 @@ namespace LuanShi
             GUI.color = prevColor;
 
             var fac = engine.State.FindFaction(currentSeat);
-            GUI.Label(new Rect(0, 330, 1600, 50), $"第 {engine.State.Season} 季 · {fac?.Name}（{currentSeat}）", centered);
-            GUI.Label(new Rect(0, 400, 1600, 40), "陛下請坐", centeredBody);
-            GUI.Label(new Rect(0, 460, 1600, 40), "按任意鍵開始", centeredBody);
+            GUI.Label(new Rect(0, 330, 1600, 50), $"Season {engine.State.Season} · {fac?.Name} ({currentSeat})", centered);
+            GUI.Label(new Rect(0, 400, 1600, 40), "Please take your seat", centeredBody);
+            GUI.Label(new Rect(0, 460, 1600, 40), "Press any key to begin", centeredBody);
         }
 
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
             bool mine = city.OwnerSeatId == currentSeat;
-            var p = new Rect(10, 50, 300, mine ? 400 : 120);
+            var p = new Rect(10, 50, 420, mine ? 400 : 120);
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 280, 24), $"{city.Name}（{OwnerName(city)}）", body);
+            GUI.Label(new Rect(22, 58, 400, 24), $"{city.Name} ({OwnerName(city)})", body);
 
             if (mine)
             {
-                string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? "（產出減半）" : "";
-                GUI.Label(new Rect(22, 86, 280, 116),
-                    $"人口 {city.Population}\n糧食 {city.Food}\n金錢 {city.Gold}\n駐軍 {city.Garrison}\n" +
-                    $"民心 {city.Morale}{moraleWarning}\n" +
-                    $"開墾 {city.ReclaimPct}%　城防 {city.Defense}/{BalanceConfig.DefenseMax}　訓練 {city.Training}/{BalanceConfig.TrainingMax}",
+                string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
+                GUI.Label(new Rect(22, 86, 400, 116),
+                    $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison}\n" +
+                    $"Morale {city.Morale}{moraleWarning}\n" +
+                    $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{BalanceConfig.TrainingMax}",
                     body);
 
+                float buttonLeft = p.x + 12f;
+                float buttonTop = p.y + 160f;
+                float buttonGap = 12f;
+                float buttonWidth = (p.width - 24f - buttonGap) * 0.5f;
+                float rightButtonLeft = buttonLeft + buttonWidth + buttonGap;
                 string hint = null;
-                hint = FirstReason(hint, OrderButton(new Rect(22, 210, 120, 34), ActionType.LevyTax, city.Id, "徵稅", null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 210, 120, 34), ActionType.LightenLabor, city.Id, "輕徭",
-                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "金不足", 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 248, 120, 34), ActionType.Reclaim, city.Id, "開墾",
-                    city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "已達上限"
-                    : city.ReclaimedThisSeason ? "本季已開墾" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 248, 120, 34), ActionType.Recruit, city.Id, "募兵",
-                    city.Gold < BalanceConfig.RecruitGoldCost ? "金不足"
-                    : city.Population < BalanceConfig.RecruitPopCost ? "人口不足" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 286, 120, 34), ActionType.Train, city.Id, "練兵",
-                    city.Training >= BalanceConfig.TrainingMax ? "已達上限" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(152, 286, 120, 34), ActionType.Fortify, city.Id, "修城",
-                    city.Defense >= BalanceConfig.DefenseMax ? "已達上限" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(22, 324, 120, 34), ActionType.Relief, city.Id, "賑災",
-                    city.Food < BalanceConfig.ReliefFoodCost ? "糧不足" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop, buttonWidth, 34), ActionType.LevyTax, city.Id, "Tax", null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop, buttonWidth, 34), ActionType.LightenLabor, city.Id, "Lighten labor",
+                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "Not enough gold", 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Reclaim, city.Id, "Reclaim",
+                    city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "Limit reached"
+                    : city.ReclaimedThisSeason ? "Already reclaimed this season" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Recruit, city.Id, "Recruit",
+                    city.Gold < BalanceConfig.RecruitGoldCost ? "Not enough gold"
+                    : city.Population < BalanceConfig.RecruitPopCost ? "Not enough population" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Train, city.Id, "Train",
+                    city.Training >= BalanceConfig.TrainingMax ? "Limit reached" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Fortify, city.Id, "Fortify",
+                    city.Defense >= BalanceConfig.DefenseMax ? "Limit reached" : null, 0, 0, btn));
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
+                    city.Food < BalanceConfig.ReliefFoodCost ? "Not enough food" : null, 0, 0, btn));
 
-                if (hint != null) GUI.Label(new Rect(22, 364, 280, 22), hint, body);
+                if (hint != null) GUI.Label(new Rect(22, 364, 400, 22), hint, body);
             }
             else
             {
-                GUI.Label(new Rect(22, 84, 280, 30), city.IsNeutral ? "無主之地" : "敵境 — 詳情不明", body);
+                GUI.Label(new Rect(22, 84, 400, 30), city.IsNeutral ? "Unclaimed land" : "Enemy territory — details unknown", body);
             }
         }
 
         /// <summary>
         /// One order button. It always submits a real ActionCommand through SubmitHuman and shows the
-        /// action's 號令 cost from BalanceConfig; the engine stays the only authority, so a stale hint
+        /// action's order cost from BalanceConfig; the engine stays the only authority, so a stale hint
         /// just means the click comes back rejected with a reason.
         /// </summary>
         string OrderButton(Rect r, string type, string targetId, string label, string blockedReason,
             int paramA, int paramB, GUIStyle btn,
-            Dictionary<string, string> args = null, string text = null)
+            Dictionary<string, string> args = null, string text = null, System.Action onSubmitted = null)
         {
             bool available = blockedReason == null;
+            string buttonText = $"{label} {BalanceConfig.CommandPointCost(type)} orders";
+            r.width = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
             var prev = GUI.enabled;
             GUI.enabled = available;
-            if (GUI.Button(r, $"{label} {BalanceConfig.CommandPointCost(type)}令", btn))
-                SubmitHuman(new ActionCommand
+            if (GUI.Button(r, buttonText, btn) && SubmitHuman(new ActionCommand
                 {
                     Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB,
                     Args = args, Text = text, Reason = "UI: " + type,
-                });
+                }))
+                onSubmitted?.Invoke();
             GUI.enabled = prev;
             return available ? null : label + "：" + blockedReason;
         }
@@ -945,41 +1197,44 @@ namespace LuanShi
             var enemyCities = AdjacentEnemyCities(army);
             int orders = enemyArmies.Count + enemyCities.Count;
 
-            var p = new Rect(10, 50, 300, orders > 0 ? 236 + orders * 38 : 150);
+            var p = new Rect(10, 50, 330, orders > 0 ? 236 + orders * 38 : 150);
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 280, 24), $"{army.Name} · 兵力 {army.Troops}", body);
-            GUI.Label(new Rect(22, 86, 280, 66),
-                $"位置 ({army.X}, {army.Z})\n士氣 {army.Morale}\n" +
-                (army.MarchedThisSeason ? "本季已行軍" : "點選六邊格以行軍"), body);
+            GUI.Label(new Rect(22, 58, 308, 24), $"{army.Name} · Troops {army.Troops}", body);
+            GUI.Label(new Rect(22, 86, 308, 66),
+                $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
+                (army.MarchedThisSeason ? "Already marched this season" : "Select a hex to march"), body);
 
             if (orders == 0)
             {
-                GUI.Label(new Rect(22, 156, 280, 22), "四周無敵軍或敵城", body);
+                GUI.Label(new Rect(22, 156, 308, 22), "No enemy armies or cities nearby", body);
                 return;
             }
 
             string hint = null;
             int row = 0;
+            float buttonLeft = p.x + 12f;
+            float buttonTop = p.y + 110f;
+            float buttonWidth = p.width - 24f;
             foreach (var enemy in enemyArmies)
             {
-                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackArmy,
-                    army.Id, "攻擊 " + enemy.Name,
-                    army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "士氣潰散，無法出戰" : null,
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackArmy,
+                    army.Id, $"Attack {enemy.Name} · Troops {enemy.Troops}",
+                    army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight" : null,
                     enemy.X, enemy.Z, btn));
                 row++;
             }
             foreach (var city in enemyCities)
             {
-                string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "士氣潰散，無法出戰"
+                string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight"
                     : army.Troops < BalanceConfig.AssaultTroopRatio * city.Garrison
-                        ? $"需 {BalanceConfig.AssaultTroopRatio}:1 兵力（守軍 {city.Garrison}）" : null;
-                hint = FirstReason(hint, OrderButton(new Rect(22, 160 + row * 38, 280, 34), ActionType.AttackCity,
-                    army.Id, "攻城 " + city.Name, blocked, city.X, city.Z, btn));
+                        ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio (garrison {city.Garrison})" : null;
+                hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackCity,
+                    army.Id, "Assault " + city.Name, blocked, city.X, city.Z, btn));
                 row++;
             }
 
-            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 280, 22), hint, body);
+            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 308, 22), hint, body);
         }
 
         List<ArmyState> AdjacentEnemyArmies(ArmyState army)
@@ -1029,12 +1284,12 @@ namespace LuanShi
                 GUI.Label(new Rect(view.x, view.y, 760, textHeight + 8f), sb.ToString(), body);
             }
 
-            if (GUI.Button(new Rect(p.x + 330, p.y + 50 + textHeight + 14, 140, 40), "繼續", btn)) CloseReport();
+            if (GUI.Button(new Rect(p.x + 330, p.y + 50 + textHeight + 14, 140, 40), "Continue", btn)) CloseReport();
         }
 
         // ------------------------------------------------------------ concept tabs
-        // 內政 / 外交 / 諜報 / 研究 are display-only previews of the full design;
-        // 史官 renders the real in-memory event log.
+        // Domestic / Diplomacy / Intel / Research are display-only previews of the full design;
+        // History renders the real in-memory event log.
 
         /// <summary>Opens a concept panel by tab key. Same entry point the tab bar uses,
         /// so scripted demos and screenshot passes can drive the UI without a mouse.</summary>
@@ -1073,8 +1328,8 @@ namespace LuanShi
                 ClearArmyMoveTargets();
                 selCity = city;
                 selArmy = null;
-                statusMsg = city.OwnerSeatId == currentSeat ? "已選擇 " + city.Name
-                    : city.IsNeutral ? "中立城市 — 派軍進駐以佔領" : "敵方城市";
+                statusMsg = city.OwnerSeatId == currentSeat ? "Selected " + city.Name
+                    : city.IsNeutral ? "Neutral city — send an army to occupy it" : "Enemy city";
                 return;
             }
 
@@ -1095,7 +1350,7 @@ namespace LuanShi
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "已選擇 " + army.Name + " — 點選目的地";
+                statusMsg = "Selected " + army.Name + " — choose a destination";
             }
         }
 
@@ -1149,17 +1404,17 @@ namespace LuanShi
             }
 
             // pinned to the panel bottom, so a content-sized panel keeps its button inside
-            if (GUI.Button(new Rect(p.x + 320, p.y + height - 56, 160, 40), "關閉", btn)) activeTab = "map";
+            if (GUI.Button(new Rect(p.x + 320, p.y + height - 56, 160, 40), "Close", btn)) activeTab = "map";
         }
 
         /// <summary>
-        /// Panel height per tab: the design previews keep the full shell; the 史官 chronicle hugs its
+        /// Panel height per tab: the design previews keep the full shell; the historian chronicle hugs its
         /// contents (capped) so a two-record log does not open an 80%-empty box.
         /// </summary>
         float TabPanelHeight()
             => activeTab == "history" ? 178f + HistorianViewHeight() : 480f;
 
-        /// <summary>Height of the 史官 scroll view for the current seat: content-sized, capped.</summary>
+        /// <summary>Height of the historian scroll view for the current seat: content-sized, capped.</summary>
         float HistorianViewHeight()
             => Mathf.Min(HistorianViewMaxHeight,
                          (obs != null ? obs.Events.Count : 1) * HistorianLineHeight + 8f);
@@ -1168,55 +1423,55 @@ namespace LuanShi
         {
             switch (activeTab)
             {
-                case "domestic":  return "內政 · 行動一覽";
-                case "diplomacy": return "外交 · 行動一覽";
-                case "intel":     return "諜報 · 待開發";
-                case "research":  return "研究 · 待開發";
-                default:          return "史官 · 本局史書";
+                case "domestic":  return "Domestic · Orders";
+                case "diplomacy": return "Diplomacy · Orders";
+                case "intel":     return "Intel · Planned";
+                case "research":  return "Research · Planned";
+                default:           return "History · Chronicle";
             }
         }
 
         void DrawDomesticPanel(Rect p, GUIStyle body)
         {
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "內政行動（設計文件第 11 章 · 共 10 項）", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Domestic actions (design document chapter 11 · 10 total)", body);
             y += 30;
 
             // Live actions mirror ACTIONS.md §3 and read their numbers from BalanceConfig,
             // so this panel cannot drift from what the engine actually charges.
             string[] live =
             {
-                $"徵稅　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 ＋{BalanceConfig.TaxLevyAmount}、民心 −{BalanceConfig.TaxLevyMoraleCost}",
-                $"輕徭　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 −{BalanceConfig.LightenLaborGoldCost}、民心 ＋{BalanceConfig.LightenLaborMoraleGain}",
-                $"開墾　　耗令 {BalanceConfig.CommandPointsPerOrder}　該城糧產 ＋{BalanceConfig.ReclaimPctPerUse}%（上限 ＋{BalanceConfig.ReclaimPctCap}%）",
-                $"募兵　　耗令 {BalanceConfig.CommandPointsPerOrder}　金 −{BalanceConfig.RecruitGoldCost}、人口 −{BalanceConfig.RecruitPopCost}、駐軍 ＋{BalanceConfig.RecruitTroopGain}",
-                $"練兵　　耗令 {BalanceConfig.CommandPointsPerOrder}　訓練 ＋1（上限 {BalanceConfig.TrainingMax}）",
-                $"修城　　耗令 {BalanceConfig.CommandPointsPerOrder}　城防 ＋1（上限 {BalanceConfig.DefenseMax}）",
-                $"賑災　　耗令 {BalanceConfig.CommandPointsPerOrder}　糧 −{BalanceConfig.ReliefFoodCost}、民心 ＋{BalanceConfig.ReliefMoraleGain}",
+                $"Tax      costs {BalanceConfig.CommandPointsPerOrder} order  Gold +{BalanceConfig.TaxLevyAmount}, morale -{BalanceConfig.TaxLevyMoraleCost}",
+                $"Lighten labor  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
+                $"Reclaim  costs {BalanceConfig.CommandPointsPerOrder} order  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
+                $"Recruit  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.RecruitGoldCost}, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
+                $"Train    costs {BalanceConfig.CommandPointsPerOrder} order  Training +1 (cap {BalanceConfig.TrainingMax})",
+                $"Fortify  costs {BalanceConfig.CommandPointsPerOrder} order  Defense +1 (cap {BalanceConfig.DefenseMax})",
+                $"Relief   costs {BalanceConfig.CommandPointsPerOrder} order  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
             };
             foreach (var row in live)
             {
-                GUI.Label(new Rect(p.x + 36, y, 744, 22), "已開放　" + row, body);
+                GUI.Label(new Rect(p.x + 36, y, 744, 22), "Available  " + row, body);
                 y += 24;
             }
 
             y += 10;
             string[] planned =
             {
-                "屯田　　耗令 1　需農政 3：駐軍自給 30%",
-                "興建建築　耗令 1　金足夠、有空位（市集／農田／兵營…）",
-                "遷都　　耗令 1　需另一座城：威望 −5、換都城",
+                "Farm fields  costs 1 order  Requires agriculture 3: army supply +30%",
+                "Build structure  costs 1 order  Requires gold and an empty slot (market / farm / barracks...)",
+                "Move capital  costs 1 order  Requires another city: prestige -5, change capital",
             };
             foreach (var row in planned)
             {
-                PlannedLabel(new Rect(p.x + 36, y, 744, 22), "〔待開發〕 " + row, body);
+                PlannedLabel(new Rect(p.x + 36, y, 744, 22), "[Planned] " + row, body);
                 y += 24;
             }
 
             y += 10;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                $"點選我方城池後，於左側城池面板下達命令；條件不足的按鈕呈灰色。\n" +
-                $"點選我方部隊，可對相鄰敵軍發動野戰（1令）、對敵城強攻（{BalanceConfig.CommandPointsPerAttackCity}令，需 {BalanceConfig.AssaultTroopRatio}:1 兵力）。", body);
+                $"Select one of our cities, then issue orders from the city panel on the left; unavailable buttons are grey.\n" +
+                $"Select one of our armies to start a field battle against an adjacent enemy (1 order), or assault an enemy city ({BalanceConfig.CommandPointsPerAttackCity} orders, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).", body);
         }
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)
@@ -1227,14 +1482,16 @@ namespace LuanShi
 
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 22),
-                $"外交（{me.Name}）　號令 {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}　威望 {me.Prestige}" +
-                $"　條約 {(obs != null ? obs.Treaties.Count : 0)}" +
-                $"　待決提案 {(obs != null ? obs.Proposals.Count : 0)}", body);
+                $"Diplomacy ({me.Name})  Orders {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}  Prestige {me.Prestige}" +
+                $"  Treaties {(obs != null ? obs.Treaties.Count : 0)}" +
+                $"  Pending proposals {(obs != null ? obs.Proposals.Count : 0)}", body);
             y += 26;
 
-            // 遣使: type here, then press 遣使 on a faction row to submit it.
-            GUI.Label(new Rect(p.x + 36, y, 120, 22), "遣使文書", body);
+            // Envoy message: type here, then press Send message on a faction row to submit it.
+            GUI.Label(new Rect(p.x + 36, y, 120, 22), "Envoy message", body);
             envoyText = GUI.TextField(new Rect(p.x + 160, y, 604, 24), envoyText, 120);
+            if (envoyConfirmationUntil > Time.unscaledTime)
+                GUI.Box(new Rect(p.x + 270, y + 34, 300, 52), "Message sent successfully");
             y += 34;
 
             // Incoming offers first: they are the only diplomacy that demands an answer.
@@ -1243,23 +1500,23 @@ namespace LuanShi
                 foreach (var proposal in obs.Proposals)
                     if (proposal.ToSeatId == currentSeat) incoming.Add(proposal);
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), $"待決提案（{incoming.Count}）", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), $"Pending proposals ({incoming.Count})", body);
             y += 24;
 
             if (incoming.Count == 0)
             {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20), "目前無人來使提案。", body);
+                GUI.Label(new Rect(p.x + 36, y, 744, 20), "No incoming proposals.", body);
                 y += 24;
             }
             foreach (var proposal in incoming)
             {
                 GUI.Label(new Rect(p.x + 36, y, 744, 20),
-                    $"{SeatShort(proposal.FromSeatId)} 提議 {TreatyLabel(proposal.Type)}　{proposal.DurationSeasons} 季" +
-                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"　附言：{proposal.Text}"), body);
+                    $"{SeatShort(proposal.FromSeatId)} proposes {TreatyLabel(proposal.Type)} for {proposal.DurationSeasons} seasons" +
+                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"  Note: {proposal.Text}"), body);
                 y += 22;
-                OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "接受",
+                OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Accept",
                     null, 0, 0, btn, new Dictionary<string, string> { { "response", "accept" } });
-                OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "拒絕",
+                OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Reject",
                     null, 0, 0, btn, new Dictionary<string, string> { { "response", "reject" } });
                 y += 36;
             }
@@ -1271,7 +1528,7 @@ namespace LuanShi
                 if (other.SeatId == currentSeat) continue;
                 if (drawn == shownFactions)
                 {
-                    GUI.Label(new Rect(p.x + 36, y, 744, 20), "…（其餘勢力省略）", body);
+                    GUI.Label(new Rect(p.x + 36, y, 744, 20), "... (remaining factions omitted)", body);
                     break;
                 }
 
@@ -1281,32 +1538,36 @@ namespace LuanShi
                 bool atWar = relation != null && relation.AtWar;
 
                 GUI.Label(new Rect(p.x + 20, y, 760, 20),
-                    $"{other.Name}　信任 我→他 {myTrust}／他→我 {theirTrust}　{StatusLine(other.SeatId)}", body);
+                    $"{other.Name}  Trust me→them {myTrust} / them→me {theirTrust}  {StatusLine(other.SeatId)}", body);
                 y += 22;
 
                 string hint = null;
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.DeclareWar,
-                    other.SeatId, "宣戰", atWar ? "已在交戰" : null, 0, 0, btn));
+                    other.SeatId, "Declare war", atWar ? "Already at war" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.Gift,
-                    other.SeatId, $"贈禮 {BalanceConfig.GiftGoldPerTrustUnit}",
-                    Treasury() < BalanceConfig.GiftGoldPerTrustUnit ? "金不足" : null,
+                    other.SeatId, $"Gift {BalanceConfig.GiftGoldPerTrustUnit}",
+                    Treasury() < BalanceConfig.GiftGoldPerTrustUnit ? "Not enough gold" : null,
                     BalanceConfig.GiftGoldPerTrustUnit, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 400, y, 176, 30), ActionType.SendMessage,
-                    other.SeatId, "遣使", string.IsNullOrEmpty(envoyText) ? "請先輸入文書" : null,
-                    0, 0, btn, null, envoyText));
+                    other.SeatId, "Send message", string.IsNullOrEmpty(envoyText) ? "Enter a message first" : null,
+                    0, 0, btn, null, envoyText, () =>
+                    {
+                        envoyText = "";
+                        envoyConfirmationUntil = Time.unscaledTime + 2f;
+                    }));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 582, y, 182, 30), ActionType.BreakTreaty,
-                    other.SeatId, "毀約", BreakBlocked(other.SeatId), 0, 0, btn,
+                    other.SeatId, "Break treaty", BreakBlocked(other.SeatId), 0, 0, btn,
                     new Dictionary<string, string> { { "treaty_type", BreakableType(other.SeatId) } }));
                 y += 34;
 
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "互不侵犯", ProposalBlocked(other.SeatId, TreatyType.Nap), 0, 0, btn,
+                    other.SeatId, "Non-aggression pact", ProposalBlocked(other.SeatId, TreatyType.Nap), 0, 0, btn,
                     new Dictionary<string, string> { { "treaty_type", TreatyType.Nap } }));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 282, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "同盟", ProposalBlocked(other.SeatId, TreatyType.Alliance), 0, 0, btn,
+                    other.SeatId, "Alliance", ProposalBlocked(other.SeatId, TreatyType.Alliance), 0, 0, btn,
                     new Dictionary<string, string> { { "treaty_type", TreatyType.Alliance } }));
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 528, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "停戰提案", ProposalBlocked(other.SeatId, TreatyType.Truce), 0, 0, btn,
+                    other.SeatId, "Propose truce", ProposalBlocked(other.SeatId, TreatyType.Truce), 0, 0, btn,
                     new Dictionary<string, string> { { "treaty_type", TreatyType.Truce } }));
                 y += 34;
 
@@ -1320,24 +1581,24 @@ namespace LuanShi
             }
         }
 
-        /// <summary>和平 / 交戰 plus every treaty in force (with seasons left) and any pending offer,
+        /// <summary>Peace / war plus every treaty in force (with seasons left) and any pending offer,
         /// read from this seat's observation only.</summary>
         string StatusLine(string seatId)
         {
             var relation = obs != null ? obs.Relation(seatId) : null;
-            var sb = new StringBuilder(relation != null && relation.AtWar ? "交戰" : "和平");
+            var sb = new StringBuilder(relation != null && relation.AtWar ? "At war" : "Peace");
             foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
             {
                 var treaty = MyTreaty(type, seatId);
                 if (treaty == null) continue;
                 int seasonsLeft = treaty.ExpirySeason - engine.State.Season + 1;
                 if (seasonsLeft < 1) seasonsLeft = 1;
-                sb.Append($"　[{TreatyLabel(type)} 剩 {seasonsLeft} 季]");
+                sb.Append($"  [{TreatyLabel(type)} {seasonsLeft} seasons left]");
             }
             var proposal = MyProposal(seatId);
             if (proposal != null)
-                sb.Append("　[").Append(proposal.FromSeatId == currentSeat ? "我方提案待覆" : "待你回覆")
-                  .Append("：").Append(TreatyLabel(proposal.Type)).Append(']');
+                                sb.Append(" [").Append(proposal.FromSeatId == currentSeat ? "Our proposal pending" : "Your response needed")
+                                    .Append(": ").Append(TreatyLabel(proposal.Type)).Append(']');
             return sb.ToString();
         }
 
@@ -1345,9 +1606,9 @@ namespace LuanShi
         {
             switch (type)
             {
-                case TreatyType.Nap: return "互不侵犯";
-                case TreatyType.Alliance: return "同盟";
-                case TreatyType.Truce: return "停戰";
+                case TreatyType.Nap: return "Non-aggression pact";
+                case TreatyType.Alliance: return "Alliance";
+                case TreatyType.Truce: return "Truce";
                 default: return type;
             }
         }
@@ -1375,13 +1636,13 @@ namespace LuanShi
         /// <summary>Reason a treaty offer is obviously illegal, or null when it can be sent.</summary>
         string ProposalBlocked(string seatId, string type)
         {
-            if (MyTreaty(type, seatId) != null) return "已在生效";
-            if (MyProposal(seatId) != null) return "已有提案待覆";
+            if (MyTreaty(type, seatId) != null) return "Already active";
+            if (MyProposal(seatId) != null) return "Proposal already pending";
             return null;
         }
 
         string BreakBlocked(string seatId)
-            => BreakableType(seatId) == null ? "沒有條約可毀" : null;
+            => BreakableType(seatId) == null ? "No treaty to break" : null;
 
         /// <summary>First treaty in force with that seat (nap → alliance → truce), or null.</summary>
         string BreakableType(string seatId)
@@ -1403,39 +1664,39 @@ namespace LuanShi
         {
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "戰爭迷霧：己方城池周邊 3 格、己方軍隊周邊 2 格可見，其餘一片模糊。\n目前無間諜潛伏 — 敵軍位置與兵力皆為推測。", body);
+                "Fog of war: 3 hexes around our cities and 2 around our armies are visible; everything else is obscured.\nNo spies are active — enemy positions and troop counts are estimates.", body);
             y += 52;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "間諜任務", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Spy missions", body);
             y += 26;
             PlannedLabel(new Rect(p.x + 36, y, 744, 66),
-                "〔待開發〕 偵察 200 金　　〔待開發〕 竊取軍報 400 金\n" +
-                "〔待開發〕 散播謠言 500 金　〔待開發〕 偽造軍報 600 金\n" +
-                "〔待開發〕 挑撥離間 800 金　〔待開發〕 收買將領 1000 金", body);
+                "[Planned] Scout 200 gold    [Planned] Steal reports 400 gold\n" +
+                "[Planned] Spread rumors 500 gold    [Planned] Forge reports 600 gold\n" +
+                "[Planned] Sow discord 800 gold    [Planned] Bribe general 1000 gold", body);
             y += 74;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "反諜", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Counter-intelligence", body);
             y += 26;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "〔待開發〕 巡查　　〔待開發〕 清查", body);
+            PlannedLabel(new Rect(p.x + 36, y, 744, 22), "[Planned] Patrol    [Planned] Investigate", body);
             y += 30;
 
             GUI.Label(new Rect(p.x + 20, y, 760, 40),
-                "暴露判定：基礎 5% ＋ 所在城治安 ＋ 目標國諜報等級；嫌疑 ≥ 80 必定暴露。", body);
+                "Exposure check: base 5% + city security + target intelligence; suspicion >= 80 guarantees exposure.", body);
         }
 
         void DrawResearchPanel(Rect p, GUIStyle body)
         {
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "四條國策線（各 5 級：20 / 40 / 70 / 110 / 160 研究點）", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Four policy tracks (5 levels each: 20 / 40 / 70 / 110 / 160 research points)", body);
             y += 30;
             PlannedLabel(new Rect(p.x + 36, y, 744, 96),
-                "〔待開發〕 農政 1　開墾 — 糧 ＋10%\n" +
-                "〔待開發〕 兵法 1　練兵 — 訓練 ＋1\n" +
-                "〔待開發〕 諜報 1　細作 — 可派間諜\n" +
-                "〔待開發〕 吏治 1　賦稅 — 金 ＋10%", body);
+                "[Planned] Agriculture 1  Reclaim — food +10%\n" +
+                "[Planned] Military 1  Train — training +1\n" +
+                "[Planned] Intelligence 1  Spies — deploy spies\n" +
+                "[Planned] Administration 1  Taxation — gold +10%", body);
             y += 108;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "開局約 15 研究點／季，一局之內通常只能專精兩條線。\n研究模組完成後可於此花費研究點逐級解鎖。", body);
+                "The game starts with about 15 research points per season; a campaign usually allows specialization in only two tracks.\nSpend research points here to unlock levels once the research module is implemented.", body);
         }
 
         void DrawHistorianPanel(Rect p, GUIStyle body, GUIStyle mono)
@@ -1443,8 +1704,8 @@ namespace LuanShi
             // the chronicle is the seat's filtered view of the log (CONTROLLER_PROTOCOL §5)
             var records = obs != null ? obs.Events : new List<EventRecord>();
             GUI.Label(new Rect(p.x + 20, p.y + 52, 760, 22),
-                $"本局史書（{engine.State.FindFaction(currentSeat)?.Name} 可見）— 共 {records.Count} 條" +
-                $"（第 {engine.State.Season} 季 · {PhaseLabel(engine.State.Phase)}）", body);
+                $"Campaign chronicle (visible to {engine.State.FindFaction(currentSeat)?.Name}) — {records.Count} entries" +
+                $" (season {engine.State.Season} · {PhaseLabel(engine.State.Phase)})", body);
 
             // hug the chronicle: the scroll view is as tall as its content (capped), and the
             // scrollbar only appears when the cap actually bites
@@ -1459,14 +1720,14 @@ namespace LuanShi
             GUI.EndScrollView();
 
             GUI.Label(new Rect(p.x + 20, p.y + 80 + viewHeight + 12, 760, 22),
-                $"史官記：本季共錄得 {CountSeasonEvents(engine.State.Season)} 事。", body);
+                $"Historian: {CountSeasonEvents(engine.State.Season)} events recorded this season.", body);
         }
 
         string HistorianLine(EventRecord rec)
         {
             var sb = new StringBuilder();
             sb.Append(rec.Seq.ToString().PadLeft(2));
-            sb.Append("　第").Append(rec.Season).Append("季　");
+            sb.Append(" Season ").Append(rec.Season).Append(" ");
             sb.Append(rec.EventType);
             sb.Append("　").Append(SeatShort(rec.ActorSeatId));
             string payload = PayloadText(rec.Payload);
@@ -1495,8 +1756,8 @@ namespace LuanShi
 
         string PhaseLabel(string phase)
         {
-            if (phase == "player_orders") return "下令";
-            if (phase == "resolution") return "結算";
+            if (phase == "player_orders") return "Orders";
+            if (phase == "resolution") return "Resolution";
             return phase;
         }
 
@@ -1510,7 +1771,7 @@ namespace LuanShi
 
         string OwnerName(CityState city)
         {
-            if (city.IsNeutral) return "中立";
+            if (city.IsNeutral) return "Neutral";
             var f = engine.State.FindFaction(city.OwnerSeatId);
             return f != null ? f.Name : "?";
         }

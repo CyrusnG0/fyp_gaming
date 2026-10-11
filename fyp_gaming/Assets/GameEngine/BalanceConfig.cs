@@ -10,6 +10,7 @@ namespace LuanShi.Engine
         public const int CommandPointsPerOrder = 1;       // default 號令 per accepted command (§3 domestic)
         public const int CommandPointsPerAttackCity = 2;  // LOCKED (ACTIONS.md §4 M3): 攻城 costs 2
         public const int ArmyMoveCostPerSeason = 6;       // TBD: total hex-cost an army may spend per season
+        public const int FogWatchTowerRange = 5;          // watchtower vision radius
 
         public const int CityBaseFoodYield = 200;         // TBD: passive food per owned city per season (pre-開墾)
 
