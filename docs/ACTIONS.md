@@ -48,6 +48,8 @@ JSON object, adding two optional fields:
 | Move points per army per season | 6 (cavalry 8 ⏸) | terrain cost via Dijkstra; **冬 ×0.7 ✅** (`BalanceConfig.MarchBudget`, P6 §8b) |
 | Once-per-season flags | per city （開墾…) / per army (marched) | reset in `BeginSeason()` |
 | Seasonal harvest multiplier | 春 ×0.7 · 夏 ×1.0 · 秋 ×2.0 · 冬 ×0.3 | applied to every city's harvest at `EndSeason()` ✅ (P6 §8b); seasons cycle 春→夏→秋→冬 by `(Season−1) % 4` |
+| 研究 points per season | **15** (TBD) | `BalanceConfig.ResearchPointsPerSeason`; ×1.25 with 吏治 L4 學堂 → 19; paid at every rollover (`BeginSeason()`), no building income yet |
+| Research line level | 1–5 per line, price 20 / 40 / 70 / 110 / 160 | LOCKED (design §9); `research` costs **1 號令** (TBD — design ch.11 does not price it), §7 |
 | Event log | every accepted action emits an event with `visibility` (public / owner_and_observers / owner_only); rejections emit `action_rejected` (owner_only) | CONTROLLER_PROTOCOL §5 |
 | World events (no action behind them) | `season_start`/`season_end`, `city_resolved`, `starvation`, `revolt`, `desertion`, `game_over` — emitted by `BeginSeason()`/`EndSeason()` | P6 §8b: `revolt`/`game_over` public, `desertion` owner-only |
 | Execution | immediate on `Submit()`; economy/combat resolve at season end or per action as specified | |
@@ -129,10 +131,31 @@ Consequently 求和 (sue for peace) is the 停戰 proposal path, not a direct pe
 **But:** fog-of-war *observation filtering* (cities ±3格, armies ±2格, §8.1) is 🎯 MVP —
 it is observation-side, not an action, and the thesis needs it.
 
-## 7. 研究 Research — ⏸ deferred (needs ResearchPoint model)
+## 7. 研究 Research ✅ (P7, ADR-014) — design §9 四條線 × 5 級
 
-`research` (`args.line` ∈ {農政，兵法，諜報，吏治}, cost 20/40/70/110/160 點, ~15點/季).
-No CP cost stated in design ❓. Unlocks D9 屯田 (農政3), espionage (諜報1/3/4), etc.
+One action, four lines. `target_id` is unused; `args.line` is required.
+
+| id | 中文 | CP | Cost | Preconditions | Effect | Event | Status |
+|---|---|---|---|---|---|---|---|
+| R1 | `research` | 研究 | **1 (TBD)** | `args.line` ∈ `agri｜military｜espionage｜governance` (農政/兵法/諜報/吏治) | `ResearchPoints ≥` the level's price; `level < 5` | level +1, points deducted immediately (20/40/70/110/160, LOCKED design §9); a level's effects are read at the point of use | `research` **owner-only** (`line`, `level`, `cost`, `research_points`) | ✅ |
+
+**Income ✅:** `ResearchPoints += 15` (TBD, design's 「約 15 點／季」) at every season rollover, ×1.25 with
+吏治 L4 學堂 → 19/season. No building income: **學堂 the building (+3/季, design §4.2) is deferred with D8 建築**.
+
+**Level effects — implemented vs deferred (design §9 table).** A level with a deferred effect is still
+**purchasable**: it is progress up the line and unlocks what comes after it.
+
+| Line | L1 | L2 | L3 | L4 | L5 |
+|---|---|---|---|---|---|
+| 農政 agri | ✅ harvest ×1.10 | ⏸ 水利 (drought halving — no 天時 events) | ⏸ 屯田 (D9 自給 30%) | ⏸ 常平倉 (food cap — no cap modelled) | ✅ all harvests ×1.25 (stacks with L1) |
+| 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ⏸ 騎兵 (no unit types) | ⏸ 器械 (no siege weapons) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) |
+| 諜報 espionage | ⏸ 細作 | ⏸ 反諜 | ⏸ 偽報 | ⏸ 諜網 | ⏸ 無間 | (all five gate the espionage phase, §6) |
+| 吏治 governance | ✅ tax ×1.10 | ✅ 民心 +5/季 per city | ✅ 叛變機率 −50% (`RevoltChanceMult = 0.5`, synced at rollover) | ✅ research +25% (→19/season) | ✅ 威望 +10 one-time, on purchase |
+
+**Timing (ADR-014):** point-of-use effects (harvest, tax, combat, training cap, the 民心 grant) apply as
+soon as the level exists — a level bought before `EndSeason()` already pays that season. The two derived
+values — 吏治 L3's `RevoltChanceMult` and the L4 income bonus — are settled at the season rollover, so they
+take effect from the next season (the rule treaties follow, ADR-010 #5).
 
 ## 8. 君主特權 / control switch
 
@@ -167,11 +190,12 @@ game always opens in 春 and always has the same season sequence for a given see
 |---|---|---|
 | `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | ✅ defaults in `BalanceConfig`, 民心 clamps 0–100 |
 | `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
-| `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; P7 吏治 3 will set 0.5 |
+| `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; **P7 吏治 3 syncs it to 0.5** at rollover (ADR-014) |
 | `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |
 | `ArmyState` | `Morale (0-100, start 60 待決)` | ✅ P2: battle losses, 潰散 at 0, seasonal regrowth |
 | `GameState` | `WinnerSeatId` (null while live) | ✅ P6 §8b — set by `CheckVictory()`, blocks `Submit()`, exposed in the observation |
-| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011; P6 adds `season_name` + `winner_seat_id` |
+| `FactionState` | `ResearchPoints` (int) + `Research` (4 lines → level 0-5, keys `agri/military/espionage/governance`) | ✅ P7 §7 — income at rollover, levels bought by `research`; **private to the seat** |
+| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011; P6 adds `season_name` + `winner_seat_id`; P7 adds `research_points` + `research` (own levels only) |
 | 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | ✅ applied at season rollover; the design's second threshold (民心<25 → 民變) landed in P6 as §8b — both numbers stand (ADR-013, OPEN_QUESTIONS 19) |
 
 ## 10. Decisions — LOCKED 2026-10-08 (recorded as ADR-010; team may supersede)
@@ -194,3 +218,13 @@ game always opens in 春 and always has the same season sequence for a given see
 >    **4** (`floor(6 × 0.7)`) and 冬 desertion **+5%** (LOCKED, design §10.1 嚴冬).
 > 10. Victory MVP: **一統天下 only** (every city, neutrals included, under one seat). 稱霸諸侯 / 受天明命 /
 >     時間到 stay ⏸ (OPEN_QUESTIONS 10/11).
+
+> **P7 additions (2026-10-12, ADR-014 — supersedes #3's "research → phase 2": the four lines are live,
+> espionage levels are purchasable but their effects wait for §6):**
+> 11. Research income **15/season** (TBD — the design says 「約 15 點／季」), ×1.25 → **19** with 吏治 L4.
+> 12. `research` costs **1 號令** (TBD — design ch.11 does not price it) + the level's points
+>     (20/40/70/110/160, LOCKED §9), one level per command, max level 5 per line.
+> 13. Research events are **owner-only**: a tech tree is a seat's secret. The observation carries the
+>     seat's own `research_points`/`research` and nobody else's.
+> 14. 兵法 L1 (design: 「練兵（訓練 +1）」) is implemented as **訓練 cap 5→6** for that faction, not as a
+>     free training level — the reading the P7 brief locked; flagged for the team.

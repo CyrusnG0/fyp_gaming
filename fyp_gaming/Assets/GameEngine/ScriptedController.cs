@@ -120,7 +120,7 @@ namespace LuanShi.Engine
             foreach (var city in cities)
             {
                 if (cp <= 0) break;
-                if (city.Training >= BalanceConfig.TrainingMax) continue;
+                if (city.Training >= BalanceConfig.TrainingCap(fac.ResearchLevel(ResearchLine.Military))) continue;
                 plan.Add(Order(ActionType.Train, seatId, city.Id, "Train for war"));
                 cp--;
             }
@@ -158,6 +158,20 @@ namespace LuanShi.Engine
                         plan.Add(Order(ActionType.March, seatId, best.Id, "Expand territory",
                             target.X, target.Z));
                     }
+                }
+            }
+
+            // 研究 (design §9): with a 號令 still unspent after every other priority, the scripted baseline
+            // buys the next 農政 level — the line its food-first play style is bottlenecked by. At most one
+            // purchase a season: the engine deducts the points on submit, so one order per plan.
+            if (cp > 0)
+            {
+                int level = fac.ResearchLevel(ResearchLine.Agri);
+                if (level < BalanceConfig.ResearchMaxLevel
+                    && fac.ResearchPoints >= BalanceConfig.ResearchLevelCost(level + 1))
+                {
+                    plan.Add(Order(ActionType.Research, seatId, null, "Improve the fields",
+                        args: new Dictionary<string, string> { { "line", ResearchLine.Agri } }));
                 }
             }
 

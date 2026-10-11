@@ -42,6 +42,7 @@
 | Basic combat: field battle + siege + city capture | ✅ | M2 field battle (≤5 rounds, rout/annihilation) + M3 assault-only 攻城 (3:1, single resolution, capture); multi-season 圍城 / 器械 / 兵種 still ❌ |
 | Food/gold economy with seasonal modifiers | ✅ | P6: 春 ×0.7 / 夏 ×1.0 / **秋 ×2.0** / 冬 ×0.3 harvest applied to every city, 冬 march budget 4, 冬 desertion +5% (ADR-013); 天時 per-region weather (豐收/旱災/蝗災…, design §10.1) still ❌ |
 | Pressure & consequences: 民變 revolt, 逃兵 desertion, 一統天下 victory | ✅ | P6 (ADR-013): 民心<25 → per-season revolt roll `(25 − 民心) × 2%` × `RevoltChanceMult` zeroing that city's harvest+tax, −10% garrison, 民心 +15; unfed armies desert; one owner of every city (neutrals included) sets `WinnerSeatId` + public `game_over` and blocks `Submit()` — see `docs/ACTIONS.md` §8b |
+| Research: 4 lines × 5 levels, point income, effects | ✅ | P7 (ADR-014): `research` action (1 號令 TBD + 20/40/70/110/160 points), +15/season at rollover (19 with 吏治 L4), private per seat (owner-only event), live 研究 tab; **implemented** 農政 L1/L5, 兵法 L1/L4, 吏治 L1-L5 · **deferred but purchasable** 農政 L2-L4, 兵法 L2/L3/L5, 諜報 L1-L5 — full matrix in `docs/ACTIONS.md` §7 |
 | Basic diplomacy: public messages, private letters, NAP, declare war | ✅ | P1-P6: 遣使, 提出/接受/拒絕/反提案 (nap/alliance/truce), 贈禮, 宣戰, 毀約; 密信 / 共同防禦 / 朝貢 / 通商 still ⏸ |
 | Trust (−100..+100, bidirectional) + prestige | ✅ | directional `Trust` + `Prestige` written by gifts/attacks/treaties; every change emits `trust_changed`/`prestige_changed` with a reason |
 | Basic fog of war + scouts | ✅ | engine-side observations (±3 cities / ±2 armies, absent outside; ADR-011); scouts + estimation levels not yet |
@@ -65,14 +66,14 @@
 | Map view: zoom/pan, terrain, cities, armies, fog mask | 🟡 | terrain/cities/banners/camera done (2D fake-3D, ADR-008); units outside the current seat's observation are hidden (ADR-011), but there is no terrain fog *mask* |
 | Nation/city/army panels + action menu (legal actions only) | ✅ | city panel: D1-D7 + 民心/開墾/城防/訓練; army panel: 士氣 + 攻擊/攻城 against adjacent enemies; CP cost on every label, greyed with a reason |
 | 朝報 / 朝議 / 史官 screens | 🟡 | per-seat filtered 朝報 (city lines, 戰報, 外交 news) + filtered 史官 tab; 朝議 not yet |
-| Concept tab bar （內政/外交 live) | ✅ | 內政 and 外交 tabs are live; 諜報/研究 remain design previews |
+| Concept tab bar （內政/外交/研究 live) | ✅ | 內政, 外交 and 研究 tabs are live (研究 = P7, ADR-014); 諜報 remains a design preview |
 | Diplomacy panel (grouped relations, treaty deadlines) | ✅ | per-seat relations (信任 both ways, 和平/交戰), treaties with seasons left, incoming-proposal inbox with 接受/拒絕, 遣使 text field; beyond 3 neighbours are summarised |
 | Notifications + turn progress | 🟡 | status line + JSON command feed + "回合：魏" tag; no toasts/popups |
 | Replay viewer | ❌ | |
 
 ## Stretch goals (⏸ by default)
 
-8-seat full games · full treaty set (割地/朝貢/聯姻/稱臣…) · espionage missions beyond 偵察 (偽造軍報, 收買, 暗殺, 秘密反用) · research trees (4 lines × 5) · general personalities & betrayal · 稱帝/結義/禪讓-託孤 actions · multiple simultaneous LLM seats · procedural maps · networked (non-hot-seat) multiplayer · research analytics dashboard
+8-seat full games · full treaty set (割地/朝貢/聯姻/稱臣…) · espionage missions beyond 偵察 (偽造軍報, 收買, 暗殺, 秘密反用) · general personalities & betrayal · 稱帝/結義/禪讓-託孤 actions · multiple simultaneous LLM seats · procedural maps · networked (non-hot-seat) multiplayer · research analytics dashboard · the deferred research levels (農政 2/3/4, 兵法 2/3/5, 諜報 1-5)
 
 ## Evaluation (Phase 7)
 

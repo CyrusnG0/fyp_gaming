@@ -19,21 +19,82 @@ namespace LuanShi.Engine
         public string Controller;      // ControllerType.*
         public int CommandPoints;
         public int Prestige = BalanceConfig.PrestigeStart;    // 威望, range PrestigeMin..PrestigeMax
-        public float RevoltChanceMult = 1.0f;                 // P7 hook (吏治 3 → 0.5): scales 民變 chance
+        public float RevoltChanceMult = 1.0f;                 // 吏治 3 律法 → 0.5; synced at rollover (ADR-014)
+        public int ResearchPoints;                            // 研究點 (design §9), accrued at rollover
+        public readonly Dictionary<string, int> Research = new Dictionary<string, int>();  // ResearchLine.* → 0..5
 
         public bool IsHuman => Controller == ControllerType.Human;
 
+        /// <summary>Level of one 研究 line (0 = not started). Unknown keys read as 0.</summary>
+        public int ResearchLevel(string line)
+            => Research.TryGetValue(line, out int level) ? level : 0;
+
+        /// <summary>
+        /// 吏治 L3 律法 (design §9): 叛變機率 −50%. Derived from the level at rollover instead of being
+        /// written by the purchase, so research takes effect from the *next* season (ADR-014) — the same
+        /// "takes effect next season" rule treaties follow (ADR-010 #5).
+        /// </summary>
+        public void SyncResearchDerived()
+            => RevoltChanceMult = ResearchLevel(ResearchLine.Governance) >= 3
+                                ? BalanceConfig.ResearchGovRevoltMult : 1.0f;
+
         public string ToJson()
         {
-            var sb = new StringBuilder(128);
+            var sb = new StringBuilder(180);
             sb.Append('{');
             sb.Append("\"seat_id\":").Append(MiniJson.Str(SeatId));
             sb.Append(",\"name\":").Append(MiniJson.Str(Name));
             sb.Append(",\"controller_type\":").Append(MiniJson.Str(Controller));
             sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
             sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append(",\"research_points\":").Append(MiniJson.Num(ResearchPoints));
+            sb.Append(",\"research\":").Append(ResearchLine.MapToJson(ResearchLevel));
             sb.Append('}');
             return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// The four 研究 lines (design §9, 「四條線，各 5 級」). The string values are the schema keys — they
+    /// are English because they are part of the LLM contract (`args.line`) and the observation JSON.
+    /// </summary>
+    public static class ResearchLine
+    {
+        public const string Agri = "agri";             // 農政
+        public const string Military = "military";     // 兵法
+        public const string Espionage = "espionage";   // 諜報
+        public const string Governance = "governance"; // 吏治
+
+        public static readonly string[] All = { Agri, Military, Espionage, Governance };
+
+        public static bool IsValid(string line)
+            => line == Agri || line == Military || line == Espionage || line == Governance;
+
+        /// <summary>Display name for logs and UI (English strings; 農政/兵法/諜報/吏治).</summary>
+        public static string Label(string line)
+        {
+            switch (line)
+            {
+                case Agri: return "Agriculture";
+                case Military: return "Military";
+                case Espionage: return "Intelligence";
+                case Governance: return "Administration";
+                default: return line;
+            }
+        }
+
+        /// <summary>`{agri: n, military: n, espionage: n, governance: n}` in schema order — built by
+        /// explicit iteration rather than dictionary order so a fixed seed replays byte-identical.</summary>
+        public static string MapToJson(System.Func<string, int> levelOf)
+        {
+            var sb = new StringBuilder(80);
+            sb.Append('{');
+            for (int i = 0; i < All.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(MiniJson.Str(All[i])).Append(':').Append(MiniJson.Num(levelOf(All[i])));
+            }
+            return sb.Append('}').ToString();
         }
     }
 
@@ -481,7 +542,12 @@ namespace LuanShi.Engine
         public string Phase;
         public int CommandPoints;
         public int Prestige;
+        public int ResearchPoints;       // own 研究點 (design §9) — research is private to the seat
+        public readonly Dictionary<string, int> Research = new Dictionary<string, int>();  // ResearchLine.* → 0..5
         public string WinnerSeatId;      // set once 一統天下 is reached; null while the game is live
+
+        public int ResearchLevel(string line)
+            => Research.TryGetValue(line, out int level) ? level : 0;
 
         public readonly List<CityState> Cities = new List<CityState>();
         public readonly List<ArmyState> Armies = new List<ArmyState>();
@@ -527,6 +593,8 @@ namespace LuanShi.Engine
             sb.Append(",\"phase\":").Append(MiniJson.Str(Phase));
             sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
             sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append(",\"research_points\":").Append(MiniJson.Num(ResearchPoints));
+            sb.Append(",\"research\":").Append(ResearchLine.MapToJson(ResearchLevel));
             sb.Append(",\"winner_seat_id\":").Append(MiniJson.Str(WinnerSeatId));
             sb.Append(",\"cities\":").Append(MiniJson.Array(cities));
             sb.Append(",\"armies\":").Append(MiniJson.Array(armies));

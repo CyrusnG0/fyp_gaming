@@ -32,7 +32,15 @@ namespace LuanShi.Engine
         {
             State.Season++;
             State.Phase = "player_orders";
-            foreach (var f in State.Factions) f.CommandPoints = BalanceConfig.CommandPointsPerSeason;
+            foreach (var f in State.Factions)
+            {
+                f.CommandPoints = BalanceConfig.CommandPointsPerSeason;
+                // 研究 income (design §9): ~15 points/season (TBD), ×1.25 with 吏治 L4 學堂. Income and the
+                // derived 吏治 L3 multiplier settle here at rollover, so a level bought this season pays
+                // out — and 律法 takes hold — from the next one (ADR-014; cf. treaties, ADR-010 #5).
+                f.ResearchPoints += BalanceConfig.ResearchIncome(f.ResearchLevel(ResearchLine.Governance));
+                f.SyncResearchDerived();
+            }
             foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
             Emit(null, null, "season_start", "public",
@@ -68,13 +76,20 @@ namespace LuanShi.Engine
                 bool disheartened = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold;
                 float yieldFactor = disheartened ? 1f - BalanceConfig.MoraleYieldPenalty : 1f;
 
+                // 研究 (design §9), read at the point of use — no cached derived state (ADR-014):
+                // 農政 L1/L5 scale this city's harvest, 吏治 L1 scales its tax.
+                int agriLevel = fac?.ResearchLevel(ResearchLine.Agri) ?? 0;
+                int govLevel = fac?.ResearchLevel(ResearchLine.Governance) ?? 0;
+
                 int taxes = revolted ? 0
-                          : (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor);
+                          : (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor
+                                  * BalanceConfig.ResearchTaxMult(govLevel));
                 city.Gold += taxes;
 
                 int harvest = revolted ? 0
                             : (int)(BalanceConfig.CityBaseFoodYield
-                                  * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood);
+                                  * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood
+                                  * BalanceConfig.ResearchFoodYieldMult(agriLevel));
                 city.Food += harvest;
                 int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
                                 + city.Garrison * BalanceConfig.FoodPerGarrisonTroop);
@@ -86,7 +101,7 @@ namespace LuanShi.Engine
                     int lost = (int)(city.Population * BalanceConfig.StarvationPopLoss);
                     city.Population -= lost;
                     city.Food = 0;
-                    note = $"Famine! Population reduced by {lost}";
+                    AddNote(ref note, $"Famine! Population reduced by {lost}");
                     Emit(city.OwnerSeatId, fac?.Controller, "starvation", "public",
                         P("city_id", city.Id, "pop_lost", lost.ToString()), null);
                 }
@@ -102,11 +117,18 @@ namespace LuanShi.Engine
                     int garrisonLost = (int)(city.Garrison * BalanceConfig.RevoltGarrisonLossPct);
                     city.Garrison -= garrisonLost;
                     AddMorale(city, BalanceConfig.RevoltMoraleGainAfterVenting);
-                    string revoltNote = $"Revolt! output halted this season, garrison −{garrisonLost}";
-                    note = note == null ? revoltNote : note + "; " + revoltNote;
+                    AddNote(ref note, $"Revolt! output halted this season, garrison −{garrisonLost}");
                     Emit(city.OwnerSeatId, fac?.Controller, "revolt", "public",
                         P("city_id", city.Id, "garrison_lost", garrisonLost.ToString(),
                           "morale", city.Morale.ToString()), null);
+                }
+
+                // 吏治 L2 察舉 (design §9): 民心 +5/季 — a resolution-time grant, so it lands in this
+                // season's report line (unlike the 吏治 L3 multiplier, which is synced at rollover).
+                if (govLevel >= 2)
+                {
+                    AddMorale(city, BalanceConfig.ResearchGovMoralePerSeason);
+                    AddNote(ref note, $"Administration 2: morale +{BalanceConfig.ResearchGovMoralePerSeason}");
                 }
 
                 string line = $"{city.Name}: population {city.Population}, food {city.Food}, gold {city.Gold}, garrison {city.Garrison}, morale {city.Morale}"
@@ -289,6 +311,7 @@ namespace LuanShi.Engine
                 case ActionType.Gift: r = DoGift(fac, cmd); break;
                 case ActionType.DeclareWar: r = DoDeclareWar(fac, cmd); break;
                 case ActionType.BreakTreaty: r = DoBreakTreaty(fac, cmd); break;
+                case ActionType.Research: r = DoResearch(fac, cmd); break;
                 default: r = ValidationResult.Fail($"unknown action type '{cmd.Type}'"); break;
             }
 
@@ -371,17 +394,19 @@ namespace LuanShi.Engine
             return ValidationResult.Success;
         }
 
-        /// <summary>D5 練兵: garrison training +1 (the §6.1 combat bonus lands with M2/M3).</summary>
+        /// <summary>D5 練兵: garrison training +1, up to the faction's cap (兵法 L1 raises it, design §9).</summary>
         private ValidationResult DoTrain(FactionState fac, ActionCommand cmd)
         {
             ValidationResult check = OwnCity(fac, cmd, out CityState city);
             if (!check.Ok) return check;
-            if (city.Training >= BalanceConfig.TrainingMax)
-                return ValidationResult.Fail($"training already at max ({BalanceConfig.TrainingMax})");
+            int cap = BalanceConfig.TrainingCap(fac.ResearchLevel(ResearchLine.Military));
+            if (city.Training >= cap)
+                return ValidationResult.Fail($"training already at max ({cap})");
 
             city.Training++;
             Emit(fac.SeatId, fac.Controller, "troops_trained", "owner_and_observers",
-                P("city_id", city.Id, "training", city.Training.ToString()), cmd.ActionId);
+                P("city_id", city.Id, "training", city.Training.ToString(), "training_cap", cap.ToString()),
+                cmd.ActionId);
             return ValidationResult.Success;
         }
 
@@ -412,6 +437,43 @@ namespace LuanShi.Engine
             Emit(fac.SeatId, fac.Controller, "disaster_relieved", "owner_and_observers",
                 P("city_id", city.Id, "food_spent", BalanceConfig.ReliefFoodCost.ToString(),
                   "morale", city.Morale.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        // ---- 研究 R1 (design §9, ACTIONS.md §7) ---------------------------------
+
+        /// <summary>
+        /// 研究: buy the next level of one of the four §9 lines. Costs 1 號令 (TBD — the design's chapter-11
+        /// table does not price it) plus the level's point cost, paid immediately on success.
+        /// The event is **owner_only**: your tech tree is your secret (a locked choice, ADR-014).
+        /// </summary>
+        private ValidationResult DoResearch(FactionState fac, ActionCommand cmd)
+        {
+            string line = Arg(cmd, "line");
+            if (string.IsNullOrEmpty(line))
+                return ValidationResult.Fail("args.line is required (agri|military|espionage|governance)");
+            if (!ResearchLine.IsValid(line))
+                return ValidationResult.Fail($"unknown research line '{line}'");
+
+            int level = fac.ResearchLevel(line);
+            if (level >= BalanceConfig.ResearchMaxLevel)
+                return ValidationResult.Fail($"{line} research is already at max level ({BalanceConfig.ResearchMaxLevel})");
+
+            int cost = BalanceConfig.ResearchLevelCost(level + 1);
+            if (fac.ResearchPoints < cost)
+                return ValidationResult.Fail(
+                    $"not enough research points for {line} {level + 1} (needs {cost}, have {fac.ResearchPoints})");
+
+            fac.ResearchPoints -= cost;
+            fac.Research[line] = level + 1;
+
+            // 吏治 L5 九品 (design §9): a one-time 威望 +10 the moment the level is bought.
+            if (line == ResearchLine.Governance && level + 1 >= BalanceConfig.ResearchMaxLevel)
+                AddPrestige(fac, BalanceConfig.ResearchGovPrestigeL5, "research_governance_l5", cmd);
+
+            Emit(fac.SeatId, fac.Controller, "research", "owner_only",
+                P("line", line, "level", (level + 1).ToString(), "cost", cost.ToString(),
+                  "research_points", fac.ResearchPoints.ToString()), cmd.ActionId);
             return ValidationResult.Success;
         }
 
@@ -477,6 +539,10 @@ namespace LuanShi.Engine
         private static void AddMorale(CityState city, int delta)
             => city.Morale = Clamp(city.Morale + delta, BalanceConfig.MoraleMin, BalanceConfig.MoraleMax);
 
+        /// <summary>Joins the notes on a city's report line, so a season can report several events at once.</summary>
+        private static void AddNote(ref string note, string extra)
+            => note = note == null ? extra : note + "; " + extra;
+
         private static int Clamp(int value, int min, int max)
             => value < min ? min : value > max ? max : value;
 
@@ -500,8 +566,10 @@ namespace LuanShi.Engine
                 Phase = State.Phase,
                 CommandPoints = fac.CommandPoints,
                 Prestige = fac.Prestige,
+                ResearchPoints = fac.ResearchPoints,     // 研究 is private to the seat (ADR-014)
                 WinnerSeatId = State.WinnerSeatId,
             };
+            foreach (string line in ResearchLine.All) obs.Research[line] = fac.ResearchLevel(line);
 
             foreach (var city in State.Cities)
                 if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
@@ -884,6 +952,8 @@ namespace LuanShi.Engine
             string legitimacy = ApplyAttackReputation(fac, defender.OwnerSeatId, cmd);
 
             int attackerTraining = TrainingOf(fac.SeatId), defenderTraining = TrainingOf(defender.OwnerSeatId);
+            float attackerResearch = CombatResearchMult(fac.SeatId);
+            float defenderResearch = CombatResearchMult(defender.OwnerSeatId);
             int attackerBefore = army.Troops, defenderBefore = defender.Troops;
             var roundLog = new StringBuilder();
             int round = 0;
@@ -896,9 +966,11 @@ namespace LuanShi.Engine
                 int attackerStart = army.Troops, defenderStart = defender.Troops;
 
                 // Design §6.2: each side takes enemy 戰力 × CombatLossPerRound that round.
-                int toAttacker = CapLoss(Vary(Strength(defender.Troops, defenderTraining, defender.Morale)
+                int toAttacker = CapLoss(Vary(Strength(defender.Troops, defenderTraining, defender.Morale,
+                                                       defenderResearch)
                                               * BalanceConfig.CombatLossPerRound), army.Troops);
-                int toDefender = CapLoss(Vary(Strength(army.Troops, attackerTraining, army.Morale)
+                int toDefender = CapLoss(Vary(Strength(army.Troops, attackerTraining, army.Morale,
+                                                       attackerResearch)
                                               * BalanceConfig.CombatLossPerRound), defender.Troops);
 
                 army.Troops -= toAttacker;
@@ -968,6 +1040,8 @@ namespace LuanShi.Engine
             string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
 
             int training = TrainingOf(fac.SeatId);
+            float attackerResearch = CombatResearchMult(fac.SeatId);
+            float garrisonResearch = CombatResearchMult(city.OwnerSeatId);
             int troopsBefore = army.Troops, garrisonBefore = city.Garrison;
             int garrisonTraining = city.Training, defense = city.Defense;
             var roundLog = new StringBuilder();
@@ -979,8 +1053,9 @@ namespace LuanShi.Engine
                 round++;
                 int troopsStart = army.Troops;
 
-                int toArmy = CapLoss(Vary(GarrisonStrength(city) * BalanceConfig.CombatLossPerRound), army.Troops);
-                int toGarrison = CapLoss(Vary(Strength(army.Troops, training, army.Morale)
+                int toArmy = CapLoss(Vary(GarrisonStrength(city, garrisonResearch)
+                                          * BalanceConfig.CombatLossPerRound), army.Troops);
+                int toGarrison = CapLoss(Vary(Strength(army.Troops, training, army.Morale, attackerResearch)
                                               * BalanceConfig.CombatLossPerRound), city.Garrison);
 
                 army.Troops -= toArmy;
@@ -1126,17 +1201,29 @@ namespace LuanShi.Engine
                   "prestige", fac.Prestige.ToString(), "reason", reason), cmd.ActionId);
         }
 
-        /// <summary>Design §6.1 戰力, reduced to the fields the MVP has: troops, 訓練 and 士氣.</summary>
-        private static int Strength(int troops, int training, int morale)
+        /// <summary>
+        /// Design §6.1 戰力, reduced to the fields the MVP has: troops, 訓練 and 士氣, times the acting
+        /// faction's research multiplier (兵法 L4 兵法 +15%, design §9 — a faction-side bonus, so the
+        /// opposite side of one battle can be fighting at a different multiplier).
+        /// </summary>
+        private static int Strength(int troops, int training, int morale, float researchMult)
             => (int)(troops
                    * (1f + training * BalanceConfig.CombatTrainingBonusPerLevel)
-                   * (BalanceConfig.CombatMoraleFloor + morale / BalanceConfig.CombatMoraleScale));
+                   * (BalanceConfig.CombatMoraleFloor + morale / BalanceConfig.CombatMoraleScale)
+                   * researchMult);
 
-        /// <summary>A city's garrison strength: 訓練 plus the 城防 multiplier (design §4.1/§6.1).</summary>
-        private static int GarrisonStrength(CityState city)
+        /// <summary>A city's garrison strength: 訓練 plus the 城防 multiplier (design §4.1/§6.1),
+        /// times its owner's 兵法 L4 research multiplier.</summary>
+        private static int GarrisonStrength(CityState city, float researchMult)
             => (int)(city.Garrison
                    * (1f + city.Training * BalanceConfig.CombatTrainingBonusPerLevel)
-                   * (1f + city.Defense * BalanceConfig.CombatDefenseBonusPerLevel));
+                   * (1f + city.Defense * BalanceConfig.CombatDefenseBonusPerLevel)
+                   * researchMult);
+
+        /// <summary>The 兵法 L4 戰力 multiplier of one seat (1.0 without the research).</summary>
+        private float CombatResearchMult(string seatId)
+            => BalanceConfig.ResearchCombatStrengthMult(
+                   State.FindFaction(seatId)?.ResearchLevel(ResearchLine.Military) ?? 0);
 
         /// <summary>An army drills at home: the best 訓練 level among its faction's cities (§5.1).</summary>
         private int TrainingOf(string seatId)

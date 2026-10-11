@@ -132,3 +132,75 @@ each carries its design-doc section, and design-silent values are marked 待決/
   public `game_over`, later `Submit()` rejected for winner and loser alike; `ScriptedController` relieves a
   revolt-risk city first and never plans an unaffordable winter march). Engine + adapter also compile
   clean against Unity's managed assemblies (0 warnings/errors).
+
+## ADR-014 — Research: four §9 lines, point income at rollover, effects read where they apply
+**Date:** 2026-10-12 · **Status:** accepted · **Phase:** P7
+
+Design §9 (四條線，各 5 級) is implemented as **one action + four state lines**, engine-first and
+deterministic like everything since P6. All numbers live in `BalanceConfig` with the design section in the
+comment; values the design does not state are marked TBD.
+
+- **Model & schema.** `FactionState.ResearchPoints` (int) plus `FactionState.Research`, a `line → level`
+  (0..5) map. The four keys are **English and frozen**, because they are the LLM contract: `agri` 農政 ·
+  `military` 兵法 · `espionage` 諜報 · `governance` 吏治 (`ResearchLine.*`). `ResearchLine.MapToJson`
+  renders all four keys **in schema order** rather than dictionary order, so replay JSON is byte-stable
+  (ADR-005). The observation carries the seat's own `research_points` and `research` only — a tech tree is
+  a seat's secret, and the `FactionView`s other seats receive carry no research fields at all (they are
+  built from `FactionView`, not `FactionState`).
+- **Action R1 `research`.** `args.line` required ∈ the four keys; `target_id` unused. Costs **1 號令**
+  (TBD — design ch.11 never prices it) *plus* the level's points (20/40/70/110/160, LOCKED design §9),
+  deducted immediately on success. Refused for: unknown/missing line, line already at level 5,
+  insufficient points, no 號令 left (the generic pipeline checks CP first, so the CP message wins). One
+  level per command, so a faction can advance at most 5 levels a season given the CP budget of 5. Event
+  `research` is **owner-only** — locked choice: in a game with a fog of war and a 諜報 tree, publishing
+  everyone's progress would gut the 諜報 line and hand LLM seats free information a human cannot get from
+  the screen. The event payload is `line`, `level`, `cost`, `research_points`.
+- **Income at rollover.** `+15/season` (TBD; design says 「約 15 點／季」) at `BeginSeason()`, ×1.25 →
+  **19** with 吏治 L4 學堂 (rounding, documented in `BalanceConfig.ResearchIncome`). Income is deliberately
+  *not* granted in `EndSeason()`: rollover is where a season's budget is set (CP are set there too), and it
+  makes the demo's very first order phase follow the design's "開局約 15 點" reading. **學堂 the building**
+  (design §4.2, +3/季) is deferred with D8 建築 — no building model exists.
+- **Effects — implemented only where a system exists, each read at the point of use** (no cached derived
+  state): 農政 L1 harvest ×1.10 and L5 a further ×1.25 (multiplicative with 開墾 and the 天時 season —
+  `EndSeason`), 兵法 L1 `TrainingCap` 5→6 for that faction (`DoTrain`, the UI and `ScriptedController` all
+  read `BalanceConfig.TrainingCap(level)`), 兵法 L4 戰力 ×1.15 **faction-side** (`Strength`/`GarrisonStrength`
+  take the multiplier, so the two sides of one battle can differ — a defender with 兵法 4 defends a city at
+  ×1.15 while the attacker's troops are unchanged), 吏治 L1 tax ×1.10, L2 民心 +5/季 per city (granted in the
+  city loop so it lands on the season's report line), L3 `RevoltChanceMult` 0.5, L4 income ×1.25, L5 威望
+  +10 once at purchase (via `AddPrestige`, so it is public and logged like every other 威望 change).
+- **Timing.** Point-of-use effects (harvest, tax, combat, training cap, the 民心 grant) apply as soon as the
+  level exists — buying before `EndSeason()` already pays in that season. The two **derived** values —
+  吏治 L3's `RevoltChanceMult` and the L4 income rate — are settled at the season rollover instead, so they
+  take effect from the next season, the same rule treaties follow (ADR-010 #5). `FactionState.SyncResearchDerived`
+  computes L3 from the level rather than the purchase writing 0.5 directly, so the hook can never drift from
+  the tech tree. This is the intended shape for the P6 note "P7 吏治 3 will set it to 0.5".
+- **Deferred (still purchasable — a level with a deferred effect is progress up its line):** 農政 L2 水利,
+  L3 屯田 (D9, needs the research gate it was always waiting on), L4 常平倉 (no food cap exists); 兵法 L2 騎兵,
+  L3 器械, L5 統帥 (no unit types, no siege weapons, no generals); 諜報 L1–L5 (they gate the espionage phase,
+  which is still ⏸). Also deferred: 學堂/其他 building effects, per-region 天時 weather, and any research
+  analytics (the thesis metric). `ACTIONS.md` §7 carries the full implemented-vs-deferred matrix and the UI
+  prints "(deferred)" on every level whose system is missing, so the panel never promises an effect the
+  engine does not apply.
+- **兵法 L1 interpretation (flagged).** Design §9 L1 reads 「練兵（訓練 +1）」, which can be read as a free
+  training level or as a raised cap. Implemented as **cap 5→6** per the P7 brief; recorded here so the team
+  can supersede it (OPEN_QUESTIONS-style flag rather than a silent pick).
+- **Scripted baseline.** With a 號令 still unspent after diplomacy, military, domestic and march, the
+  scripted seat buys the next 農政 level (its food-first play style's bottleneck) — **at most one research
+  order per season**, and only when the points are already in hand; it never plans a purchase the validator
+  will refuse.
+- **UI (KingdomDemo).** The 研究 tab is live: four rows with pips, the seat's points and income, "Now:" and
+  "Next: level n for c points — <effect>", and one `Research` button per row using the shared `OrderButton`
+  helper (so its label carries the CP cost and it is greyed with a reason: *Line complete* / *Needs c points*
+  / *No orders left*). Everything is rendered from the seat's observation, and the city panel's
+  訓練 display/blocked reason use the research-aware cap.
+- **Verified** headless 2026-10-12: **109/109 assertions** (58 from P6 still green + 51 for P7) — income 15,
+  19 with 吏治 L4, income only at rollover; unknown line / missing `args.line` / insufficient points /
+  max level / no-CP all refused with their own messages; level 1 = 20 and level 2 = 40 deducted; the
+  `research` event is owner-only and unreadable by another seat; 農政 L1 harvest ×1.10 (exact numbers),
+  L5 ×1.25 on top; 兵法 L1 lifts 訓練 to 6 and holds there; 兵法 L4 multiplies the boosted faction's
+  first-round losses by exactly ×1.15 while the other side's first round is identical; 吏治 L1 tax ×1.10,
+  L2 民心 +5 named on the report line, L3 `RevoltChanceMult` 0.5 only from the next rollover, L5 one-time
+  +10 威望; the observation carries all four lines plus points; the scripted seat buys exactly one 農政 level
+  when rich and none when poor; two runs of an 8-season research replay on one seed are byte-identical and a
+  different seed diverges. Engine + `KingdomDemo` also compile clean against Unity's managed assemblies
+  (0 warnings / 0 errors); the editor compile and play-mode smoke are still pending.

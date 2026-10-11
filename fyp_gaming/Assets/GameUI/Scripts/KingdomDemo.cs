@@ -92,7 +92,7 @@ namespace LuanShi
         private Vector2 reportScroll;         // court report scroll offset when a season outruns its panel
 
         // concept tabs: Map is the live view, the rest preview the full design
-        // (doc/LuanShi-Game-Design-v1.md). Domestic/Diplomacy are live, Intel/Research are previews, History renders real data.
+        // (doc/LuanShi-Game-Design-v1.md). Domestic/Diplomacy/Research are live, Intel is a preview, History renders real data.
         private string activeTab = "map";
         private Vector2 historianScroll;
         private static readonly string[,] Tabs =
@@ -1158,7 +1158,7 @@ namespace LuanShi
                 GUI.Label(new Rect(22, 86, 400, 116),
                     $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison}\n" +
                     $"Morale {city.Morale}{moraleWarning}\n" +
-                    $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{BalanceConfig.TrainingMax}",
+                    $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{MyTrainingCap()}",
                     body);
 
                 float buttonLeft = p.x + 12f;
@@ -1177,7 +1177,7 @@ namespace LuanShi
                     city.Gold < BalanceConfig.RecruitGoldCost ? "Not enough gold"
                     : city.Population < BalanceConfig.RecruitPopCost ? "Not enough population" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Train, city.Id, "Train",
-                    city.Training >= BalanceConfig.TrainingMax ? "Limit reached" : null, 0, 0, btn));
+                    city.Training >= MyTrainingCap() ? "Limit reached" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Fortify, city.Id, "Fortify",
                     city.Defense >= BalanceConfig.DefenseMax ? "Limit reached" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
@@ -1425,7 +1425,7 @@ namespace LuanShi
                 case "domestic":  DrawDomesticPanel(p, body); break;
                 case "diplomacy": DrawDiplomacyPanel(p, body); break;
                 case "intel":     DrawIntelPanel(p, body); break;
-                case "research":  DrawResearchPanel(p, body); break;
+                case "research":  DrawResearchPanel(p, body, btn); break;
                 default:          DrawHistorianPanel(p, body, mono); break;
             }
 
@@ -1452,7 +1452,7 @@ namespace LuanShi
                 case "domestic":  return "Domestic · Orders";
                 case "diplomacy": return "Diplomacy · Orders";
                 case "intel":     return "Intel · Planned";
-                case "research":  return "Research · Planned";
+                case "research":  return "Research · Orders";
                 default:           return "History · Chronicle";
             }
         }
@@ -1471,7 +1471,7 @@ namespace LuanShi
                 $"Lighten labor  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
                 $"Reclaim  costs {BalanceConfig.CommandPointsPerOrder} order  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
                 $"Recruit  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.RecruitGoldCost}, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
-                $"Train    costs {BalanceConfig.CommandPointsPerOrder} order  Training +1 (cap {BalanceConfig.TrainingMax})",
+                $"Train    costs {BalanceConfig.CommandPointsPerOrder} order  Training +1 (cap {MyTrainingCap()})",
                 $"Fortify  costs {BalanceConfig.CommandPointsPerOrder} order  Defense +1 (cap {BalanceConfig.DefenseMax})",
                 $"Relief   costs {BalanceConfig.CommandPointsPerOrder} order  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
             };
@@ -1710,19 +1710,116 @@ namespace LuanShi
                 "Exposure check: base 5% + city security + target intelligence; suspicion >= 80 guarantees exposure.", body);
         }
 
-        void DrawResearchPanel(Rect p, GUIStyle body)
+        /// <summary>
+        /// 研究 (design §9, 四條線各 5 級): the four lines are live. Each row shows the seat's level, the
+        /// next level's price and what that level does; the button submits a real `research` command
+        /// (1 號令 + the level's points, TBD) through the same pipeline as every other order.
+        /// Every number on screen comes from BalanceConfig and the seat's own observation — research is
+        /// private (ADR-014), so another seat's tech tree is never rendered.
+        /// </summary>
+        void DrawResearchPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Four policy tracks (5 levels each: 20 / 40 / 70 / 110 / 160 research points)", body);
+            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+                $"Research points {obs.ResearchPoints}  (+{BalanceConfig.ResearchIncome(obs.ResearchLevel(ResearchLine.Governance))}/season)" +
+                $"  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
+                $"  ·  level costs {string.Join(" / ", System.Array.ConvertAll(BalanceConfig.ResearchLevelCosts, v => v.ToString()))}", body);
             y += 30;
-            PlannedLabel(new Rect(p.x + 36, y, 744, 96),
-                "[Planned] Agriculture 1  Reclaim — food +10%\n" +
-                "[Planned] Military 1  Train — training +1\n" +
-                "[Planned] Intelligence 1  Spies — deploy spies\n" +
-                "[Planned] Administration 1  Taxation — gold +10%", body);
-            y += 108;
+
+            for (int i = 0; i < ResearchLine.All.Length; i++)
+            {
+                string line = ResearchLine.All[i];
+                int level = obs.ResearchLevel(line);
+                int cost = BalanceConfig.ResearchLevelCost(level + 1);
+                bool maxed = level >= BalanceConfig.ResearchMaxLevel;
+                string blocked = maxed ? "Line complete"
+                               : obs.ResearchPoints < cost ? $"Needs {cost} points"
+                               : obs.CommandPoints < BalanceConfig.CommandPointCost(ActionType.Research) ? "No orders left"
+                               : null;
+
+                GUI.Label(new Rect(p.x + 20, y, 560, 22),
+                    $"{ResearchLine.Label(line)}  {ResearchPips(level)}  {level}/{BalanceConfig.ResearchMaxLevel}", body);
+                OrderButton(new Rect(p.x + 596, y, 184, 30), ActionType.Research, null, "Research",
+                    blocked, 0, 0, btn, new Dictionary<string, string> { { "line", line } });
+
+                GUI.Label(new Rect(p.x + 36, y + 26, 744, 20),
+                    "Now:  " + (level > 0 ? ResearchEffect(line, level) : "—"), body);
+                GUI.Label(new Rect(p.x + 36, y + 44, 744, 20),
+                    maxed ? "All five levels researched."
+                          : $"Next: level {level + 1} for {cost} points — {ResearchEffect(line, level + 1)}", body);
+                y += 70;
+            }
+
+            y += 6;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
-                "The game starts with about 15 research points per season; a campaign usually allows specialization in only two tracks.\nSpend research points here to unlock levels once the research module is implemented.", body);
+                "Points arrive at every season rollover. Harvest, tax, combat and training-cap effects apply as soon as they resolve;\n" +
+                "律法 (level 3) and the income bonus settle at the next rollover. 學堂 the building (+3/season) and all Intelligence levels are deferred.", body);
+        }
+
+        /// <summary>
+        /// The current seat's 訓練 cap: 兵法 L1 練兵 raises it (design §9). Read from the seat's own
+        /// observation, like everything else the panel shows.
+        /// </summary>
+        int MyTrainingCap()
+            => BalanceConfig.TrainingCap(obs != null ? obs.ResearchLevel(ResearchLine.Military) : 0);
+
+        static string ResearchPips(int level)
+        {
+            var sb = new StringBuilder(BalanceConfig.ResearchMaxLevel);
+            for (int i = 1; i <= BalanceConfig.ResearchMaxLevel; i++) sb.Append(i <= level ? '\u25cf' : '\u25cb');
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Design §9's effect for one level, in one line. Levels whose systems do not exist yet say so
+        /// ("deferred") instead of promising an effect the engine does not implement (ADR-014).
+        /// </summary>
+        static string ResearchEffect(string line, int level)
+        {
+            switch (line)
+            {
+                case ResearchLine.Agri:
+                    switch (level)
+                    {
+                        case 1: return $"Reclaim — city harvest +{(int)(BalanceConfig.ResearchAgriFoodBonus * 100)}%";
+                        case 2: return "Water works — drought damage halved (deferred: no 天時 events)";
+                        case 3: return "Military farms — garrison self-supply 30% (deferred: 屯田 D9)";
+                        case 4: return "State granaries — food cap +50% (deferred: no food cap)";
+                        case 5: return $"Shennong — all harvests +{(int)(BalanceConfig.ResearchAgriL5FoodBonus * 100)}%";
+                    }
+                    break;
+                case ResearchLine.Military:
+                    switch (level)
+                    {
+                        case 1: return $"Drill — training cap +{BalanceConfig.ResearchMilTrainingCapBonus} (now {BalanceConfig.TrainingCap(1)})";
+                        case 2: return "Cavalry unlock (deferred: no unit types)";
+                        case 3: return "Siege engines unlock (deferred: no 器械)";
+                        case 4: return $"Art of war — combat power ×{1f + BalanceConfig.ResearchMilCombatBonus:F2}";
+                        case 5: return "Command — general coefficient +0.2 (deferred: no generals)";
+                    }
+                    break;
+                case ResearchLine.Espionage:
+                    switch (level)
+                    {
+                        case 1: return "Spies — deploy agents (deferred: espionage phase)";
+                        case 2: return "Counter-intelligence — domestic exposure +10% (deferred)";
+                        case 3: return "Forged reports (deferred)";
+                        case 4: return "Spy network — +2 agent slots (deferred)";
+                        case 5: return "No shadows — capture chance +25% (deferred)";
+                    }
+                    break;
+                default:
+                    switch (level)
+                    {
+                        case 1: return $"Taxation — city tax +{(int)(BalanceConfig.ResearchGovTaxBonus * 100)}%";
+                        case 2: return $"Recruitment — morale +{BalanceConfig.ResearchGovMoralePerSeason}/season in every city";
+                        case 3: return $"Law — revolt chance ×{BalanceConfig.ResearchGovRevoltMult} (from next season)";
+                        case 4: return $"Academy — research +{(int)(BalanceConfig.ResearchGovIncomeBonus * 100)}% ({BalanceConfig.ResearchIncome(4)} points/season)";
+                        case 5: return $"Nine ranks — prestige +{BalanceConfig.ResearchGovPrestigeL5} once";
+                    }
+                    break;
+            }
+            return "no effect yet";
         }
 
         void DrawHistorianPanel(Rect p, GUIStyle body, GUIStyle mono)

@@ -163,6 +163,58 @@ namespace LuanShi.Engine
         public const float DesertionTroopLossPct = 0.10f;  // LOCKED (design §6.3 斷補): 逃兵 10%/季
         public const int DesertionMoraleLoss = 15;         // TBD: 士氣 lost with the deserters (design silent)
 
+        // ---- 研究 research (design §9 四條線 × 5 級, §4.2 學堂) -------------------
+        // Four tracks × 5 levels. Level n costs ResearchLevelCosts[n−1] points; the effect of every level
+        // is read from its level at the point of use (no cached derived state) except 吏治 L3, which is
+        // synced onto FactionState.RevoltChanceMult at rollover (ADR-014).
+
+        public static readonly int[] ResearchLevelCosts = { 20, 40, 70, 110, 160 };  // LOCKED (design §9)
+        public const int ResearchMaxLevel = 5;             // LOCKED (design §9): 各 5 級
+        public const int ResearchPointsPerSeason = 15;     // TBD (design §9: 「開局約 15 點／季」 is approximate)
+        public const int ResearchCommandPoints = 1;        // TBD (design ch.11 is silent; ACTIONS.md §7 ❓)
+
+        public const float ResearchAgriFoodBonus = 0.10f;      // LOCKED (design §9 農政 L1 開墾): 糧 +10%
+        public const float ResearchAgriL5FoodBonus = 0.25f;    // LOCKED (design §9 農政 L5 神農): 全境糧產 +25%
+        public const int ResearchMilTrainingCapBonus = 1;      // LOCKED (design §9 兵法 L1 練兵): 訓練上限 +1
+        public const float ResearchMilCombatBonus = 0.15f;     // LOCKED (design §9 兵法 L4 兵法): 戰力 +15%
+        public const float ResearchGovTaxBonus = 0.10f;        // LOCKED (design §9 吏治 L1 賦稅): 金 +10%
+        public const int ResearchGovMoralePerSeason = 5;       // LOCKED (design §9 吏治 L2 察舉): 民心 +5／季
+        public const float ResearchGovRevoltMult = 0.5f;       // LOCKED (design §9 吏治 L3 律法): 叛變機率 −50%
+        public const float ResearchGovIncomeBonus = 0.25f;     // LOCKED (design §9 吏治 L4 學堂): 研究 +25%
+        public const int ResearchGovPrestigeL5 = 10;           // LOCKED (design §9 吏治 L5 九品): 威望 +10
+
+        /// <summary>Point cost of buying a line from `level` to `level + 1` (1-based level).</summary>
+        public static int ResearchLevelCost(int level)
+            => level < 1 || level > ResearchLevelCosts.Length ? 0 : ResearchLevelCosts[level - 1];
+
+        /// <summary>
+        /// §9 農政: harvest multiplier for one city. L1 開墾 +10%, L5 神農 a further +25% — the two
+        /// stack multiplicatively with each other, with 開墾 and with the 天時 season multiplier.
+        /// </summary>
+        public static float ResearchFoodYieldMult(int agriLevel)
+            => (agriLevel >= 1 ? 1f + ResearchAgriFoodBonus : 1f)
+             * (agriLevel >= 5 ? 1f + ResearchAgriL5FoodBonus : 1f);
+
+        /// <summary>§9 兵法 L1 練兵: the faction's 訓練 cap (base TrainingMax).</summary>
+        public static int TrainingCap(int militaryLevel)
+            => TrainingMax + (militaryLevel >= 1 ? ResearchMilTrainingCapBonus : 0);
+
+        /// <summary>§9 兵法 L4 兵法: 戰力 multiplier for that faction's side of a battle.</summary>
+        public static float ResearchCombatStrengthMult(int militaryLevel)
+            => militaryLevel >= 4 ? 1f + ResearchMilCombatBonus : 1f;
+
+        /// <summary>§9 吏治 L1 賦稅: gold-per-population multiplier at season resolution.</summary>
+        public static float ResearchTaxMult(int governanceLevel)
+            => governanceLevel >= 1 ? 1f + ResearchGovTaxBonus : 1f;
+
+        /// <summary>
+        /// §9 吏治 L4 學堂: research points per season. 15 base (TBD) × 1.25 = 19, rounded — 學堂 the
+        /// *building* (§4.2, +3/季) is deferred, this is the research tree's own bonus.
+        /// </summary>
+        public static int ResearchIncome(int governanceLevel)
+            => (int)System.Math.Round(ResearchPointsPerSeason
+                                      * (governanceLevel >= 4 ? 1f + ResearchGovIncomeBonus : 1f));
+
         /// <summary>
         /// 號令 cost of an action — the spec's "CP" column lives here so neither a handler nor a UI
         /// label hardcodes it (ACTIONS.md §3–§5). Anything the spec does not price costs the default.
@@ -176,6 +228,7 @@ namespace LuanShi.Engine
                 case ActionType.ProposeTreaty:
                 case ActionType.RespondTreaty: return CommandPointsPerTalk;
                 case ActionType.AttackCity: return CommandPointsPerAttackCity;
+                case ActionType.Research: return ResearchCommandPoints;
                 default: return CommandPointsPerOrder;
             }
         }

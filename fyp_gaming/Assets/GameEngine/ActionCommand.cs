@@ -111,6 +111,7 @@ namespace LuanShi.Engine
         public const string Gift = "gift";                  // Gift P4: target_id = seat, param_a = gold amount
         public const string DeclareWar = "declare_war";     // Declare war P5: target_id = seat
         public const string BreakTreaty = "break_treaty";   // Break treaty P6: target_id = seat, args.treaty_type
+        public const string Research = "research";          // Research R1: args.line ∈ agri|military|espionage|governance
 
         /// <summary>Legacy alias of Reclaim (pre-ADR-010 logs and UI); normalized in Submit().</summary>
         public const string Farm = "farm";
