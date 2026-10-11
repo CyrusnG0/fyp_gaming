@@ -889,7 +889,7 @@ namespace LuanShi
         void BuildReport(SeasonReport report)
         {
             reportLines.Clear();
-            reportLines.Add($"-- Season {report.Season} court report ({engine.State.FindFaction(currentSeat)?.Name}) --");
+            reportLines.Add($"-- Season {report.Season} ({report.SeasonName}) court report ({engine.State.FindFaction(currentSeat)?.Name}) --");
             reportLines.Add("");
 
             foreach (var rec in obs.Events)
@@ -972,13 +972,20 @@ namespace LuanShi
             // render from the seat's observation, never from canonical state
             foreach (var c in obs.CitiesOf(currentSeat)) { food += c.Food; gold += c.Gold; pop += c.Population; }
 
+            // 一統天下 (design §13): the game is decided — the land is one, there is nothing left to order.
+            if (engine.State.WinnerSeatId != null)
+            {
+                DrawVictoryBanner(title, body);
+                return;
+            }
+
             bool hotseat = SeatRotation.HumanSeats(engine.State).Count > 1;
             // top bar
             var top = new Rect(10, 8, 1000, 34);
             uiRects.Add(top);
             DrawBackdrop(top);
             GUI.Label(new Rect(22, 12, 980, 28),
-                $"Season {engine.State.Season} · {fac.Name} ({(hotseat ? currentSeat + " · Player" : "Player")})" +
+                $"Season {engine.State.Season} ({BalanceConfig.SeasonName(engine.State.Season)}) · {fac.Name} ({(hotseat ? currentSeat + " · Player" : "Player")})" +
                 $" · Orders {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
                 $" · Prestige {fac.Prestige} · Population {pop} · Food {food} · Gold {gold}", title);
 
@@ -1116,6 +1123,25 @@ namespace LuanShi
             GUI.Label(new Rect(0, 330, 1600, 50), $"Season {engine.State.Season} · {fac?.Name} ({currentSeat})", centered);
             GUI.Label(new Rect(0, 400, 1600, 40), "Please take your seat", centeredBody);
             GUI.Label(new Rect(0, 460, 1600, 40), "Press any key to begin", centeredBody);
+        }
+
+        /// <summary>
+        /// 一統天下 (design §13): the whole screen becomes the result. Order buttons, panels and map clicks
+        /// are unreachable — the engine refuses further commands anyway (Submit → "game over").
+        /// </summary>
+        void DrawVictoryBanner(GUIStyle title, GUIStyle body)
+        {
+            var centered = new GUIStyle(title) { fontSize = 34, alignment = TextAnchor.MiddleCenter };
+            var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
+
+            var prevColor = GUI.color;
+            GUI.color = new Color(0.07f, 0.07f, 0.09f, 1f);
+            GUI.DrawTexture(new Rect(0, 0, 1600, 900), Texture2D.whiteTexture);
+            GUI.color = prevColor;
+
+            var winner = engine.State.FindFaction(engine.State.WinnerSeatId);
+            GUI.Label(new Rect(0, 380, 1600, 60), $"{winner?.Name} unifies the land — game over", centered);
+            GUI.Label(new Rect(0, 450, 1600, 40), "一統天下 · all cities are one banner", centeredBody);
         }
 
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)

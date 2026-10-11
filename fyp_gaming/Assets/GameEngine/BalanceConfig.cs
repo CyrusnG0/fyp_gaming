@@ -112,6 +112,57 @@ namespace LuanShi.Engine
         public const int ScriptedAllianceTrustThreshold = 30;  // TBD
         public const int ScriptedTruceTrustThreshold = -50;    // AI signs/offers 停戰 at or above this 信任
 
+        // ---- 天時 seasonal modifiers (design §3 「季節對糧食的影響」 table) --------
+        // Seasons cycle 春 → 夏 → 秋 → 冬 by (Season − 1) % 4; SeasonReport/observation carry the name.
+
+        public const float SpringFoodYieldMult = 0.7f;    // LOCKED (design §3 table): 春 糧產 ×0.7
+        public const float SummerFoodYieldMult = 1.0f;    // LOCKED (design §3 table): 夏 糧產 ×1.0
+        public const float AutumnFoodYieldMult = 2.0f;    // LOCKED (design §3 table): 秋 糧產 ×2.0 (大收)
+        public const float WinterFoodYieldMult = 0.3f;    // LOCKED (design §3 table): 冬 糧產 ×0.3
+        public const float WinterMarchBudgetMult = 0.7f;  // LOCKED (design §3 table + §10.1 嚴冬): 行軍 ×0.7
+        public const float WinterDesertionExtraTroopLoss = 0.05f;  // LOCKED (design §10.1 嚴冬): 逃兵 +5%
+
+        private static readonly string[] SeasonNames = { "Spring", "Summer", "Autumn", "Winter" };  // 春/夏/秋/冬
+
+        /// <summary>0-based position in the 春夏秋冬 cycle (design §3); 1-based seasons start at 春.</summary>
+        public static int SeasonIndex(int season) => ((season - 1) % 4 + 4) % 4;
+
+        /// <summary>English season name for reports/observations (UI strings are English).</summary>
+        public static string SeasonName(int season) => SeasonNames[SeasonIndex(season)];
+
+        public static bool IsWinter(int season) => SeasonIndex(season) == 3;
+
+        /// <summary>§3 天時 harvest multiplier: food yield for the whole map this season.</summary>
+        public static float SeasonFoodYieldMult(int season)
+        {
+            switch (SeasonIndex(season))
+            {
+                case 0: return SpringFoodYieldMult;
+                case 1: return SummerFoodYieldMult;
+                case 2: return AutumnFoodYieldMult;
+                default: return WinterFoodYieldMult;
+            }
+        }
+
+        /// <summary>Effective per-army hex budget this season: 冬 marches at WinterMarchBudgetMult (§10.1 嚴冬).</summary>
+        public static int MarchBudget(int season)
+            => (int)(ArmyMoveCostPerSeason * (IsWinter(season) ? WinterMarchBudgetMult : 1f));
+
+        // ---- 民變 revolt (design §4.1「民心 0–100；低於 25 有民變風險」+ §10.2「產出停擺」) ----
+
+        public const int RevoltRiskMoraleThreshold = 25;   // LOCKED (design §4.1 line 149): 民心 <25 → 民變風險
+        public const float RevoltChancePerMoralePoint = 0.02f;  // TBD: chance = (25 − 民心) × 2% per season
+        public const float RevoltGarrisonLossPct = 0.10f;  // TBD: garrison lost to the rising (design silent)
+        public const int RevoltMoraleGainAfterVenting = 15;     // TBD: 民心 +15 once the anger is spent (clamp ≤100)
+
+        // ---- 逃兵 army supply & desertion (design §5.1 補給, §6.3 斷補, §10.1 嚴冬) ----
+
+        // Design gives armies a 補給 0–100 field that hits 0 away from home ("歸零則每季逃兵", §5.1) and
+        // prices 斷補 at 10%/season (§6.3). MVP simplification: no 補給 field — an army eats
+        // Troops × FoodPerGarrisonTroop per season out of its faction's food; failing that, it deserts.
+        public const float DesertionTroopLossPct = 0.10f;  // LOCKED (design §6.3 斷補): 逃兵 10%/季
+        public const int DesertionMoraleLoss = 15;         // TBD: 士氣 lost with the deserters (design silent)
+
         /// <summary>
         /// 號令 cost of an action — the spec's "CP" column lives here so neither a handler nor a UI
         /// label hardcodes it (ACTIONS.md §3–§5). Anything the spec does not price costs the default.

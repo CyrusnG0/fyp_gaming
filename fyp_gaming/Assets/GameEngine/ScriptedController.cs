@@ -62,6 +62,18 @@ namespace LuanShi.Engine
                 }
             }
 
+            // 賑災 (revolt-risk first): a city under the 民變 threshold can produce nothing next season
+            // (design §4.1), so feeding it outranks 徵稅/開墾/募兵 spending. The ordinary 民心 recovery
+            // pass below still catches everything between this threshold and the yield threshold.
+            foreach (var city in cities)
+            {
+                if (cp <= 0) break;
+                if (city.Morale >= BalanceConfig.RevoltRiskMoraleThreshold) continue;
+                if (city.Food < BalanceConfig.ReliefFoodCost) continue;
+                plan.Add(Order(ActionType.Relief, seatId, city.Id, "Stop the revolt risk"));
+                cp--;
+            }
+
             // 徵稅: raise gold when the treasury cannot pay for troops and 民心 can take it.
             foreach (var city in cities)
             {
@@ -133,11 +145,12 @@ namespace LuanShi.Engine
                 {
                     CityState target = null;
                     int bestCost = int.MaxValue;
+                    int budget = BalanceConfig.MarchBudget(state.Season);   // 冬 行軍 ×0.7 (design §10.1)
                     foreach (var c in state.Cities)
                     {
                         if (!c.IsNeutral) continue;
                         if (state.ArmyAt(c.X, c.Z) != null) continue;      // occupied hexes are refused by M1
-                        int cost = state.Map.PathCost(best.X, best.Z, c.X, c.Z, BalanceConfig.ArmyMoveCostPerSeason);
+                        int cost = state.Map.PathCost(best.X, best.Z, c.X, c.Z, budget);
                         if (cost >= 0 && cost < bestCost) { bestCost = cost; target = c; }
                     }
                     if (target != null)

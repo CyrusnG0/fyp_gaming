@@ -42,9 +42,12 @@
     beyond this demo`, and an illegal 攻城 names the defender's exact garrison (`assault needs 3:1 troops
     (have X, garrison Y)`). Acceptable for the MVP (humans and LLMs face the same validator), or should
     error strings be coarsened into a probe-proof form?
-19. **民心 thresholds disagree between docs**: design §4.1 says 民變 risk below 25, ADR-010 locks
-    "民心<30 → yields −50%". Only the yield rule is implemented (no rebellion system). Reconcile the two
-    numbers (one threshold for both, or keep 25 for 民變 when that system lands)?
+19. ~~**民心 thresholds disagree between docs**~~ — **RESOLVED 2026-10-11 (ADR-013): keep both, they are a ladder.**
+    The two numbers describe two different states, so both are implemented as the design wrote them:
+    **民心 < 30 → city yields −50%** (ADR-010 #6, the warning band) and **民心 < 25 → 民變 risk**
+    (design §4.1: `(25 − 民心) × 2%` per season × `FactionState.RevoltChanceMult`, and a revolt zeroes that
+    city's harvest and tax outright — the harsher, rarer tier, design §10.2 產出停擺). No team decision
+    needed; see `docs/ACTIONS.md` §8b for the locked numbers.
 20. **Visible ⇒ full detail vs estimation levels**: an in-radius foreign city/army currently exposes all
     fields (troops, garrison, 民心, food…). The design §8.1 implies estimated enemy strength. Keep exact
     values for MVP, or introduce coarse estimation bands before the LLM comparison?

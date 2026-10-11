@@ -19,6 +19,7 @@ namespace LuanShi.Engine
         public string Controller;      // ControllerType.*
         public int CommandPoints;
         public int Prestige = BalanceConfig.PrestigeStart;    // 威望, range PrestigeMin..PrestigeMax
+        public float RevoltChanceMult = 1.0f;                 // P7 hook (吏治 3 → 0.5): scales 民變 chance
 
         public bool IsHuman => Controller == ControllerType.Human;
 
@@ -403,6 +404,7 @@ namespace LuanShi.Engine
         public string GameId = "g-001";
         public int Season;                       // 1-based once the first season begins
         public string Phase = "setup";           // setup | player_orders | resolution
+        public string WinnerSeatId;              // 一統天下: set when one seat owns every city (design §13)
         public readonly List<FactionState> Factions = new List<FactionState>();
         public readonly DiplomacyState Diplomacy = new DiplomacyState();
         public readonly List<CityState> Cities = new List<CityState>();
@@ -475,9 +477,11 @@ namespace LuanShi.Engine
     {
         public string SeatId;
         public int Season;
+        public string SeasonName;        // 春/夏/秋/冬 in English (design §3)
         public string Phase;
         public int CommandPoints;
         public int Prestige;
+        public string WinnerSeatId;      // set once 一統天下 is reached; null while the game is live
 
         public readonly List<CityState> Cities = new List<CityState>();
         public readonly List<ArmyState> Armies = new List<ArmyState>();
@@ -519,9 +523,11 @@ namespace LuanShi.Engine
             var sb = new StringBuilder(640);
             sb.Append("{\"seat_id\":").Append(MiniJson.Str(SeatId));
             sb.Append(",\"season\":").Append(MiniJson.Num(Season));
+            sb.Append(",\"season_name\":").Append(MiniJson.Str(SeasonName));
             sb.Append(",\"phase\":").Append(MiniJson.Str(Phase));
             sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
             sb.Append(",\"prestige\":").Append(MiniJson.Num(Prestige));
+            sb.Append(",\"winner_seat_id\":").Append(MiniJson.Str(WinnerSeatId));
             sb.Append(",\"cities\":").Append(MiniJson.Array(cities));
             sb.Append(",\"armies\":").Append(MiniJson.Array(armies));
             sb.Append(",\"watch_towers\":").Append(MiniJson.Array(watchTowers));

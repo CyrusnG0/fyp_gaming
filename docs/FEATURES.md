@@ -38,13 +38,14 @@
 | 4 factions (config-driven; architecture supports 8) | 🟡 | seat control is data-driven (`humanSeats`, `FactionState.Controller`); the demo scene ships 2 factions (魏/蜀 + a neutral city) |
 | Cities: population/民心/治安/城防/garrison/buildings | 🟡 | population/民心/城防/駐軍/訓練/開墾 live; 治安 and buildings missing |
 | Domestic actions (subset): 徵稅 輕徭 開墾 募兵 練兵 修城 建築 賑災 | ✅ | D1-D7 through the real pipeline; 屯田 (D9) / 建築 (D8) / 遷都 (D10) still phase 2 |
-| Armies: movement (A*, terrain cost), supply, morale | 🟡 | movement + 士氣 done (P2: battle losses, 潰散, seasonal regrowth); supply not yet |
+| Armies: movement (A*, terrain cost), supply, morale | ✅ | movement + 士氣 (P2) + **supply as a food ration (P6)**: each army eats `Troops × 0.1` from its faction's food (standing city first, then proportionally) or deserts −10% troops/−15 士氣 (ADR-013); the 補給 0–100 field, 劫糧/斷補 actions and cavalry remain ⏸ |
 | Basic combat: field battle + siege + city capture | ✅ | M2 field battle (≤5 rounds, rout/annihilation) + M3 assault-only 攻城 (3:1, single resolution, capture); multi-season 圍城 / 器械 / 兵種 still ❌ |
-| Food/gold economy with seasonal modifiers | ❌ | autumn ×2.0 etc. |
+| Food/gold economy with seasonal modifiers | ✅ | P6: 春 ×0.7 / 夏 ×1.0 / **秋 ×2.0** / 冬 ×0.3 harvest applied to every city, 冬 march budget 4, 冬 desertion +5% (ADR-013); 天時 per-region weather (豐收/旱災/蝗災…, design §10.1) still ❌ |
+| Pressure & consequences: 民變 revolt, 逃兵 desertion, 一統天下 victory | ✅ | P6 (ADR-013): 民心<25 → per-season revolt roll `(25 − 民心) × 2%` × `RevoltChanceMult` zeroing that city's harvest+tax, −10% garrison, 民心 +15; unfed armies desert; one owner of every city (neutrals included) sets `WinnerSeatId` + public `game_over` and blocks `Submit()` — see `docs/ACTIONS.md` §8b |
 | Basic diplomacy: public messages, private letters, NAP, declare war | ✅ | P1-P6: 遣使, 提出/接受/拒絕/反提案 (nap/alliance/truce), 贈禮, 宣戰, 毀約; 密信 / 共同防禦 / 朝貢 / 通商 still ⏸ |
 | Trust (−100..+100, bidirectional) + prestige | ✅ | directional `Trust` + `Prestige` written by gifts/attacks/treaties; every change emits `trust_changed`/`prestige_changed` with a reason |
 | Basic fog of war + scouts | ✅ | engine-side observations (±3 cities / ±2 armies, absent outside; ADR-011); scouts + estimation levels not yet |
-| Victory: 一統天下 + score at season limit | ❌ | configurable per map |
+| Victory: 一統天下 + score at season limit | 🟡 | **一統天下 ✅ (P6, ADR-013)** — every city (neutrals included) under one seat, public `game_over`, later commands rejected, IMGUI banner; 稱霸諸侯 / 受天明命 / 時間到 (score) ⏸ — need city counts, 威望 gating, 稱帝 and a season cap |
 
 ## Controllers (FYP core — see docs/CONTROLLER_PROTOCOL.md)
 

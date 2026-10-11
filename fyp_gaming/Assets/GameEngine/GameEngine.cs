@@ -35,33 +35,46 @@ namespace LuanShi.Engine
             foreach (var f in State.Factions) f.CommandPoints = BalanceConfig.CommandPointsPerSeason;
             foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
-            Emit(null, null, "season_start", "public", P("season", State.Season.ToString()), null);
+            Emit(null, null, "season_start", "public",
+                P("season", State.Season.ToString(),
+                  "season_name", BalanceConfig.SeasonName(State.Season)), null);
 
             // Rollover is when diplomacy moves: offers lapse or are ratified into treaties, and
             // treaties that have run their term expire (ADR-010 #5: treaties take effect next season).
             ResolveDiplomacyRollover();
         }
 
-        /// <summary>Resolution: taxes, harvests, consumption, growth, starvation.</summary>
+        /// <summary>Resolution: revolts, taxes, harvests, consumption, growth, army supply, starvation.</summary>
         public SeasonReport EndSeason()
         {
             State.Phase = "resolution";
-            var report = new SeasonReport { Season = State.Season };
+            var report = new SeasonReport
+            {
+                Season = State.Season,
+                SeasonName = BalanceConfig.SeasonName(State.Season),
+            };
+            float seasonFood = BalanceConfig.SeasonFoodYieldMult(State.Season);   // 天時 (design §3)
 
             foreach (var city in State.Cities)
             {
                 if (city.IsNeutral) continue;
                 var fac = State.FindFaction(city.OwnerSeatId);
 
+                // 民變 (design §4.1 民心 <25 + §10.2 產出停擺): rolled before the yields so that one
+                // tick zeroes both harvest and tax for a city that has risen.
+                bool revolted = RollRevolt(city, fac);
+
                 // 民心 below the threshold halves both yields (ADR-010, LOCKED).
                 bool disheartened = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold;
                 float yieldFactor = disheartened ? 1f - BalanceConfig.MoraleYieldPenalty : 1f;
 
-                int taxes = (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor);
+                int taxes = revolted ? 0
+                          : (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor);
                 city.Gold += taxes;
 
-                int harvest = (int)(BalanceConfig.CityBaseFoodYield
-                                  * (1f + city.ReclaimPct / 100f) * yieldFactor);
+                int harvest = revolted ? 0
+                            : (int)(BalanceConfig.CityBaseFoodYield
+                                  * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood);
                 city.Food += harvest;
                 int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
                                 + city.Garrison * BalanceConfig.FoodPerGarrisonTroop);
@@ -84,9 +97,21 @@ namespace LuanShi.Engine
                     city.Population += (int)(city.Population * rate);
                 }
 
+                if (revolted)
+                {
+                    int garrisonLost = (int)(city.Garrison * BalanceConfig.RevoltGarrisonLossPct);
+                    city.Garrison -= garrisonLost;
+                    AddMorale(city, BalanceConfig.RevoltMoraleGainAfterVenting);
+                    string revoltNote = $"Revolt! output halted this season, garrison −{garrisonLost}";
+                    note = note == null ? revoltNote : note + "; " + revoltNote;
+                    Emit(city.OwnerSeatId, fac?.Controller, "revolt", "public",
+                        P("city_id", city.Id, "garrison_lost", garrisonLost.ToString(),
+                          "morale", city.Morale.ToString()), null);
+                }
+
                 string line = $"{city.Name}: population {city.Population}, food {city.Food}, gold {city.Gold}, garrison {city.Garrison}, morale {city.Morale}"
                             + (disheartened ? $" (morale < {BalanceConfig.MoraleYieldPenaltyThreshold}, yields halved)" : "")
-                            + (note != null ? $"。{note}" : "");
+                            + (note != null ? $"; {note}" : "");
                 report.Lines.Add(line);
                 report.CityLines[city.Id] = line;      // keyed so a seat can read only the cities it can see
                 Emit(city.OwnerSeatId, fac?.Controller, "city_resolved", "owner_and_observers",
@@ -104,8 +129,126 @@ namespace LuanShi.Engine
                     army.Morale = Math.Min(BalanceConfig.ArmyMoraleStart,
                                            army.Morale + BalanceConfig.ArmyMoraleRegainPerSeason);
 
+            // 逃兵 (design §5.1 補給 / §6.3 斷補 / §10.1 嚴冬): an unfed army loses men. Runs after the
+            // morale regrowth above so this season's −15 士氣 is not quietly refunded by it.
+            foreach (var army in State.Armies) ResolveArmySupply(army);
+
             Emit(null, null, "season_end", "public", P("season", State.Season.ToString()), null);
             return report;
+        }
+
+        // ---- 民變 / 逃兵 / 一統天下: the pressure systems (P6) -------------------
+
+        /// <summary>
+        /// 民變 roll (design §4.1): chance = (25 − 民心) × RevoltChancePerMoralePoint, scaled by the
+        /// faction's `RevoltChanceMult` (the P7 吏治 hook). Seeded, so a fixed seed replays identically.
+        /// </summary>
+        private bool RollRevolt(CityState city, FactionState fac)
+        {
+            if (city.Morale >= BalanceConfig.RevoltRiskMoraleThreshold) return false;
+            float chance = (BalanceConfig.RevoltRiskMoraleThreshold - city.Morale)
+                         * BalanceConfig.RevoltChancePerMoralePoint
+                         * (fac?.RevoltChanceMult ?? 1f);
+            return rng.NextDouble() < chance;
+        }
+
+        /// <summary>
+        /// One army's seasonal ration (design §5.1 補給 down → desert, §6.3 斷補 10%/季).
+        /// Simplification (documented in ADR-013): 補給 0–100 and distance-from-home are not modelled.
+        /// The army eats Troops × FoodPerGarrisonTroop; the city it stands on pays first, the faction's
+        /// other cities cover the rest in proportion to their stores. A faction pool that cannot cover
+        /// the whole ration feeds nobody — the army deserts instead of eating a fraction.
+        /// </summary>
+        private void ResolveArmySupply(ArmyState army)
+        {
+            int need = (int)(army.Troops * BalanceConfig.FoodPerGarrisonTroop);
+            if (need <= 0) return;
+
+            if (FoodPoolOf(army.OwnerSeatId) < need)
+            {
+                Desert(army, "no_food");
+                return;
+            }
+
+            var here = State.CityAt(army.X, army.Z);
+            if (here != null && here.OwnerSeatId == army.OwnerSeatId)
+            {
+                int taken = Math.Min(here.Food, need);
+                here.Food -= taken;
+                need -= taken;
+            }
+            if (need > 0) PayFromFoodPool(army.OwnerSeatId, need);
+        }
+
+        /// <summary>逃兵 (design §6.3 10%/季, §10.1 嚴冬 +5%): men leave and 士氣 falls with them.</summary>
+        private void Desert(ArmyState army, string cause)
+        {
+            float pct = BalanceConfig.DesertionTroopLossPct
+                      + (BalanceConfig.IsWinter(State.Season) ? BalanceConfig.WinterDesertionExtraTroopLoss : 0f);
+            int lost = (int)(army.Troops * pct);
+            army.Troops -= lost;
+            army.Morale = Clamp(army.Morale - BalanceConfig.DesertionMoraleLoss,
+                                BalanceConfig.MoraleMin, BalanceConfig.MoraleMax);
+            Emit(army.OwnerSeatId, State.FindFaction(army.OwnerSeatId)?.Controller, "desertion", "owner_only",
+                P("army_id", army.Id, "cause", cause, "troops_lost", lost.ToString(),
+                  "troops", army.Troops.ToString(), "morale", army.Morale.ToString()), null);
+        }
+
+        /// <summary>Total food of a faction's cities — food is national in the design, per-city in the model.</summary>
+        private int FoodPoolOf(string seatId)
+        {
+            int total = 0;
+            foreach (var city in State.Cities) if (city.OwnerSeatId == seatId) total += city.Food;
+            return total;
+        }
+
+        /// <summary>
+        /// Draws `amount` from a faction's cities in proportion to each city's store. Integer shares leave
+        /// a few units over, handed to the cities with food left in state order. Pays nothing when short.
+        /// </summary>
+        private bool PayFromFoodPool(string seatId, int amount)
+        {
+            if (amount <= 0) return true;
+            var cities = State.CitiesOf(seatId);
+            int total = 0;
+            foreach (var city in cities) total += city.Food;
+            if (total < amount) return false;
+
+            int left = amount;
+            foreach (var city in cities)
+            {
+                int share = (int)((long)amount * city.Food / total);
+                if (share > city.Food) share = city.Food;
+                city.Food -= share;
+                left -= share;
+            }
+            foreach (var city in cities)
+            {
+                if (left <= 0) break;
+                int take = Math.Min(city.Food, left);
+                city.Food -= take;
+                left -= take;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 一統天下 (design §13): one seat owning every city ends the game. Neutral cities count — they
+        /// are territory nobody has taken, so holding "all but the neutral ones" is not unification.
+        /// </summary>
+        private void CheckVictory()
+        {
+            if (State.WinnerSeatId != null || State.Cities.Count == 0) return;
+            string owner = State.Cities[0].OwnerSeatId;
+            if (string.IsNullOrEmpty(owner)) return;
+            foreach (var city in State.Cities)
+                if (city.OwnerSeatId != owner) return;
+            var fac = State.FindFaction(owner);
+            if (fac == null) return;
+
+            State.WinnerSeatId = owner;
+            Emit(owner, fac.Controller, "game_over", "public",
+                P("winner_seat_id", owner, "reason", "unification"), null);
         }
 
         // ---- command pipeline --------------------------------------------------
@@ -115,6 +258,7 @@ namespace LuanShi.Engine
         {
             if (cmd == null) return Reject(cmd, "null command");
             cmd.ActionId = "a-" + nextActionId++;
+            if (State.WinnerSeatId != null) return Reject(cmd, "game over");
 
             var fac = State.FindFaction(cmd.ActorSeatId);
             if (fac == null) return Reject(cmd, $"unknown seat '{cmd.ActorSeatId}'");
@@ -289,9 +433,10 @@ namespace LuanShi.Engine
             if (cityAtDest != null && !cityAtDest.IsNeutral && cityAtDest.OwnerSeatId != fac.SeatId)
                 return ValidationResult.Fail("enemy city — battle is beyond this demo");
 
-            int cost = State.Map.PathCost(army.X, army.Z, tx, tz, BalanceConfig.ArmyMoveCostPerSeason);
+            int budget = BalanceConfig.MarchBudget(State.Season);   // 冬 行軍 ×0.7 (design §3/§10.1 嚴冬)
+            int cost = State.Map.PathCost(army.X, army.Z, tx, tz, budget);
             if (cost < 0) return ValidationResult.Fail(
-                $"destination out of reach this season (max cost {BalanceConfig.ArmyMoveCostPerSeason})");
+                $"destination out of reach this season (max cost {budget})");
 
             int fx = army.X, fz = army.Z;
             army.X = tx; army.Z = tz;
@@ -305,6 +450,7 @@ namespace LuanShi.Engine
                 cityAtDest.OwnerSeatId = fac.SeatId;
                 Emit(fac.SeatId, fac.Controller, "city_captured", "public",
                     P("city_id", cityAtDest.Id, "army_id", army.Id), cmd.ActionId);
+                CheckVictory();
             }
             var towerAtDest = State.WatchTowerAt(tx, tz);
             if (towerAtDest != null && towerAtDest.IsNeutral)
@@ -350,9 +496,11 @@ namespace LuanShi.Engine
             {
                 SeatId = fac.SeatId,
                 Season = State.Season,
+                SeasonName = BalanceConfig.SeasonName(State.Season),
                 Phase = State.Phase,
                 CommandPoints = fac.CommandPoints,
                 Prestige = fac.Prestige,
+                WinnerSeatId = State.WinnerSeatId,
             };
 
             foreach (var city in State.Cities)
@@ -872,6 +1020,7 @@ namespace LuanShi.Engine
                 AddPrestige(fac, BalanceConfig.PrestigeCityCaptured, "city_captured", cmd);
                 Emit(fac.SeatId, fac.Controller, "city_captured", "public",
                     P("city_id", city.Id, "army_id", army.Id), cmd.ActionId);
+                CheckVictory();
                 if (army.Troops <= 0) DestroyArmy(army, "assault_pyrrhic", cmd);
             }
             else if (outcome == "attacker_routed") RoutArmy(army, "assault", cmd);
@@ -1079,6 +1228,7 @@ namespace LuanShi.Engine
     public sealed class SeasonReport
     {
         public int Season;
+        public string SeasonName;                 // 春/夏/秋/冬 (design §3) — shown in the report header
         public readonly List<string> Lines = new List<string>();
         public readonly Dictionary<string, string> CityLines = new Dictionary<string, string>();  // city id → line
     }

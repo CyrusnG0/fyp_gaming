@@ -45,9 +45,11 @@ JSON object, adding two optional fields:
 |---|---|---|
 | Command points (號令) per season | **5** (LOCKED, ADR-010 #1) | `BalanceConfig.CommandPointsPerSeason`; D1-D7/M1/M2/P4-P6 cost 1, M3 攻城 costs 2, 遣使/提案/回覆 cost 0 |
 | 遣使 / 提案 / 回覆 (talk, propose, reply) | **0 CP** | design §11: 說話永遠免費 |
-| Move points per army per season | 6 (cavalry 8 ⏸) | terrain cost via Dijkstra; 冬 ×0.7 ⏸ |
+| Move points per army per season | 6 (cavalry 8 ⏸) | terrain cost via Dijkstra; **冬 ×0.7 ✅** (`BalanceConfig.MarchBudget`, P6 §8b) |
 | Once-per-season flags | per city （開墾…) / per army (marched) | reset in `BeginSeason()` |
+| Seasonal harvest multiplier | 春 ×0.7 · 夏 ×1.0 · 秋 ×2.0 · 冬 ×0.3 | applied to every city's harvest at `EndSeason()` ✅ (P6 §8b); seasons cycle 春→夏→秋→冬 by `(Season−1) % 4` |
 | Event log | every accepted action emits an event with `visibility` (public / owner_and_observers / owner_only); rejections emit `action_rejected` (owner_only) | CONTROLLER_PROTOCOL §5 |
+| World events (no action behind them) | `season_start`/`season_end`, `city_resolved`, `starvation`, `revolt`, `desertion`, `game_over` — emitted by `BeginSeason()`/`EndSeason()` | P6 §8b: `revolt`/`game_over` public, `desertion` owner-only |
 | Execution | immediate on `Submit()`; economy/combat resolve at season end or per action as specified | |
 
 ---
@@ -78,13 +80,13 @@ deferred behind research. All seven domestic actions emit their event with the v
 
 | # | id | 中文 | CP | Preconditions | Effect | Event | Status |
 |---|---|---|---|---|---|---|---|
-| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6, dest walkable, no army on the destination | move; neutral city → **capture** | `army_moved` (+`city_captured` public) | ✅ |
+| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6 (冬 ≤ 4, §8b), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下) | `army_moved` (+`city_captured` public) | ✅ |
 | M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; 士氣 0 → 潰散 +30% and retreat | `battle_field` public | ✅ |
-| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3:1** (no 器械 in MVP) | **assault only, single resolution** (ADR-010 #4): capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 | `battle_siege` public (+`city_captured`) | ✅ |
+| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3:1** (no 器械 in MVP) | **assault only, single resolution** (ADR-010 #4): capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b) | `battle_siege` public (+`city_captured`) | ✅ |
 | M4 | `massacre` | 屠城 | 0 | just captured a city | instant pacify; `民心 −30` perm, `威望 −20`, all factions' trust −35 | `city_massacred` public | ⏸ (designed §4.3/§7.3, missing from ch.11) |
-| — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ needs supply |
+| — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ (feeding an army is now a P6 resolution rule, §8b — the 補給 *field* this action restores is still 待決) |
 | — | `ambush` | 設伏 | 1 | forest/hill | first-round dmg ×1.5, 敵士氣−20 | | ⏸ |
-| — | `raid_supply` / `cut_supply` | 劫糧 / 斷補 | 1 | 騎兵 | 補給−40 / 逃兵10%/季 | | ⏸ needs cavalry + supply |
+| — | `raid_supply` / `cut_supply` | 劫糧 / 斷補 | 1 | 騎兵 | 補給−40 / 逃兵10%/季 | | ⏸ as actions (need cavalry); the 逃兵 10%/季 **consequence** is live for any unfed army since P6 (§8b) |
 | — | `retreat` / `relieve` | 撤退 / 救援 | 1 | — | 士氣−10 / join ally battle (信任+20, 威望+8) | | ⏸ |
 
 ## 5. 外交 Diplomacy — `target_id` = a **seat** (never a hex); Trust (−100..+100 per ordered pair) + 威望 + Treaty model
@@ -138,16 +140,39 @@ No CP cost stated in design ❓. Unlocks D9 屯田 (農政3), espionage (諜報1
   operation (HandoverBundle, CONTROLLER_PROTOCOL §3), not a normal action. 🎯 MVP.
 - 稱帝 (城≥30, 威望≥70 → 天命 victory route), 結義 (信任≥80→95), 招降敵將, 斬將, 大赦： ⏸ all need General/Prestige depth.
 
+## 8b. 壓力與後果 Pressure & consequences (P6) — engine-side, no new actions
+
+> Rules, not orders: every seat (human / LLM / scripted) is subject to them identically and cannot opt
+> out. All resolve deterministically from the engine's seeded RNG at `BeginSeason()` / `EndSeason()`.
+> Sources: design §3 (天時), §4.1 + §10.2 (民心/民變), §5.1 + §6.3 + §10.1 (補給/斷補/嚴冬), §13 (勝利).
+
+| System | Rule | Numbers (`BalanceConfig`) | Event | Status |
+|---|---|---|---|---|
+| 天時 seasons | `(Season−1) % 4` → 春·夏·秋·冬; the multiplier scales **every** city's harvest at rollover | 春 `SpringFoodYieldMult` **0.7** · 夏 **1.0** · 秋 **2.0** · 冬 **0.3** — all LOCKED (design §3 table) | — (`SeasonReport.SeasonName`, `season_start.season_name`, observation `season_name`) | ✅ |
+| 嚴冬 | 行軍 budget ×0.7 (enforced in `march` validation); 逃兵 +5% troops | `WinterMarchBudgetMult` **0.7** (LOCKED, §10.1 嚴冬); `WinterDesertionExtraTroopLoss` **0.05** (LOCKED, §10.1); winter budget = floor(6 × 0.7) = **4** | — | ✅ |
+| 民變 revolt | each owned city with 民心 < threshold rolls `(25 − 民心) × 2% × FactionState.RevoltChanceMult`; on revolt the city's **harvest and tax are zero** for that tick, garrison −10%, 民心 +15 after venting (≤100) | `RevoltRiskMoraleThreshold` **25** (LOCKED, §4.1); `RevoltChancePerMoralePoint` **0.02** 待決 (the 2%/point is invented); `RevoltGarrisonLossPct` **0.10** 待決 (design silent); `RevoltMoraleGainAfterVenting` **15** 待決 | `revolt` **public** (`city_id`, `garrison_lost`, `morale`) | ✅ |
+| 逃兵 army supply | each army eats `Troops × FoodPerGarrisonTroop` per season: the city it stands on pays first, then the faction's other cities **proportionally**; a pool that cannot cover the whole ration feeds nobody and the army deserts — 兵力 −10% (冬 −15%), 士氣 −15 | `FoodPerGarrisonTroop` **0.1** (existing 待決); `DesertionTroopLossPct` **0.10** (LOCKED, §6.3 斷補); `DesertionMoraleLoss` **15** 待決 (`cause=no_food`) | `desertion` **owner-only** (`army_id`, `cause`, `troops_lost`, `troops`, `morale`) | ✅ |
+| 一統天下 victory | when **every** city on the map shares one non-empty owner (neutral cities must be taken too), `GameState.WinnerSeatId` is set and every later `Submit()` returns `game over` | — | `game_over` **public** (`winner_seat_id`, `reason=unification`) | ✅ (design §13; 稱霸諸侯 / 受天明命 / 時間到 ⏸) |
+
+**Locked simplifications (ADR-013).** 補給 0–100, distance-from-home decay and per-army supply state are
+**not** modelled — faction food coverage stands in for the supply line, so "far from home" is expressed as
+"the faction is out of food", and nothing is consumed on a failed ration. A revolt is a **one-tick** event:
+no ownership change, no multi-season rebellion, and the city keeps producing again next season (民心 +15
+usually makes it eligible to produce at all). Seasons are computed from the absolute season number, so a
+game always opens in 春 and always has the same season sequence for a given seed.
+
 ## 9. State fields to add (MVP)
 
 | Model | Add | Status |
 |---|---|---|
 | `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | ✅ defaults in `BalanceConfig`, 民心 clamps 0–100 |
 | `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
+| `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; P7 吏治 3 will set 0.5 |
 | `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |
 | `ArmyState` | `Morale (0-100, start 60 待決)` | ✅ P2: battle losses, 潰散 at 0, seasonal regrowth |
-| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011 |
-| 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | ✅ applied at season rollover; 民變 (design's <25) not implemented — OPEN_QUESTIONS 19 |
+| `GameState` | `WinnerSeatId` (null while live) | ✅ P6 §8b — set by `CheckVictory()`, blocks `Submit()`, exposed in the observation |
+| observation | `GameEngine.Observe(seatId)` → `Observation` (cities ±3, armies ±2, **absent** outside; filtered event log) | ✅ P4, ADR-011; P6 adds `season_name` + `winner_seat_id` |
+| 待決 consequence | 民心 effect: **LOCKED** — 民心<30 → city yields −50% (else the number is dead weight for LLM reasoning) | ✅ applied at season rollover; the design's second threshold (民心<25 → 民變) landed in P6 as §8b — both numbers stand (ADR-013, OPEN_QUESTIONS 19) |
 
 ## 10. Decisions — LOCKED 2026-10-08 (recorded as ADR-010; team may supersede)
 
@@ -160,3 +185,12 @@ No CP cost stated in design ❓. Unlocks D9 屯田 (農政3), espionage (諜報1
 6. 民心 consequence: **民心<30 → city yields −50%** (LOCKED, see §9).
 7. 偷襲/背盟: **derived, not separate actions** — attacking without a declared war or
    attacking an ally applies reputation/trust penalties computed from state at execution time.
+
+> **P6 additions (2026-10-11, ADR-013 — supersedes #3's "supply → phase 2" insofar as supply is now
+> modelled as a food ration, and #6's single 民心 threshold insofar as 民心<25 民變 (§8b) is implemented
+> alongside it):**
+> 8. `FactionState.RevoltChanceMult` (default **1.0**) is the revolt-chance hook; P7 吏治 3 sets **0.5**.
+> 9. Seasonal fact: harvest 春 ×0.7 / 夏 ×1.0 / 秋 ×2.0 / 冬 ×0.3 (LOCKED, design §3); 冬 march budget
+>    **4** (`floor(6 × 0.7)`) and 冬 desertion **+5%** (LOCKED, design §10.1 嚴冬).
+> 10. Victory MVP: **一統天下 only** (every city, neutrals included, under one seat). 稱霸諸侯 / 受天明命 /
+>     時間到 stay ⏸ (OPEN_QUESTIONS 10/11).

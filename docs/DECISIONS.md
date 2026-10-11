@@ -73,3 +73,62 @@ P1-P6 are implemented with these command shapes (the LLM contract; `target_id` i
 - `declare_war` (1 CP): war state on, `威望 −5` (cheaper than a 偷襲, design §11 #18); refused if already at war.
 - `break_treaty` (1 CP): `args.treaty_type` required → treaty removed; alliance/NAP −50 信任/−15 威望/bystanders −15, truce −30/−10.
 **Lifecycle**: propose → pending (`treaty_proposed`, two-party) → accept (marked, **not yet in force**) / reject / counter → at rollover (`BeginSeason`) unanswered offers lapse (`treaty_lapsed`) and accepted ones are ratified into `TreatyRecord`s with `ExpirySeason = season + duration − 1` (`treaty_ratified`, public); a ratified 停戰 calls `MakePeace` (`war_ended=true`). Treaties past `ExpirySeason` are removed (`treaty_expired`, public). Consequences: P3 sits before any war/peace effect (treaties take effect next season, ADR-010 #5 — so 求和 is the 停戰 proposal path, not a direct peace action), 守約's +15/+5 design row is **not** implemented (no P-row and a 1-season NAP round-trip would farm trust), and 宣戰 does not itself break treaties — a later attack is still priced as 背盟 (OPEN_QUESTIONS 16).
+
+## ADR-013 — Pressure & consequences: 民變, army supply/desertion, 天時 seasons, 一統天下
+**Date:** 2026-10-11 · **Status:** accepted · **Phase:** P6
+
+The world now pushes back on every seat, engine-side and deterministically (seeded `System.Random`, same
+stream as combat). No new actions: these are rules of resolution, so a human, an LLM and a scripted seat
+are all subject to them identically (AGENTS.md invariants #1–#3). All numbers live in `BalanceConfig`;
+each carries its design-doc section, and design-silent values are marked 待決/TBD there.
+
+- **天時 seasons (design §3 table, §10.1 嚴冬).** Seasons cycle 春→夏→秋→冬 by `(Season−1) % 4`;
+  `BalanceConfig.SeasonFoodYieldMult` scales **every** city's harvest at rollover — 春 0.7 (LOCKED,
+  design table) · 夏 1.0 · 秋 **2.0** (大收) · 冬 **0.3** — multiplying on top of the 民心<30 halving
+  (ADR-010 #6) and 開墾. 冬 additionally cuts the per-army hex budget to `MarchBudget = floor(6 × 0.7) = 4`
+  (enforced in `GameEngine.DoMarch`, mirrored by `ScriptedController` so the AI never plans a move the
+  validator will refuse) and adds +5% to desertion losses. The season name rides `SeasonReport.SeasonName`,
+  the `season_start` payload and the observation (`Observation.SeasonName`, JSON `season_name`) so the
+  朝報 header and the LLM payload both say which season it is.
+- **民變 revolt (design §4.1 民心 <25 + §10.2 產出停擺).** At `EndSeason()`, before a city's yields are
+  computed, each owned city with 民心 < `RevoltRiskMoraleThreshold` (25, design's number) rolls
+  `chance = (25 − 民心) × RevoltChancePerMoralePoint (0.02 待決) × FactionState.RevoltChanceMult` — the
+  multiplier is a **P7 research hook** (吏治 3 will set it to 0.5) and is read from day one; it defaults to
+  1.0. On a revolt the city's **harvest and tax are zero for that tick** (the following starvation check
+  still runs — a revolting city can starve), the garrison loses 10% (待決, design is silent) and 民心 gains
+  +15 after venting (待決, clamped ≤100). Event `revolt` (payload `city_id`, `garrison_lost`, `morale`) is
+  **public** — the design's 朝報 is full of such news and hiding it would be unfair to LLM seats that cannot
+  feel the map. Rolling before the yields (rather than cancelling them afterwards) keeps the tick
+  deterministic and order-independent from the tax/harvest code paths.
+- **逃兵 army supply & desertion (design §5.1 補給, §6.3 斷補 10%/季, §10.1 嚴冬).** The design gives armies
+  a 補給 0–100 field that decays with distance from home and reaches 0 in the field. MVP models **only the
+  consequence**: each army eats `Troops × FoodPerGarrisonTroop` (0.1) per season out of its faction's food.
+  The city the army stands on pays first (deducted there), the faction's remaining cities cover the rest
+  **in proportion to their stores** (`PayFromFoodPool`, integer shares with the remainder handed to cities in
+  state order — same "food is national in the design, per-city in the model" bridge as `PayFromTreasury`,
+  ADR-012). If the faction pool cannot cover the **whole** ration, nothing is eaten and the army deserts:
+  兵力 −10% (LOCKED, §6.3; 冬 −15%), 士氣 −15 (待決). Event `desertion` is **owner-only** — a starving army
+  is the owner's secret, matching how 斷補 is described as a surprise. Supply resolves *after* the seasonal
+  morale regrowth so the −15 is not refunded in the same tick. Deliberate simplifications: no 補給 field, no
+  distance decay, no fractional ration, no per-army supply state to snapshot. 劫糧/斷補 remain ⏸ as *actions*
+  (they need cavalry); their consequence is now live for anyone who cannot feed their army.
+- **一統天下 victory (design §13).** `GameState.WinnerSeatId` is set when **every** city on the map has the
+  same non-empty owner — neutral cities included, since a neutral city is territory nobody has taken, so
+  "all cities except the neutral ones" is not unification. `CheckVictory()` runs at the two places ownership
+  can change (neutral capture on 行軍, capture on 攻城), emits one public `game_over` (`winner_seat_id`,
+  `reason=unification`) and is irreversible: every later `Submit()` returns `game over` before phase/CP
+  checks, and the observation exposes `winner_seat_id` so the LLM/HandoverBundle path can see the game is
+  over. 稱霸諸侯 / 受天明命 / 時間到 (score at the season limit) are **not** implemented — they need city
+  counts, 威望 gating, a 稱帝 action and a season cap (OPEN_QUESTIONS 10/11).
+- **Consequences for the thesis.** The pressure systems are the first mechanics that punish a *passive*
+  seat, which is exactly what the human-vs-LLM comparison needs: an unfed army and an unhappy city show up
+  as numbers in the same `SeasonReport`/observation JSON for every controller type. Both new private
+  methods (`RollRevolt`, `ResolveArmySupply`) read canonical state — they are engine rules, not
+  observation-filtered reads.
+- **Verified** headless 2026-10-11: 58/58 assertions (revolt fires below 25 and zeroes both yields, never
+  at/above 25 over 256 runs, `RevoltChanceMult=0` suppresses it; desertion on an empty pool, the standing
+  city pays first, proportional pool draw, winter +5%; autumn ×2.0 / winter ×0.3 / spring ×0.7 / summer
+  ×1.0 harvests; winter march of cost 6 refused while cost 4 is allowed; victory on the last neutral city,
+  public `game_over`, later `Submit()` rejected for winner and loser alike; `ScriptedController` relieves a
+  revolt-risk city first and never plans an unaffordable winter march). Engine + adapter also compile
+  clean against Unity's managed assemblies (0 warnings/errors).
