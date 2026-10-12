@@ -1,22 +1,44 @@
 # CURRENT_STATE.md
 
 > Day-to-day truth of where the project stands. **Update this file at the end of every work session.**
-> Last updated: 2026-10-08
+> Last updated: 2026-10-12
 
 ## Status summary
 
-**2026-10-08: ADR-010 locked; the locked MVP tier is implemented (P0–P4) and verified in Unity.** Five
-sessions took the demo from 3 actions to the full locked tier, all through the one `GameEngine.Submit()`
-pipeline: `06eece2` **P0** state fields + schema v2 (`args`/`text`, CP 5, `farm`→`reclaim`, 民心<30 →
-yields −50%); `e25594b` **P1** domestic D1–D7; `f1d7ff9` **P2** military M2/M3 (field battle, assault-only
-攻城, derived 偷襲/背盟 penalties — `Trust`/`Prestige`/`WarWith` finally have writers); `f831c98` **P3**
-diplomacy P1–P6 (pending proposals, ratify/lapse at rollover, treaty expiry, working 外交 tab); `1d6f91d`
-**P4** hotseat pass-and-play (`SeatRotation` + per-seat UI + handover blocker) and engine-side fog
-observations (`GameEngine.Observe()`, ADR-011/ADR-012). The engine stays pure C# and is re-verified
-headless every session (P1 57, P2 64, P3 92, P4 53 assertions); **the adapter has now passed three Unity
-play-mode smoke rounds** — domestic orders, march, 朝報 and the event log; then combat (`battle_field`
-with `round_log`, the 3:1 siege gate enforced), hotseat handover (陛下請坐 blocker, per-seat fog map) and
-opaque panels; then the frame-1 synchronous init fix. Screenshots: `docs/screenshots/smoke*.png`.
+**2026-10-12: PR #2 merged; P6–P8 make the game push back — revolt, desertion, seasons, victory, research, espionage lite. All headless-verified (175 assertions); Unity play-mode gate PENDING (see Known issues).**
+
+Teammate **PR #2** (`055f1a3`, reviewed + merged): English UI, bigger auto-sized buttons, photo-based fog
+overlays on out-of-vision cells, **watchtower** (new `WatchTowerState`; capture by marching onto a neutral
+tower; vision radius 5 via `BalanceConfig.FogWatchTowerRange`; `Observation.WatchTowers`), city/army
+selection popups, enemy troop counts on attack. Engine invariants verified intact in review (all commands
+via `Submit`, no UI state mutation). One exception documented: teammate patched
+`TBTK/Scripts/GridIndicator.cs` in place (hex indicator Y=0.02).
+
+Then three engine phases by deepseek subagent, orchestrated + reviewed by main agent (all pure C#,
+all numbers in `BalanceConfig` with design citations, all deterministic/seeded):
+
+- **`e619f7b` P6 pressure & consequences (ADR-013)**: 民變 revolt （民心<25, chance (25−民心)×2%/season,
+  zeroes the city's yields that tick, garrison −10%, 民心 +15 venting); army supply (armies eat from the
+  city they stand on, then the faction pool proportionally; shortage → **desertion** −10% troops, −15 士氣，
+  winter −15%); seasonal modifiers (design §3 table: 春×0.7 夏×1.0 秋×2.0 冬×0.3 harvest, winter march
+  budget ×0.7); **victory 一統天下** (one seat owns every city incl. neutrals → `WinnerSeatId`, public
+  `game_over`, later `Submit()` rejected; IMGUI banner).
+- **`8870dc1` P7 research (ADR-014)**: 4 lines （農政/兵法/諜報/吏治， schema keys agri/military/espionage/
+  governance) × 5 levels, costs 20/40/70/110/160 points, income 15/season (×1.25 at 吏治4); `research`
+  action 1 CP. Implemented effects: 農政1 harvest ×1.1, 農政5 ×1.25; 兵法1 training cap 5→6, 兵法4 戰力
+  ×1.15; 吏治1 tax ×1.1, 吏治2 民心+5/季， 吏治3 revolt ×0.5 (the P6 hook), 吏治4 income ×1.25, 吏治5 威望+10
+  once. Other levels purchasable but deferred-effect (labelled in UI). **研究 tab is LIVE.**
+- **`e22eed4` P8 espionage lite (ADR-015)**: no spy entities — instant missions, 1 CP + gold, gated by
+  諜報 level, seeded success 70%+5%/level. `scout` (200金， L1: city report in observation for 2 seasons,
+  banded 少/中/多 at L1-2, exact at L3+), `rumor` (500金， L1: 民心−10, hidden from target on success),
+  `sow_distrust` (800金， L2: trust −10 both directions). Failure → public `spy_exposed`, 威望−8, victim
+  信任−10, gold spent. Covert actions log owner-only. **諜報 tab is LIVE.**
+
+Verification: headless harness **175 passed / 0 failed** (determinism replays included); KingdomDemo
+dotnet-builds against Unity 6000.6.2f1 assemblies 0/0. **Not yet done: Unity editor compile + play-mode
+smoke of PR #2 + P6-P8** — the MCP bridge wedged on 2026-10-11 when the merge changed files under the live
+editor (see Known issues); the editor needs a restart, then run the gate (compile, play, watchtower capture
+at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`).
 
 **Phase 1 — the professor demo loop WORKS.** One full season plays end-to-end on `LuanShi_Demo`: human orders (屯田/徵兵/march) through the authoritative `GameEngine.Submit()` pipeline, scripted-AI seat through the *same* pipeline, season resolution, 朝報 report panel, 史官 line, append-only JSONL event log. All orders — UI clicks and AI alike — are the same `ActionCommand` JSON (the FYP thesis artifact, shown live in the on-screen feed). Engine architecture: ADR-009.
 
@@ -58,10 +80,22 @@ opaque panels; then the frame-1 synchronous init fix. Screenshots: `docs/screens
 
 ## In progress
 
-- (nothing actively in progress — P0-P4 are implemented and smoke-verified in play mode; P5 is next, see below)
+- **Unity verification gate PENDING for PR #2 + P6/P7/P8.** Everything since `d4c38d0` is headless-verified
+  only (175 assertions + Unity-assembly dotnet builds). The editor's MCP bridge wedged on 2026-10-11 when
+  the PR #2 merge changed sources under the live editor (compile requested, never completed; assemblies in
+  `Library/ScriptAssemblies/` predate the merge). **Fix: restart the Unity editor** (scene is not dirty),
+  then re-run the gate with the Unity-driving subagent: compile check (assembly timestamps must postdate
+  the merge), play mode, watchtower capture at (6,2), fog overlays present, 研究/諜報 tabs render, victory
+  banner, screenshot `docs/screenshots/pr2_smoke.png`. Lesson recorded: merge git work while Unity is
+  CLOSED, or restart it right after.
+- P5 (LLM adapter) not started — see Next actions.
 
 ## Known integration issues (TBTK ↔ this project)
 
+0. **MCP bridge wedged after under-editor merge (2026-10-11)**: merging PR #2 while the editor was open
+   triggered a compile the bridge never finished; every relay call queued behind it (Editor.log silent
+   12+ min, process "Responding"). Editor restart required. Also: PR #2's `fog.png.meta` ships an ancient
+   TextureImporter (v1) — Unity auto-upgrades on reimport; commit the result.
 1. ~~URP vs Built-in shaders~~ — resolved 2026-09-25 (URP conversion).
 2. **Input handling**: `activeInputHandler=Both` set on disk; **Unity editor restart still pending** — TBTK's own legacy-input Update loops (camera pan/zoom, UIInput) throw until then. KingdomDemo's own clicks are unaffected (OnGUI events).
 3. TBTK prefabs: harmless old-serialization warnings.
@@ -82,23 +116,25 @@ opaque panels; then the frame-1 synchronous init fix. Screenshots: `docs/screens
 
 ## Next actions (priority order)
 
-1. **P5 — controllers** (the FYP core): extract `IPlayerController` (Human/Scripted/LLM,
+1. **Unity gate for PR #2 + P6-P8** (see In progress) — restart editor, verify, screenshot.
+2. **P5 — controllers** (the FYP core): extract `IPlayerController` (Human/Scripted/LLM,
    CONTROLLER_PROTOCOL §2) out of KingdomDemo, then build the LLM adapter (observation → prompt → JSON →
    validate → retry/fallback + `LLMRun` logging) and the HandoverBundle from `Observation` + pending
    proposals. Two blockers of its own: **the engine's JSON support is writer-only** (`MiniJson` has no
    parser — a small hand-rolled one is the first engine task), and the provider/model/budget decision is
    still open (OPEN_QUESTIONS 4). After that: state snapshots and a JSON balance file.
-2. **Professor demo rehearsal** on the smoke-tested build: capture neutral 南城 by marching onto it,
-   propose → accept a treaty and show it come into force next season, fight a field battle (戰報 +
-   `round_log`), hand the chair to a second human (陛下請坐) to show per-seat fog, and use the JSON feed to
-   make the thesis argument that UI clicks and LLM output are the same commands.
-3. **Team: answer `docs/OPEN_QUESTIONS.md`** — items 16-20 raised during P2-P4 (宣戰 vs existing treaties,
-   遣使 trust, the validator-oracle leak, 民心 25 vs 30, estimation levels), then the blocking Phase 0/1
-   list (seat count, faction roster, map size, LLM provider/budget, turn order).
+3. **Professor demo rehearsal** on the smoke-tested build: grow 魏都 (recruit/train with the economy
+   ticking), capture neutral 南城, fight a field battle (戰報 + `round_log`), buy a research level, run a
+   spy mission, propose → accept a treaty, hand the chair to a second human (陛下請坐) to show per-seat fog,
+   and use the JSON feed for the thesis argument that UI clicks and LLM output are the same commands.
+4. **Team: answer `docs/OPEN_QUESTIONS.md`** — items 16-23 (宣戰 vs treaties, 遣使 trust, validator-oracle
+   leak, 民心 25 vs 30, estimation levels, 諜報 gates, exposure trust, known-cities memory), then the
+   blocking Phase 0/1 list (seat count, faction roster, map size, LLM provider/budget, turn order).
 
 ## Blockers
 
-- None technical. Waiting on team decisions in `docs/OPEN_QUESTIONS.md`.
+- **Unity editor restart needed** (In progress #1) — only the user can do this on their machine.
+- LLM provider/model/budget decision (OPEN_QUESTIONS 4) blocks P5's adapter tail.
 
 ## LuanShi_Demo scene anatomy (as of 2026-09-26)
 
