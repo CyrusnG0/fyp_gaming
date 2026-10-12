@@ -277,3 +277,26 @@ per-seat false reports).
   挑撥離間), and byte-identical replays for identical seeds. Engine + `KingdomDemo` compile clean against
   Unity's managed assemblies (0 warnings / 0 errors); the editor compile and a play-mode smoke of the live
   諜報 tab are still pending.
+
+## ADR-016 — Fog-visible city markers, observation-shaped city panel, march-before-popup
+**Date:** 2026-10-12 · **Status:** accepted · **Phase:** post-PR#2 fix (`2ce2c48`)
+
+Four UI-level rulings made while fixing the hotseat privacy leak and the broken march path:
+
+1. **Out-of-vision cities keep a marker but lose their colour.** PR #2 kept city markers visible outside
+   vision ("a city stands here"); the marker is now painted **neutral** — existence is public map
+   knowledge, ownership is not. Anything richer must come from sight or a scout report.
+2. **The city panel is observation-shaped.** Own city → full panel; in sight → the observation's numbers
+   (ADR-011 "visible ⇒ full detail"); scouted-only → the P8 report (bands at 諜報 L1-2, exact at L3+, with
+   expiry shown); otherwise "nothing is known", and the title degrades to "Unknown city". This supersedes
+   PR #2's blanket "Enemy territory — details unknown", which hid legitimate observations and made 偵察
+   pointless in the panel.
+3. **Army selected + click on a city hex = march order**, not inspection (standard RTS "move here").
+   Inspection requires deselecting first. Root cause of "armies can't move": PR #2's city/army popup
+   branch ran before the march branch and swallowed every march onto a city hex.
+4. **The handover blocker hides by early-returning from OnGUI** (nothing else draws at all) and fills in
+   screen pixels (aspect-proof), rather than drawing a near-black overlay inside the 1600×900 design
+   matrix, which leaked a visible strip on non-16:9 windows.
+
+Also locked: the movement **highlight budget and the validator budget are the same call** —
+`BalanceConfig.MarchBudget(season)` — so winter (×0.7) can never highlight a hex the engine then rejects.
