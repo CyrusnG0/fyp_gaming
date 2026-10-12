@@ -300,3 +300,30 @@ Four UI-level rulings made while fixing the hotseat privacy leak and the broken 
 
 Also locked: the movement **highlight budget and the validator budget are the same call** —
 `BalanceConfig.MarchBudget(season)` — so winter (×0.7) can never highlight a hex the engine then rejects.
+
+## ADR-017 — Design north star: Polytopia-inspired, but no fixed policy should survive
+**Date:** 2026-10-12 · **Status:** accepted · **Source:** team direction (user, 2026-10-12)
+
+Battle of Polytopia is the reference for *feel* (clean hex map, one-tap orders, pass-and-play), but the
+design target is deliberately beyond it: **the game must be unwinnable by a memorised decision tree or a
+scripted auto-player.** Every match must present a different problem, so that winning play requires
+model-level reasoning under uncertainty — which is exactly the FYP's justification for LLM seats.
+
+Consequences, in planned phase order (NOT yet implemented — roadmap only):
+
+1. **P9 seeded world variability** — map defs as data (several handcrafted maps + a seeded parameterized
+   generator), asymmetric starting resources/terrain per faction. The seed stays an explicit experiment
+   parameter: identical seeds for fair human-vs-LLM comparison, different seeds for robustness runs.
+2. **P10 天時 weather + events** (design §10) — per-region seasonal rolls (豐收/旱災/蝗災/疫病/祥瑞) and
+   choice-bearing events (流民南下: accept = +人口 −民心, refuse = −威望). Needs a small choice-prompt UI;
+   pairs with the P5 controller refactor.
+3. **P11 uncertain information** — estimation levels for distant armies (少/中/多 bands, design §8.1),
+   counter-intelligence (巡查/清查), 偽造軍報 (pollute an enemy's observation for a season). Information
+   itself becomes attackable.
+4. **P12 multiple victory routes** — 一統天下 / 稱帝·天命 (威望≥70 + 30 城) / score-at-season-limit, so
+   opponents pursue different goals and no fixed counter exists.
+5. **P13 adaptive opponents** — LLM seats with free-text negotiation, betrayal timing, and memory of
+   deception: the dimension no precomputed policy can cover. This is where the thesis pays off.
+
+The scripted controller remains in the game deliberately: it is the **baseline a real player (or LLM)
+should beat**, and the evaluation harness measures exactly that.

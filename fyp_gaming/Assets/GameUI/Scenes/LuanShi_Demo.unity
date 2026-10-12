@@ -240,6 +240,7 @@ MonoBehaviour:
   randomSeed: 12345
   humanSeats:
   - seat-0
+  - seat-1
 --- !u!4 &4228577
 Transform:
   m_ObjectHideFlags: 0
