@@ -399,11 +399,18 @@ namespace LuanShi
             return material;
         }
 
+        /// <summary>
+        /// A city marker is tinted with its owner's colour only while the current seat can actually see the
+        /// city (its own, or one inside the fog radius). A city outside the observation keeps its marker —
+        /// the map still says "a city stands here" — but is painted in the neutral colour, because the
+        /// owner's banner is exactly the information the fog is supposed to withhold (hotseat privacy).
+        /// </summary>
         void TintCity(string cityId)
         {
             var city = engine.State.FindCity(cityId);
             if (city == null) return;
-            var color = OwnerColor(city.OwnerSeatId);
+            bool known = city.OwnerSeatId == currentSeat || (obs != null && obs.FindCity(cityId) != null);
+            var color = OwnerColor(known ? city.OwnerSeatId : null);
 
             var go = cityObjs[cityId];
             var sprite = go.GetComponentInChildren<SpriteRenderer>();
@@ -467,6 +474,28 @@ namespace LuanShi
                 return;
             }
 
+            // clicking the selected army again drops it (works on a city hex too)
+            if (army != null && selArmy != null && army.Id == selArmy.Id)
+            {
+                selArmy = null;
+                ClearArmyMoveTargets();
+                e.Use();
+                return;
+            }
+
+            // An army is selected: the next click is a march order, on whatever hex it lands — an empty
+            // hex, a neutral city (capture) or our own city (return home). This MUST be decided before
+            // the city/army popup below, or a click aimed at a city hex opens the popup instead and the
+            // march never happens (the demo's headline move — taking 南城 by marching onto it — was
+            // impossible, and so was marching home).
+            if (selArmy != null && army == null)
+            {
+                locationChoiceOpen = false;
+                TryMarch(selArmy, node.idxX, node.idxZ);
+                e.Use();
+                return;
+            }
+
             if (army != null && citySelectable)
             {
                 locationChoiceOpen = true;
@@ -481,24 +510,11 @@ namespace LuanShi
 
             if (army != null)
             {
-                if (selArmy != null && selArmy.Id == army.Id)
-                {
-                    selArmy = null;
-                    ClearArmyMoveTargets();
-                    e.Use();
-                    return;
-                }
                 selArmy = army;
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
                 statusMsg = "Selected " + army.Name + " — choose a destination";
-                e.Use();
-                return;
-            }
-            if (selArmy != null)
-            {
-                TryMarch(selArmy, node.idxX, node.idxZ);
                 e.Use();
                 return;
             }
@@ -547,6 +563,9 @@ namespace LuanShi
         void ShowArmyMoveTargets(ArmyState army)
         {
             var targets = new List<TBTK.Node>();
+            // the highlight and the validator must agree on the season's budget, or 冬 (floor(6 × 0.7) = 4)
+            // highlights hexes the engine then refuses (P6 §8b; ACTIONS.md §2)
+            int budget = BalanceConfig.MarchBudget(engine.State.Season);
             if (!army.MarchedThisSeason)
                 for (int x = 0; x < engine.State.Map.Width; x++)
                     for (int z = 0; z < engine.State.Map.Height; z++)
@@ -564,8 +583,7 @@ namespace LuanShi
                         var city = engine.State.CityAt(x, z);
                         if (city != null && !city.IsNeutral && city.OwnerSeatId != currentSeat
                             && obs != null && obs.FindCity(city.Id) != null) continue;
-                        if (engine.State.Map.PathCost(army.X, army.Z, x, z,
-                                BalanceConfig.ArmyMoveCostPerSeason) < 0) continue;
+                        if (engine.State.Map.PathCost(army.X, army.Z, x, z, budget) < 0) continue;
 
                         var node = TBTK.GridManager.GetNode(x, z);
                         if (node != null) targets.Add(node);
@@ -668,6 +686,8 @@ namespace LuanShi
         void StartSeatTurn()
         {
             selCity = null; selArmy = null;
+            locationChoiceOpen = false;           // the previous seat's popup is not the next one's
+            envoyText = "";                       // nor is a half-written envoy message
             ClearArmyMoveTargets();
             jsonFeed.Clear();                     // one player's command feed is not the next one's
             if (string.IsNullOrEmpty(currentSeat)) currentSeat = SeatRotation.FirstSeat(engine.State);
@@ -773,9 +793,9 @@ namespace LuanShi
         }
 
         /// <summary>
-        /// Fog on the map (AGENTS.md #3): foreign cities and armies outside the seat's observation are
-        /// hidden outright — the UI never shows a unit the seat cannot see, and a selection that drops
-        /// out of sight is dropped with it.
+        /// Fog on the map (AGENTS.md #3): foreign armies and towers outside the seat's observation are
+        /// hidden outright, a city marker outside it keeps only its existence (see <see cref="TintCity"/>),
+        /// and a selection that drops out of sight is dropped with it.
         /// </summary>
         void ApplyFog()
         {
@@ -784,6 +804,12 @@ namespace LuanShi
                 bool visible = obs != null && obs.FindArmy(kv.Key) != null;
                 if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
             }
+            foreach (var kv in watchTowerObjs)
+            {
+                bool visible = obs != null && obs.FindWatchTower(kv.Key) != null;
+                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
+            }
+            foreach (var kv in cityObjs) TintCity(kv.Key);      // owner colour only while the city is seen
             if (selCity != null && (obs == null || obs.FindCity(selCity.Id) == null)) selCity = null;
             if (selArmy != null && (obs == null || obs.FindArmy(selArmy.Id) == null)) selArmy = null;
         }
@@ -1039,8 +1065,10 @@ namespace LuanShi
             if (!locationChoiceOpen || activeTab != "map") return;
 
             var node = TBTK.GridManager.GetNode(locationChoiceX, locationChoiceZ);
-            var city = engine.State.CityAt(locationChoiceX, locationChoiceZ);
-            var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == locationChoiceX && a.Z == locationChoiceZ);
+            // drawn from the observation, like everything else: a hex whose city or army this seat cannot
+            // see has nothing to offer (the click handler only opens this for a city it may inspect)
+            var city = obs != null ? obs.Cities.Find(c => c.X == locationChoiceX && c.Z == locationChoiceZ) : null;
+            var army = obs != null ? obs.ArmiesOf(currentSeat).Find(a => a.X == locationChoiceX && a.Z == locationChoiceZ) : null;
             if (node == null || city == null || army == null)
             {
                 locationChoiceOpen = false;
@@ -1095,13 +1123,17 @@ namespace LuanShi
         }
 
         /// <summary>
-        /// Full-screen opaque blocker between seats: whoever is at the keyboard presses a key to take
-        /// the chair. Nothing of the previous player's screen survives it.
+        /// Full-screen opaque blocker between seats (hotseat rule): whoever holds the keyboard sees a black
+        /// screen and a prompt, and presses a key or clicks to take the chair. The fill is drawn in *screen*
+        /// space, not the 1600×900 design space — a scaled rect leaves the last pixels of a non-16:9 window
+        /// showing the previous player's map. OnGUI renders above every camera, so an opaque full-screen
+        /// fill is enough to hide the scene as well as the panels, and the early return in OnGUI means
+        /// nothing else is drawn at all while this is up.
         /// </summary>
         void DrawHandoverOverlay(GUIStyle title, GUIStyle body)
         {
             var e = Event.current;
-            var centered = new GUIStyle(title) { alignment = TextAnchor.MiddleCenter };
+            var centered = new GUIStyle(title) { fontSize = 28, alignment = TextAnchor.MiddleCenter };
             var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
 
             if (e.type == EventType.KeyDown || e.type == EventType.MouseDown)
@@ -1113,16 +1145,29 @@ namespace LuanShi
                 return;
             }
 
-            // fully opaque (alpha 1) — the map, panels and report are all skipped while this is up
-            var prevColor = GUI.color;
-            GUI.color = new Color(0.07f, 0.07f, 0.09f, 1f);
-            GUI.DrawTexture(new Rect(0, 0, 1600, 900), Texture2D.whiteTexture);
-            GUI.color = prevColor;
+            FillScreen(Color.black);
 
             var fac = engine.State.FindFaction(currentSeat);
-            GUI.Label(new Rect(0, 330, 1600, 50), $"Season {engine.State.Season} · {fac?.Name} ({currentSeat})", centered);
-            GUI.Label(new Rect(0, 400, 1600, 40), "Please take your seat", centeredBody);
-            GUI.Label(new Rect(0, 460, 1600, 40), "Press any key to begin", centeredBody);
+            GUI.Label(new Rect(0, 330, 1600, 50),
+                $"Season {engine.State.Season} · {fac?.Name} ({currentSeat})", centered);
+            GUI.Label(new Rect(0, 400, 1600, 40),
+                $"Pass to seat {fac?.Name} ({currentSeat}) — click to take the throne", centeredBody);
+            GUI.Label(new Rect(0, 460, 1600, 40), "Nothing of the previous player's screen is shown.", centeredBody);
+        }
+
+        /// <summary>
+        /// Fills the whole game view in *screen* pixels, whatever the window aspect is. Callers run inside
+        /// OnGUI's design-space matrix, so the matrix is reset for the fill and restored afterwards.
+        /// </summary>
+        void FillScreen(Color color)
+        {
+            var prevMatrix = GUI.matrix;
+            var prevColor = GUI.color;
+            GUI.matrix = Matrix4x4.identity;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = prevColor;
+            GUI.matrix = prevMatrix;
         }
 
         /// <summary>
@@ -1134,23 +1179,32 @@ namespace LuanShi
             var centered = new GUIStyle(title) { fontSize = 34, alignment = TextAnchor.MiddleCenter };
             var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
 
-            var prevColor = GUI.color;
-            GUI.color = new Color(0.07f, 0.07f, 0.09f, 1f);
-            GUI.DrawTexture(new Rect(0, 0, 1600, 900), Texture2D.whiteTexture);
-            GUI.color = prevColor;
+            FillScreen(Color.black);
 
             var winner = engine.State.FindFaction(engine.State.WinnerSeatId);
             GUI.Label(new Rect(0, 380, 1600, 60), $"{winner?.Name} unifies the land — game over", centered);
             GUI.Label(new Rect(0, 450, 1600, 40), "一統天下 · all cities are one banner", centeredBody);
         }
 
+        /// <summary>
+        /// City details for the current seat. An own city shows everything and offers orders; a foreign or
+        /// neutral city shows **only what this seat actually holds** — the observation when the city is in
+        /// sight, otherwise a live 偵察 report (bands or exact numbers, P8), otherwise nothing at all. It
+        /// never falls back to canonical state, so the panel cannot leak an unseen city's garrison.
+        /// </summary>
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
             bool mine = city.OwnerSeatId == currentSeat;
-            var p = new Rect(10, 50, 420, mine ? 400 : 120);
+            var inSight = obs != null ? obs.FindCity(city.Id) : null;
+            var report = obs != null ? obs.FindScoutedCity(city.Id) : null;
+            var p = new Rect(10, 50, 420, mine ? 400 : (inSight != null || report != null ? 210 : 120));
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 400, 24), $"{city.Name} ({OwnerName(city)})", body);
+            // the name and owner are themselves information: an unseen city with no report stays unnamed,
+            // even if a debug hook selects it by id
+            bool knowsCity = mine || inSight != null || report != null;
+            GUI.Label(new Rect(22, 58, 400, 24),
+                knowsCity ? $"{city.Name} ({OwnerName(city)})" : "Unknown city", body);
 
             if (mine)
             {
@@ -1187,7 +1241,31 @@ namespace LuanShi
             }
             else
             {
-                GUI.Label(new Rect(22, 84, 400, 30), city.IsNeutral ? "Unclaimed land" : "Enemy territory — details unknown", body);
+                if (inSight != null)
+                {
+                    string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
+                    GUI.Label(new Rect(22, 84, 400, 126),
+                        $"{city.Name} — in sight\n" +
+                        $"Garrison {city.Garrison}\nMorale {city.Morale}{moraleWarning}\n" +
+                        $"Food {city.Food}  Gold {city.Gold}\n" +
+                        $"Population {city.Population}\n" +
+                        $"Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}",
+                        body);
+                }
+                else if (report != null)
+                {
+                    string detail = report.Accuracy == "exact"
+                        ? $"Garrison {report.Garrison}  Food {report.Food}\nMorale {report.Morale}  Gold {report.Gold}\nPopulation {report.Population}"
+                        : $"Troops: {report.GarrisonBand}\nFood: {report.FoodBand}";
+                    GUI.Label(new Rect(22, 84, 400, 126),
+                        $"{(city.IsNeutral ? "Neutral city" : "Enemy city")} — scout report ({report.Accuracy})\n" +
+                        $"{detail}\nReport valid to season {report.UntilSeason}",
+                        body);
+                }
+                else
+                {
+                    GUI.Label(new Rect(22, 84, 400, 30), "Outside our sight — nothing is known", body);
+                }
             }
         }
 
@@ -1263,19 +1341,27 @@ namespace LuanShi
             if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 308, 22), hint, body);
         }
 
+        /// <summary>
+        /// Enemy armies the seat may actually act against: candidates come from this seat's observation, so
+        /// the panel can never name or count a unit the fog hides (it used to read canonical state, which
+        /// also let a player attack an army they could not see). The engine still validates the order.
+        /// </summary>
         List<ArmyState> AdjacentEnemyArmies(ArmyState army)
         {
             var list = new List<ArmyState>();
-            foreach (var other in engine.State.Armies)
+            if (obs == null) return list;
+            foreach (var other in obs.Armies)
                 if (other.OwnerSeatId != army.OwnerSeatId
                     && engine.State.Map.AreAdjacent(army.X, army.Z, other.X, other.Z)) list.Add(other);
             return list;
         }
 
+        /// <summary>Enemy cities within reach, from this seat's observation only (see above).</summary>
         List<CityState> AdjacentEnemyCities(ArmyState army)
         {
             var list = new List<CityState>();
-            foreach (var city in engine.State.Cities)
+            if (obs == null) return list;
+            foreach (var city in obs.Cities)
                 if (!city.IsNeutral && city.OwnerSeatId != army.OwnerSeatId
                     && engine.State.Map.AreAdjacent(army.X, army.Z, city.X, city.Z)) list.Add(city);
             return list;
