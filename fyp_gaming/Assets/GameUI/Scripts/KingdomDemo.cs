@@ -25,9 +25,11 @@ namespace LuanShi
         public string weiArmyObj = "Wei_Army1";
         public string shuArmyObj = "Shu_Army1";
         public Texture2D watchTowerImage;
+        public Texture2D armyBannerImage;
         [FormerlySerializedAs("unusedArmyObjs")]   // renamed after the smoke test: they are used
         public string[] extraArmyObjs = { "Wei_Army2", "Wei_Army3", "Wei_Army4",
                                           "Shu_Army2", "Shu_Army3", "Shu_Army4" };
+        public int convertedArmySortingOrder;
 
         [Header("Game setup")]
         public int randomSeed = 12345;
@@ -82,6 +84,12 @@ namespace LuanShi
         // selection & UI state
         private CityState selCity;
         private ArmyState selArmy;
+        private bool garrisonConversionOpen;
+        private string garrisonConversionCityId;
+        private int garrisonConversionAmount;
+        private string garrisonArmyId;
+        private int garrisonArmyAmount;
+        private bool garrisonArmyConversionOpen;
         private string statusMsg = "";
         private readonly List<string> jsonFeed = new List<string>();   // recent ActionCommand JSON
         private bool reportShowing;
@@ -190,11 +198,12 @@ namespace LuanShi
                 }
 
             engine = new GameEngine(randomSeed);
+            engine.CombatDebugLogger = message => Debug.Log(message);
             engine.State.Map = map;
             InitializeFogOverlays(nodes, w, h);
 
-            factionColors[SeatA] = new Color(0.40f, 0.55f, 0.95f);   // Wei blue
-            factionColors[SeatB] = new Color(0.45f, 0.80f, 0.45f);   // Shu green
+            factionColors[SeatB] = new Color(0.8509804f, 0.3490196f, 0.1843137f, 1f); // Shu #D95947
+            factionColors[SeatA] = new Color(0.3490196f, 0.5019608f, 0.8509804f, 1f); // Wei #5980D9
 
             engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "Wei", Controller = ControlOf(SeatA) });
             engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "Shu", Controller = ControlOf(SeatB) });
@@ -291,6 +300,19 @@ namespace LuanShi
                 go.transform.position = node.GetPos();
             }
 
+            Transform gridTerms = null;
+            foreach (var cityObject in cityObjs.Values)
+            {
+                if (cityObject == null) continue;
+                gridTerms = cityObject.transform.parent;
+                break;
+            }
+            go.transform.SetParent(gridTerms, true);
+
+            var watchTowerRenderer = go.GetComponent<SpriteRenderer>();
+            if (watchTowerRenderer == null) watchTowerRenderer = go.AddComponent<SpriteRenderer>();
+            watchTowerRenderer.sortingOrder = 500;
+
             go.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
             go.transform.localEulerAngles = new Vector3(45f, 0f, 0f);
             var towerPosition = go.transform.position;
@@ -306,6 +328,7 @@ namespace LuanShi
                 OwnerSeatId = null,
             });
             watchTowerObjs[id] = go;
+            TintWatchTower(id);
         }
 
         void AddArmy(string objName, string id, string displayName, string ownerSeat)
@@ -331,6 +354,7 @@ namespace LuanShi
                 Z = node.idxZ,
             });
             armyObjs[id] = go;
+            TintArmy(id);
         }
 
         /// <summary>
@@ -421,6 +445,34 @@ namespace LuanShi
             if (marker == null) return;
             var material = MarkerMaterial(color);
             if (material != null) marker.sharedMaterial = material;
+        }
+
+        void TintWatchTower(string towerId)
+        {
+            var tower = engine.State.WatchTowers.Find(t => t.Id == towerId);
+            if (tower == null || !watchTowerObjs.TryGetValue(towerId, out var go) || go == null) return;
+
+            bool known = tower.OwnerSeatId == currentSeat || (obs != null && obs.FindWatchTower(towerId) != null);
+            var color = OwnerColor(known ? tower.OwnerSeatId : null);
+            var sprite = go.GetComponentInChildren<SpriteRenderer>();
+            if (sprite != null) sprite.color = color;
+        }
+
+        void TintArmy(string armyId)
+        {
+            var army = engine.State.FindArmy(armyId);
+            if (army == null || !armyObjs.TryGetValue(armyId, out var go) || go == null) return;
+
+            var color = OwnerColor(army.OwnerSeatId);
+            foreach (var sprite in go.GetComponentsInChildren<SpriteRenderer>())
+                sprite.color = color;
+
+            var marker = go.GetComponentInChildren<MeshRenderer>();
+            if (marker != null)
+            {
+                var material = MarkerMaterial(color);
+                if (material != null) marker.sharedMaterial = material;
+            }
         }
 
         // ------------------------------------------------------------------ input
@@ -619,6 +671,27 @@ namespace LuanShi
                 SyncArmyVisual(cmd.TargetId);
                 selArmy = null;
             }
+            if (r.Ok && cmd.Type == ActionType.ConvertGarrison)
+            {
+                var convertedArmy = engine.State.ArmyAt(engine.State.FindCity(cmd.TargetId).X,
+                                                        engine.State.FindCity(cmd.TargetId).Z);
+                if (convertedArmy != null) EnsureArmyVisual(convertedArmy);
+                garrisonConversionOpen = false;
+                garrisonConversionCityId = null;
+            }
+            if (r.Ok && cmd.Type == ActionType.GarrisonArmy)
+            {
+                garrisonArmyId = null;
+                garrisonArmyConversionOpen = false;
+                var remainingArmy = engine.State.FindArmy(cmd.TargetId);
+                if (remainingArmy == null)
+                {
+                    if (armyObjs.TryGetValue(cmd.TargetId, out var armyObject) && armyObject != null)
+                        armyObject.SetActive(false);
+                    selArmy = null;
+                    ClearArmyMoveTargets();
+                }
+            }
             if (r.Ok && IsBattle(cmd.Type))
             {
                 ClearArmyMoveTargets();
@@ -774,7 +847,6 @@ namespace LuanShi
             if (fogOverlayRoot == null || engine == null || currentSeat == null) return;
 
             int index = 0;
-            int hiddenCount = 0;
             int width = engine.State.Map.Width;
             int height = engine.State.Map.Height;
             for (int x = 0; x < width; x++)
@@ -785,16 +857,13 @@ namespace LuanShi
 
                         bool hidden = !engine.InSight(currentSeat, x, z);
                         fogOverlays[index].enabled = hidden;
-                        if (hidden) hiddenCount++;
                     index++;
                 }
-
-                    Debug.Log("[KingdomDemo] Fog refresh: " + hiddenCount + " hidden cells for " + currentSeat + ".");
         }
 
         /// <summary>
-        /// Fog on the map (AGENTS.md #3): foreign armies and towers outside the seat's observation are
-        /// hidden outright, a city marker outside it keeps only its existence (see <see cref="TintCity"/>),
+        /// Fog on the map (AGENTS.md #3): foreign armies outside the seat's observation are hidden outright,
+        /// watchtowers remain visible, a city marker outside it keeps only its existence (see <see cref="TintCity"/>),
         /// and a selection that drops out of sight is dropped with it.
         /// </summary>
         void ApplyFog()
@@ -804,12 +873,8 @@ namespace LuanShi
                 bool visible = obs != null && obs.FindArmy(kv.Key) != null;
                 if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
             }
-            foreach (var kv in watchTowerObjs)
-            {
-                bool visible = obs != null && obs.FindWatchTower(kv.Key) != null;
-                if (kv.Value != null && kv.Value.activeSelf != visible) kv.Value.SetActive(visible);
-            }
             foreach (var kv in cityObjs) TintCity(kv.Key);      // owner colour only while the city is seen
+            foreach (var kv in watchTowerObjs) TintWatchTower(kv.Key);
             if (selCity != null && (obs == null || obs.FindCity(selCity.Id) == null)) selCity = null;
             if (selArmy != null && (obs == null || obs.FindArmy(selArmy.Id) == null)) selArmy = null;
         }
@@ -825,8 +890,92 @@ namespace LuanShi
             var node = TBTK.GridManager.GetNode(army.X, army.Z);
             if (node == null) return;
 
+            var unit = go.GetComponent<TBTK.Unit>();
+            if (unit != null && unit.node != node)
+            {
+                if (unit.node != null && unit.node.unit == unit) unit.node.unit = null;
+                if (node.unit != null && node.unit != unit) node.unit.node = null;
+                unit.node = node;
+                node.unit = unit;
+            }
+
             go.transform.position = node.GetPos();
+            if (go.name.StartsWith("ArmyBanner_", System.StringComparison.Ordinal))
+            {
+                var visualPosition = go.transform.position;
+                visualPosition.y = 0.5f;
+                go.transform.position = visualPosition;
+            }
             foreach (var city in engine.State.Cities) TintCity(city.Id);   // capture may have changed owners
+        }
+
+        void EnsureArmyVisual(ArmyState army)
+        {
+            if (army == null) return;
+            if (!armyObjs.ContainsKey(army.Id))
+                armyObjs[army.Id] = CreateArmyBannerMarker(army);
+            SyncArmyVisual(army.Id);
+        }
+
+        GameObject CreateArmyBannerMarker(ArmyState army)
+        {
+            if (armyBannerImage == null)
+            {
+#if UNITY_EDITOR
+                armyBannerImage = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    "Assets/GameUI/Art/Prop_ArmyBanner.png");
+#endif
+                if (armyBannerImage == null)
+                {
+                    string bannerPath = Path.Combine(Application.dataPath, "GameUI/Art/Prop_ArmyBanner.png");
+                    if (File.Exists(bannerPath))
+                    {
+                        armyBannerImage = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                        if (!armyBannerImage.LoadImage(File.ReadAllBytes(bannerPath), false))
+                            armyBannerImage = null;
+                    }
+                }
+            }
+
+            if (armyBannerImage == null)
+                return FindOrCreateMarker("ArmyMarker_" + army.Id, army.X, army.Z, army.OwnerSeatId);
+
+            var node = TBTK.GridManager.GetNode(army.X, army.Z);
+            if (node == null) return null;
+
+            string sourceName = army.OwnerSeatId == SeatA ? weiArmyObj : shuArmyObj;
+            var source = FindSceneObject(sourceName);
+            var sourceUnit = source != null ? source.GetComponent<TBTK.Unit>() : null;
+            if (source == null || sourceUnit == null)
+                return FindOrCreateMarker("ArmyMarker_" + army.Id, army.X, army.Z, army.OwnerSeatId);
+
+            var spawnPosition = node.GetPos();
+            spawnPosition.y = 0.5f;
+            var go = Instantiate(source, spawnPosition, Quaternion.Euler(45f, 0f, 0f));
+            go.name = "ArmyBanner_" + army.Id;
+            foreach (var sourceRenderer in go.GetComponentsInChildren<Renderer>())
+                sourceRenderer.enabled = false;
+
+            var unit = go.GetComponent<TBTK.Unit>();
+            unit.node = node;
+            node.unit = unit;
+            foreach (var faction in TBTK.UnitManager.GetFactionList())
+                if (faction.factionID == unit.facID && !faction.unitList.Contains(unit))
+                {
+                    faction.unitList.Add(unit);
+                    break;
+                }
+
+            go.transform.localEulerAngles = new Vector3(45f, 0f, 0f);
+            go.transform.localScale = new Vector3(0.28f, 0.28f, 0.28f);
+
+            var renderer = go.AddComponent<SpriteRenderer>();
+            renderer.sprite = Sprite.Create(armyBannerImage,
+                new Rect(0f, 0f, armyBannerImage.width, armyBannerImage.height),
+                new Vector2(0.5f, 0.5f), 100f);
+            renderer.color = OwnerColor(army.OwnerSeatId);
+            renderer.sortingOrder = convertedArmySortingOrder;
+            return go;
         }
 
         /// <summary>After a battle: hide banners of destroyed armies, move the survivors, recolour
@@ -993,7 +1142,20 @@ namespace LuanShi
                 return;
             }
 
+            if (engine == null || obs == null || string.IsNullOrEmpty(currentSeat))
+            {
+                GUI.Label(new Rect(20, 20, 1100, 40),
+                    "KingdomDemo is waiting for game state to finish initializing.", title);
+                return;
+            }
+
             var fac = engine.State.FindFaction(currentSeat);
+            if (fac == null)
+            {
+                GUI.Label(new Rect(20, 20, 1100, 40),
+                    "KingdomDemo cannot find the current seat: " + currentSeat, title);
+                return;
+            }
             int food = 0, gold = 0, pop = 0;
             // render from the seat's observation, never from canonical state
             foreach (var c in obs.CitiesOf(currentSeat)) { food += c.Food; gold += c.Gold; pop += c.Population; }
@@ -1195,9 +1357,10 @@ namespace LuanShi
         void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
         {
             bool mine = city.OwnerSeatId == currentSeat;
+            bool conversionOpen = mine && garrisonConversionOpen && garrisonConversionCityId == city.Id && city.Garrison > 0;
             var inSight = obs != null ? obs.FindCity(city.Id) : null;
             var report = obs != null ? obs.FindScoutedCity(city.Id) : null;
-            var p = new Rect(10, 50, 420, mine ? 400 : (inSight != null || report != null ? 210 : 120));
+            var p = new Rect(10, 50, 420, mine ? (conversionOpen ? 500 : 400) : (inSight != null || report != null ? 210 : 120));
             uiRects.Add(p);
             DrawBackdrop(p);
             // the name and owner are themselves information: an unseen city with no report stays unnamed,
@@ -1236,8 +1399,36 @@ namespace LuanShi
                     city.Defense >= BalanceConfig.DefenseMax ? "Limit reached" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
                     city.Food < BalanceConfig.ReliefFoodCost ? "Not enough food" : null, 0, 0, btn));
+                var convertRect = new Rect(rightButtonLeft, buttonTop + 114f, buttonWidth, 34);
+                var previousEnabled = GUI.enabled;
+                GUI.enabled = city.Garrison > 0;
+                if (GUI.Button(convertRect, "Convert garrison 1 order", btn))
+                {
+                    garrisonConversionOpen = true;
+                    garrisonConversionCityId = city.Id;
+                    garrisonConversionAmount = city.Garrison;
+                }
+                GUI.enabled = previousEnabled;
+                if (city.Garrison <= 0) hint = FirstReason(hint, "Convert garrison: No garrison");
 
-                if (hint != null) GUI.Label(new Rect(22, 364, 400, 22), hint, body);
+                if (conversionOpen)
+                {
+                    GUI.Label(new Rect(22, 366, 400, 22),
+                        $"Convert {garrisonConversionAmount} of {city.Garrison} garrison to army", body);
+                    garrisonConversionAmount = Mathf.Clamp(garrisonConversionAmount, 1, city.Garrison);
+                    garrisonConversionAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
+                        new Rect(22, 392, 290, 24), garrisonConversionAmount, 1, city.Garrison));
+                    if (GUI.Button(new Rect(320, 386, 90, 34), "Confirm", btn))
+                        SubmitHuman(new ActionCommand
+                        {
+                            Type = ActionType.ConvertGarrison,
+                            TargetId = city.Id,
+                            ParamA = garrisonConversionAmount,
+                            Reason = "UI: convert_garrison",
+                        });
+                }
+
+                if (hint != null) GUI.Label(new Rect(22, conversionOpen ? 442 : 364, 400, 40), hint, body);
             }
             else
             {
@@ -1279,7 +1470,7 @@ namespace LuanShi
             Dictionary<string, string> args = null, string text = null, System.Action onSubmitted = null)
         {
             bool available = blockedReason == null;
-            string buttonText = $"{label} {BalanceConfig.CommandPointCost(type)} orders";
+            string buttonText = $"{label} {BalanceConfig.CommandPointCost(type)} order";
             r.width = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
             var prev = GUI.enabled;
             GUI.enabled = available;
@@ -1300,25 +1491,63 @@ namespace LuanShi
             var enemyArmies = AdjacentEnemyArmies(army);
             var enemyCities = AdjacentEnemyCities(army);
             int orders = enemyArmies.Count + enemyCities.Count;
+            var occupiedCity = engine.State.CityAt(army.X, army.Z);
+            bool canGarrison = occupiedCity != null && occupiedCity.OwnerSeatId == army.OwnerSeatId;
+            if (canGarrison && garrisonArmyId != army.Id)
+            {
+                garrisonArmyId = army.Id;
+                garrisonArmyAmount = army.Troops;
+                garrisonArmyConversionOpen = false;
+            }
+            if (canGarrison) garrisonArmyAmount = Mathf.Clamp(garrisonArmyAmount, 1, army.Troops);
 
-            var p = new Rect(10, 50, 330, orders > 0 ? 236 + orders * 38 : 150);
+            const float panelWidth = 440f;
+            float garrisonControlsHeight = garrisonArmyConversionOpen ? 90f : 52f;
+            var p = new Rect(10, 50, panelWidth, (orders > 0 ? 236 + orders * 38 : 150) + (canGarrison ? garrisonControlsHeight : 0));
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, 308, 24), $"{army.Name} · Troops {army.Troops}", body);
-            GUI.Label(new Rect(22, 86, 308, 66),
+            GUI.Label(new Rect(22, 58, panelWidth - 32f, 24), $"{army.Name} · Troops {army.Troops}", body);
+            int foodPerSeason = (int)(army.Troops * BalanceConfig.FoodPerGarrisonTroop);
+            int factionFood = 0;
+            foreach (var city in engine.State.Cities)
+                if (city.OwnerSeatId == army.OwnerSeatId) factionFood += city.Food;
+            GUI.Label(new Rect(22, 86, panelWidth - 32f, 78),
                 $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
+                $"Faction food {factionFood} (army need {foodPerSeason} / season)\n" +
                 (army.MarchedThisSeason ? "Already marched this season" : "Select a hex to march"), body);
+
+            if (canGarrison)
+            {
+                if (!garrisonArmyConversionOpen)
+                {
+                    if (GUI.Button(new Rect(p.x + 12f, p.y + 124f, p.width - 24f, 34), "Convert troops (1 order)", btn))
+                        garrisonArmyConversionOpen = true;
+                }
+                else
+                {
+                    GUI.Label(new Rect(p.x + 12f, p.y + 120f, p.width - 24f, 22),
+                        $"Garrison troops: {garrisonArmyAmount}/{army.Troops}", body);
+                    garrisonArmyAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
+                        new Rect(p.x + 12f, p.y + 142f, p.width - 24f, 20f),
+                        garrisonArmyAmount, 1, army.Troops));
+                    OrderButton(new Rect(p.x + 12f, p.y + 162f, p.width - 24f, 34), ActionType.GarrisonArmy,
+                        army.Id, $"Garrison in {occupiedCity.Name}", null, garrisonArmyAmount, 0, btn);
+                }
+            }
 
             if (orders == 0)
             {
-                GUI.Label(new Rect(22, 156, 308, 22), "No enemy armies or cities nearby", body);
+                float noOrdersTop = canGarrison
+                    ? p.y + (garrisonArmyConversionOpen ? 208f : 166f)
+                    : p.y + 120f;
+                GUI.Label(new Rect(22, noOrdersTop, p.width - 32f, 22), "No enemy armies or cities nearby", body);
                 return;
             }
 
             string hint = null;
             int row = 0;
             float buttonLeft = p.x + 12f;
-            float buttonTop = p.y + 110f;
+            float buttonTop = p.y + (canGarrison ? (garrisonArmyConversionOpen ? 212f : 174f) : 110f);
             float buttonWidth = p.width - 24f;
             foreach (var enemy in enemyArmies)
             {
@@ -1330,15 +1559,20 @@ namespace LuanShi
             }
             foreach (var city in enemyCities)
             {
+                var defensiveArmy = engine.State.ArmyAt(city.X, city.Z);
+                int defensiveArmyTroops = defensiveArmy != null && defensiveArmy.OwnerSeatId == city.OwnerSeatId
+                    ? defensiveArmy.Troops : 0;
+                int effectiveGarrison = city.Garrison + defensiveArmyTroops;
+                int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
                 string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight"
-                    : army.Troops < BalanceConfig.AssaultTroopRatio * city.Garrison
-                        ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio (garrison {city.Garrison})" : null;
+                    : army.Troops < requiredTroops
+                        ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio ({requiredTroops} troops needed)" : null;
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackCity,
-                    army.Id, "Assault " + city.Name, blocked, city.X, city.Z, btn));
+                    army.Id, $"Assault {city.Name} · {army.Troops}/{effectiveGarrison} troops", blocked, city.X, city.Z, btn));
                 row++;
             }
 
-            if (hint != null) GUI.Label(new Rect(22, 166 + row * 38, 308, 22), hint, body);
+            if (hint != null) GUI.Label(new Rect(22, buttonTop + row * 38f + 38f, p.width - 32f, 22), hint, body);
         }
 
         /// <summary>

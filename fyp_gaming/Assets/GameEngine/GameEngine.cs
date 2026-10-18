@@ -16,6 +16,7 @@ namespace LuanShi.Engine
     {
         public readonly GameState State = new GameState();
         public readonly EventLog Log = new EventLog();
+        public Action<string> CombatDebugLogger;
 
         private readonly Random rng;
         private int nextActionId = 1;
@@ -302,6 +303,8 @@ namespace LuanShi.Engine
                 case ActionType.LightenLabor: r = DoLightenLabor(fac, cmd); break;
                 case ActionType.Reclaim: r = DoReclaim(fac, cmd); break;
                 case ActionType.Recruit: r = DoRecruit(fac, cmd); break;
+                case ActionType.ConvertGarrison: r = DoConvertGarrison(fac, cmd); break;
+                case ActionType.GarrisonArmy: r = DoGarrisonArmy(fac, cmd); break;
                 case ActionType.Train: r = DoTrain(fac, cmd); break;
                 case ActionType.Fortify: r = DoFortify(fac, cmd); break;
                 case ActionType.Relief: r = DoRelief(fac, cmd); break;
@@ -402,6 +405,80 @@ namespace LuanShi.Engine
             Emit(fac.SeatId, fac.Controller, "recruit", "owner_and_observers",
                 P("city_id", city.Id, "troops", BalanceConfig.RecruitTroopGain.ToString()), cmd.ActionId);
             return ValidationResult.Success;
+        }
+
+        private ValidationResult DoConvertGarrison(FactionState fac, ActionCommand cmd)
+        {
+            ValidationResult check = OwnCity(fac, cmd, out CityState city);
+            if (!check.Ok) return check;
+            if (cmd.ParamA <= 0 || cmd.ParamA > city.Garrison)
+                return ValidationResult.Fail("troops to convert must be between 1 and the city's garrison");
+
+            int troops = cmd.ParamA;
+            city.Garrison -= troops;
+            var cityArmy = State.ArmyAt(city.X, city.Z);
+            if (cityArmy != null)
+            {
+                if (cityArmy.OwnerSeatId != fac.SeatId)
+                {
+                    city.Garrison += troops;
+                    return ValidationResult.Fail("city is occupied by another faction's army");
+                }
+
+                cityArmy.Troops += troops;
+                Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
+                    P("city_id", city.Id, "army_id", cityArmy.Id, "troops", troops.ToString(), "mode", "merged"),
+                    cmd.ActionId);
+                return ValidationResult.Success;
+            }
+
+            string armyId = NewArmyId(fac.SeatId);
+            var newArmy = new ArmyState
+            {
+                Id = armyId,
+                Name = city.Name + " Army",
+                OwnerSeatId = fac.SeatId,
+                Troops = troops,
+                X = city.X,
+                Z = city.Z,
+            };
+            State.Armies.Add(newArmy);
+            Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
+                P("city_id", city.Id, "army_id", armyId, "troops", troops.ToString(), "mode", "formed"),
+                cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        private ValidationResult DoGarrisonArmy(FactionState fac, ActionCommand cmd)
+        {
+            var army = State.FindArmy(cmd.TargetId);
+            if (army == null) return ValidationResult.Fail("unknown army");
+            if (army.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("army is not yours");
+            if (army.Troops <= 0) return ValidationResult.Fail("army has no troops");
+
+            var city = State.CityAt(army.X, army.Z);
+            if (city == null) return ValidationResult.Fail("army is not inside a city");
+            if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("city is not allied");
+            if (cmd.ParamA <= 0 || cmd.ParamA > army.Troops)
+                return ValidationResult.Fail("troops to garrison must be between 1 and the army's troops");
+
+            int troops = cmd.ParamA;
+            army.Troops -= troops;
+            city.Garrison += troops;
+            if (army.Troops == 0) DestroyArmy(army, "garrisoned", cmd);
+            Emit(fac.SeatId, fac.Controller, "army_garrisoned", "owner_and_observers",
+                P("army_id", cmd.TargetId, "city_id", city.Id, "troops", troops.ToString(),
+                  "remaining_troops", army.Troops.ToString()), cmd.ActionId);
+            return ValidationResult.Success;
+        }
+
+        private string NewArmyId(string seatId)
+        {
+            int number = 1;
+            string id;
+            do { id = "army-" + seatId + "-" + number++; }
+            while (State.FindArmy(id) != null);
+            return id;
         }
 
         /// <summary>D5 練兵: garrison training +1, up to the faction's cap (兵法 L1 raises it, design §9).</summary>
@@ -661,7 +738,7 @@ namespace LuanShi.Engine
                 CheckVictory();
             }
             var towerAtDest = State.WatchTowerAt(tx, tz);
-            if (towerAtDest != null && towerAtDest.IsNeutral)
+            if (towerAtDest != null && towerAtDest.OwnerSeatId != fac.SeatId)
             {
                 towerAtDest.OwnerSeatId = fac.SeatId;
                 Emit(fac.SeatId, fac.Controller, "watch_tower_captured", "public",
@@ -1107,11 +1184,21 @@ namespace LuanShi.Engine
             if (!State.Map.AreAdjacent(army.X, army.Z, defender.X, defender.Z))
                 return ValidationResult.Fail("target army is not adjacent");
 
-            string legitimacy = ApplyAttackReputation(fac, defender.OwnerSeatId, cmd);
-
             int attackerTraining = TrainingOf(fac.SeatId), defenderTraining = TrainingOf(defender.OwnerSeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float defenderResearch = CombatResearchMult(defender.OwnerSeatId);
+            int previewAttackerStrength = Strength(army.Troops, attackerTraining, army.Morale, attackerResearch);
+            int previewDefenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale, defenderResearch);
+            CombatDebugLogger?.Invoke(
+                $"[Combat][Field][Attempt] action={cmd.ActionId} attacker={army.Id} defender={defender.Id} " +
+                $"attacker_strength = troops({army.Troops}) * (1 + training({attackerTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {previewAttackerStrength}; " +
+                $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) = {previewDefenderStrength}; " +
+                $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}");
+
+            string legitimacy = ApplyAttackReputation(fac, defender.OwnerSeatId, cmd);
+
             int attackerBefore = army.Troops, defenderBefore = defender.Troops;
             var roundLog = new StringBuilder();
             int round = 0;
@@ -1122,14 +1209,25 @@ namespace LuanShi.Engine
             {
                 round++;
                 int attackerStart = army.Troops, defenderStart = defender.Troops;
+                int defenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale,
+                                                defenderResearch);
+                int attackerStrength = Strength(army.Troops, attackerTraining, army.Morale,
+                                                attackerResearch);
 
                 // Design §6.2: each side takes enemy 戰力 × CombatLossPerRound that round.
-                int toAttacker = CapLoss(Vary(Strength(defender.Troops, defenderTraining, defender.Morale,
-                                                       defenderResearch)
+                int toAttacker = CapLoss(Vary(defenderStrength
                                               * BalanceConfig.CombatLossPerRound), army.Troops);
-                int toDefender = CapLoss(Vary(Strength(army.Troops, attackerTraining, army.Morale,
-                                                       attackerResearch)
+                int toDefender = CapLoss(Vary(attackerStrength
                                               * BalanceConfig.CombatLossPerRound), defender.Troops);
+
+                CombatDebugLogger?.Invoke(
+                    $"[Combat][Field] action={cmd.ActionId} round={round} attacker={army.Id} defender={defender.Id} " +
+                    $"attacker_strength = troops({army.Troops}) * (1 + training({attackerTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {attackerStrength}; " +
+                    $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) = {defenderStrength}; " +
+                    $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
+                    $"attacker_losses={toAttacker}, defender_losses={toDefender}");
 
                 army.Troops -= toAttacker;
                 defender.Troops -= toDefender;
@@ -1191,15 +1289,42 @@ namespace LuanShi.Engine
             if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
             if (!State.Map.AreAdjacent(army.X, army.Z, city.X, city.Z))
                 return ValidationResult.Fail("target city is not adjacent");
-            if (army.Troops < BalanceConfig.AssaultTroopRatio * city.Garrison)
-                return ValidationResult.Fail(
-                    $"assault needs {BalanceConfig.AssaultTroopRatio}:1 troops (have {army.Troops}, garrison {city.Garrison})");
 
-            string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
+            var defendingArmy = State.ArmyAt(city.X, city.Z);
+            int defendingArmyTroops = defendingArmy != null && defendingArmy.OwnerSeatId == city.OwnerSeatId
+                ? defendingArmy.Troops : 0;
+            int effectiveGarrison = city.Garrison + defendingArmyTroops;
+            int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
+            if (army.Troops < requiredTroops)
+                return ValidationResult.Fail(
+                    $"assault needs {BalanceConfig.AssaultTroopRatio}:1 troops (have {army.Troops}, garrison {effectiveGarrison})");
+
+            if (defendingArmy != null && defendingArmy.OwnerSeatId == city.OwnerSeatId)
+            {
+                int convertedTroops = defendingArmy.Troops;
+                city.Garrison += convertedTroops;
+                State.Armies.Remove(defendingArmy);
+                Emit(city.OwnerSeatId, State.FindFaction(city.OwnerSeatId)?.Controller,
+                    "army_garrisoned", "public",
+                    P("army_id", defendingArmy.Id, "city_id", city.Id,
+                      "troops", convertedTroops.ToString(), "mode", "defensive_assault"), cmd.ActionId);
+            }
 
             int training = TrainingOf(fac.SeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float garrisonResearch = CombatResearchMult(city.OwnerSeatId);
+            int previewGarrisonStrength = GarrisonStrength(city, garrisonResearch);
+            int previewAttackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch);
+            CombatDebugLogger?.Invoke(
+                $"[Combat][Siege][Attempt] action={cmd.ActionId} city={city.Id} army={army.Id} " +
+                $"garrison_strength = garrison_troops({city.Garrison}) * (1 + training({city.Training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) = {previewGarrisonStrength}; " +
+                $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {previewAttackerStrength}; " +
+                $"assault_ratio={BalanceConfig.AssaultTroopRatio}:1, required_troops={BalanceConfig.AssaultTroopRatio * city.Garrison}, " +
+                $"available_troops={army.Troops}");
+            string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
+
             int troopsBefore = army.Troops, garrisonBefore = city.Garrison;
             int garrisonTraining = city.Training, defense = city.Defense;
             var roundLog = new StringBuilder();
@@ -1210,11 +1335,22 @@ namespace LuanShi.Engine
             {
                 round++;
                 int troopsStart = army.Troops;
+                int garrisonStrength = GarrisonStrength(city, garrisonResearch);
+                int attackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch);
 
-                int toArmy = CapLoss(Vary(GarrisonStrength(city, garrisonResearch)
+                int toArmy = CapLoss(Vary(garrisonStrength
                                           * BalanceConfig.CombatLossPerRound), army.Troops);
-                int toGarrison = CapLoss(Vary(Strength(army.Troops, training, army.Morale, attackerResearch)
+                int toGarrison = CapLoss(Vary(attackerStrength
                                               * BalanceConfig.CombatLossPerRound), city.Garrison);
+
+                CombatDebugLogger?.Invoke(
+                    $"[Combat][Siege] action={cmd.ActionId} round={round} city={city.Id} army={army.Id} " +
+                    $"garrison_strength = garrison_troops({city.Garrison}) * (1 + training({city.Training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                    $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) = {garrisonStrength}; " +
+                    $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {attackerStrength}; " +
+                    $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
+                    $"army_losses={toArmy}, garrison_losses={toGarrison}");
 
                 army.Troops -= toArmy;
                 city.Garrison -= toGarrison;
@@ -1245,10 +1381,15 @@ namespace LuanShi.Engine
 
             if (outcome == "captured")
             {
+                string defeatedSeatId = city.OwnerSeatId;
+                var cityArmy = State.ArmyAt(city.X, city.Z);
                 city.OwnerSeatId = fac.SeatId;
                 city.Garrison = 0;
                 city.Morale = BalanceConfig.MoraleMin;    // 佔領後民心歸零 (design §4.3)
                 if (State.ArmyAt(city.X, city.Z) == null) { army.X = city.X; army.Z = city.Z; }   // occupy
+
+                if (cityArmy != null && cityArmy.OwnerSeatId == defeatedSeatId)
+                    RoutArmy(cityArmy, "city_captured", cmd, true);
 
                 AddPrestige(fac, BalanceConfig.PrestigeCityCaptured, "city_captured", cmd);
                 Emit(fac.SeatId, fac.Controller, "city_captured", "public",
@@ -1406,13 +1547,15 @@ namespace LuanShi.Engine
         private static int CapLoss(int loss, int troops) => loss > troops ? troops : loss;
 
         /// <summary>潰散: extra losses, then fall back to the nearest own city — or die trying.</summary>
-        private void RoutArmy(ArmyState army, string cause, ActionCommand cmd)
+        private void RoutArmy(ArmyState army, string cause, ActionCommand cmd, bool allowOccupiedCity = false)
         {
             int extra = (int)(army.Troops * BalanceConfig.CombatRoutExtraLoss);
             army.Troops -= extra;
             if (army.Troops <= 0) { DestroyArmy(army, cause + "_rout", cmd); return; }
 
-            var home = NearestFreeOwnCity(army.OwnerSeatId, army.X, army.Z);
+            var home = allowOccupiedCity
+                ? NearestOwnCity(army.OwnerSeatId, army.X, army.Z)
+                : NearestFreeOwnCity(army.OwnerSeatId, army.X, army.Z);
             if (home == null) { DestroyArmy(army, cause + "_no_retreat", cmd); return; }
 
             int fromX = army.X, fromZ = army.Z;
@@ -1436,6 +1579,19 @@ namespace LuanShi.Engine
                 if (city.OwnerSeatId != seatId) continue;
                 var occupant = State.ArmyAt(city.X, city.Z);
                 if (occupant != null) continue;
+                int distance = Math.Abs(city.X - x) + Math.Abs(city.Z - z);
+                if (distance < bestDistance) { bestDistance = distance; best = city; }
+            }
+            return best;
+        }
+
+        private CityState NearestOwnCity(string seatId, int x, int z)
+        {
+            CityState best = null;
+            int bestDistance = int.MaxValue;
+            foreach (var city in State.Cities)
+            {
+                if (city.OwnerSeatId != seatId) continue;
                 int distance = Math.Abs(city.X - x) + Math.Abs(city.Z - z);
                 if (distance < bestDistance) { bestDistance = distance; best = city; }
             }
