@@ -99,6 +99,8 @@ namespace LuanShi.Engine
         public const string LightenLabor = "lighten_labor"; // Lighten labor D2: target_id = city
         public const string Reclaim = "reclaim";            // Reclaim D3: target_id = city, food yield +ReclaimPctPerUse%
         public const string Recruit = "recruit";            // Recruit D4: target_id = city
+        public const string ConvertGarrison = "convert_garrison"; // Convert garrison: target_id = city, param_a = troops
+        public const string GarrisonArmy = "garrison_army"; // Convert army: target_id = army, param_a = troops
         public const string Train = "train";                // Train D5: target_id = city, Training +1
         public const string Fortify = "fortify";            // Fortify D6: target_id = city, Defense +1
         public const string Relief = "relief";              // Relief D7: target_id = city, morale +ReliefMoraleGain
