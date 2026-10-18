@@ -238,6 +238,7 @@ per-seat false reports).
   failure is public by design — that *is* the §8.3 consequence. Consequence for the thesis: the canonical log
   still holds the full truth (the researcher can read every mission), while each seat's *filtered* log holds
   only what it earned — the human/LLM information symmetry the project needs.
+  *(Superseded in part by ADR-018: the two PR #3 garrison transfers are owner-only too.)*
 - **偵察 as a report, not a leak.** A successful scout writes `FactionState.ScoutedCities` (city id →
   `untilSeason = season + ScoutReportExtraSeasons`), pruned at rollover. `Observe()` adds the city to
   `ScoutedCities` **only when it is not already in sight** — inside the fog radius `Cities` still carries the
@@ -327,3 +328,72 @@ Consequences, in planned phase order (NOT yet implemented — roadmap only):
 
 The scripted controller remains in the game deliberately: it is the **baseline a real player (or LLM)
 should beat**, and the evaluation harness measures exactly that.
+
+## ADR-018 — PR #3 garrison transfers: action shapes, movement state, fog privacy, scope restoration
+**Date:** 2026-10-19 · **Status:** accepted · **Phase:** PR #3 integration (merge `5416365`, fixes `9c6e452`, UI split `6b91dd0`)
+
+PR #3 added garrison ↔ army transfers, watchtower ownership and defensive-siege handling. An independent
+review found four balance constants changed outside the PR's stated scope and several integration defects;
+this ADR records the rulings made while fixing them. **Nothing here changes engine rules beyond what is
+listed**; unresolved design semantics are in OPEN_QUESTIONS 24-27.
+
+- **Balance restored (the PR's description covers only garrison/tower/siege, not economy).**
+  `FogWatchTowerRange` back to **5**, `CityBaseFoodYield` **200**, `StartFood` **500**, and
+  `SpringFoodYieldMult` **0.7** (spring is LOCKED by design §3). The four drifts had silently changed the
+  P6-P8 harness expectations; restoring them returns every prior assertion to green.
+- **Action shapes (the LLM contract, ACTIONS.md §4b).** `convert_garrison`: 1 號令, `target_id` = own city,
+  `param_a` = troops (1..garrison); a new `ArmyState` is **formed** unless an own army already stands on the
+  hex, in which case the troops **merge** into it. `garrison_army`: 1 號令, `target_id` = own army standing
+  in an own city, `param_a` = troops (1..army troops); a full transfer destroys the army. Events:
+  `garrison_converted` (`mode=formed|merged`) and `army_garrisoned` (with `remaining_troops`), both
+  `owner_and_observers`. The transfer event is emitted **before** the full-transfer `army_destroyed` so the
+  replay reads transfer → destruction. Validation happens before any mutation, so a refused command is
+  atomic (the old code deducted first and rolled back).
+- **Movement-state ruling.** The once-per-season movement constraint must survive full and partial garrison
+  round-trips and merges. Minimal canonical state: one boolean, `CityState.GarrisonMarchedThisSeason`
+  ("this garrison has absorbed troops that already marched"). It is set when a marched army transfers in
+  (and when a marched defending army is merged by a siege), inherited by a newly formed army, OR-ed into a
+  merged army, cleared when the garrison empties or the city is captured, and reset in `BeginSeason()`
+  alongside `ArmyState.MarchedThisSeason`. Deliberately **conservative**: a single flag over-restricts a
+  mixed garrison (fresh troops in the same city cannot form a marching army until rollover) but can never
+  let marched troops move twice. Per-troop provenance and morale laundering are OPEN_QUESTIONS 24. The flag
+  is internal rule state and is **not** in the observation JSON; if mid-season snapshots land (ADR-005),
+  they must persist it or a reload could reopen the exploit.
+- **Fog-privacy ruling.** The generic `action` record for these two commands is **owner-only**
+  (`ActionType.IsOwnerOnlyLog`), because `param_a` is an exact troop count and the current UI/log would
+  otherwise publish it to every seat. Their domain events remain `owner_and_observers`, so a seat that can
+  see the city still gets the city/army context. The same pass also wired the **pre-existing ADR-014 rule**
+  for `research` into that set: a tech tree is a seat's secret, yet the generic action was still public and
+  leaked `args.line` — an enforcement gap, not a new design rule. Covert missions keep their owner-only
+  records too. **Every other ordinary action keeps a public `action` record**: the private set is exactly the
+  covert missions, `research`, and the two garrison transfers.
+- **Scripted siege guard.** `ScriptedController`'s `attack_city` planning now computes the same **effective
+  garrison** as the validator (`city.Garrison` + same-owner defending army) while keeping its existing 50%
+  safety margin, so the baseline no longer plans assaults the engine rejects.
+- **Siege integration (as merged; semantics not locked).** A same-owner defending army counts toward the
+  3:1 check and is **merged into the city garrison and removed before the rounds**. On a held assault the
+  troops remain as garrison with no army entity; on capture the combined garrison is zeroed while the old
+  retreat branch is effectively unreachable. Restoration / destruction / rout is a design decision, not an
+  implementation detail → OPEN_QUESTIONS 25. Watchtower capture on march (any tower not owned by the mover)
+  is recorded and public, with no war/trust/prestige consequences → OPEN_QUESTIONS 26; tower existence is
+  always visible in the PR #3 UI → OPEN_QUESTIONS 27.
+- **KingdomDemo organization (`6b91dd0`).** The 2330-line adapter is now seven partial-class files in
+  `Assets/GameUI/Scripts/`, all `public partial class KingdomDemo : MonoBehaviour`:
+  `KingdomDemo.cs` (class contract, **all serialized fields and shared state**, `Start`/`InitGame`),
+  `.Visuals.cs` (markers, tinting, banners, fog), `.Input.cs` (clicks, selection, march, debug hooks),
+  `.TurnFlow.cs` (`SubmitHuman`, seat rotation, rollover), `.Panels.cs` (OnGUI shell, map panels, order
+  buttons), `.Report.cs` (court report, handover/victory screens, formatting) and `.Tabs.cs` (the five tab
+  panels). Members were moved verbatim (1857 code lines before and after, line-multiset equality); the
+  serialized-field block and its order are untouched; `KingdomDemo.cs` keeps its original `.meta` GUID, so
+  the scene reference is unchanged; the six new files have fresh `.meta` GUIDs. This is a structural split,
+  not a redesign — no gameplay, layout or text changes.
+- **Verification.** Headless harness **249 passed / 0 failed** (`/tmp/luanshi-p6`, including the new PR #3
+  regression tests: formation/merge, full/partial round-trips, merge-into-unmoved-army, rollover reset,
+  atomic rejects, event order, fog privacy, scripted siege guard, the restored balance values, and the
+  research generic-action privacy checks). `KingdomDemo` dotnet-builds against Unity 6000.6.2f1 assemblies
+  with **0 warnings / 0 errors** (`/tmp/luanshi-ui-check`, all seven partials included). **Unity editor
+  compile and play-mode verification remain PENDING** — the editor has not been available; no claim is made
+  that the split or the PR #3 UI renders correctly in-engine.
+- **Review items left out of scope here:** siege defensive-merge/capture-retreat semantics, watchtower
+  capture reputation, UI fog policy for towers, and the TBTK `Hex_Highlight` material touched by PR #3 —
+  each needs its own review (OPEN_QUESTIONS 25-27).

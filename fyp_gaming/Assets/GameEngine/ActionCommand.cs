@@ -127,14 +127,20 @@ namespace LuanShi.Engine
             => actionType == Scout || actionType == Rumor || actionType == SowDistrust;
 
         /// <summary>
-        /// Types whose generic `action` record is owner-only: the covert missions, plus the garrison
-        /// transfers, whose `param_a` troop count would otherwise be readable by every seat regardless of
-        /// sight. Their domain events (`garrison_converted` / `army_garrisoned`) stay
-        /// `owner_and_observers`, so a seat that can see the city still gets the context. Every other
-        /// action keeps its public record.
+        /// Types whose generic `action` record is owner-only. Two groups:
+        /// <list type="bullet">
+        /// <item><c>research</c> — ADR-014 already ruled a tech tree secret; its `args.line` must not be
+        /// published, so this enforces that pre-existing privacy rule.</item>
+        /// <item>the covert missions (ADR-015) and the garrison transfers (ADR-018), whose `param_a` troop
+        /// count would otherwise be readable by every seat regardless of sight. Their domain events
+        /// (`garrison_converted` / `army_garrisoned`) stay `owner_and_observers`, so a seat that can see the
+        /// city still gets the context.</item>
+        /// </list>
+        /// Every other action keeps its public record.
         /// </summary>
         public static bool IsOwnerOnlyLog(string actionType)
-            => IsCovert(actionType) || actionType == ConvertGarrison || actionType == GarrisonArmy;
+            => IsCovert(actionType) || actionType == ConvertGarrison || actionType == GarrisonArmy
+            || actionType == Research;
     }
 
     /// <summary>

@@ -51,7 +51,7 @@ JSON object, adding two optional fields:
 | 研究 points per season | **15** (TBD) | `BalanceConfig.ResearchPointsPerSeason`; ×1.25 with 吏治 L4 學堂 → 19; paid at every rollover (`BeginSeason()`), no building income yet |
 | Research line level | 1–5 per line, price 20 / 40 / 70 / 110 / 160 | LOCKED (design §9); `research` costs **1 號令** (TBD — design ch.11 does not price it), §7 |
 | 諜報 mission | **1 號令** + gold (偵察 200 / 散播謠言 500 / 挑撥離間 800, LOCKED design §8.2) | LOCKED (design §11 #30/#32): 偵察/挑撥離間 cost 1 號令; `scout`/`rumor`/`sow_distrust` — §6 |
-| Covert orders | a mission's own `action` record is **owner-only** | ADR-015: only a *failed* mission (`spy_exposed`, public) puts the attacker's name in the world's log |
+| Private `action` records | covert missions, `research`, and the two garrison transfers are **owner-only** | ADR-014 / ADR-015 / ADR-018: a failed mission becomes public via `spy_exposed`; the garrison domain events stay `owner_and_observers`; every other **ordinary** action keeps a public `action` record |
 | Event log | every accepted action emits an event with `visibility` (public / owner_and_observers / owner_only); rejections emit `action_rejected` (owner_only) | CONTROLLER_PROTOCOL §5 |
 | World events (no action behind them) | `season_start`/`season_end`, `city_resolved`, `starvation`, `revolt`, `desertion`, `game_over` — emitted by `BeginSeason()`/`EndSeason()` | P6 §8b: `revolt`/`game_over` public, `desertion` owner-only |
 | Execution | immediate on `Submit()`; economy/combat resolve at season end or per action as specified | |
@@ -84,14 +84,44 @@ deferred behind research. All seven domestic actions emit their event with the v
 
 | # | id | 中文 | CP | Preconditions | Effect | Event | Status |
 |---|---|---|---|---|---|---|---|
-| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6 (冬 ≤ 4, §8b), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下) | `army_moved` (+`city_captured` public) | ✅ |
+| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6 (冬 ≤ 4, §8b), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下); a watchtower on the destination not owned by the mover → **tower captured** too (`watch_tower_captured`, public; no war/trust/威望 consequence yet — OPEN_QUESTIONS 26) | `army_moved` (+`city_captured` public, +`watch_tower_captured` public) | ✅ |
 | M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; 士氣 0 → 潰散 +30% and retreat | `battle_field` public | ✅ |
-| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3:1** (no 器械 in MVP) | **assault only, single resolution** (ADR-010 #4): capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b) | `battle_siege` public (+`city_captured`) | ✅ |
+| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3× effective garrison** (no 器械 in MVP), where **effective garrison = `city.Garrison` + the troops of a same-owner army standing on the city** (PR #3, ADR-018) | **assault only, single resolution** (ADR-010 #4): the same-owner defending army is **merged into the city garrison and removed from `Armies` before the rounds**; capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b). **Post-siege semantics are NOT locked**: a held assault leaves the merged troops as garrison with no army entity, and on capture the combined garrison is zeroed while the old retreat branch is effectively unreachable → OPEN_QUESTIONS 25 | `battle_siege` public (+`city_captured`; defensive merge emits `army_garrisoned` public with `mode=defensive_assault`) | ✅ (integration; restore/rout semantics ❓) |
 | M4 | `massacre` | 屠城 | 0 | just captured a city | instant pacify; `民心 −30` perm, `威望 −20`, all factions' trust −35 | `city_massacred` public | ⏸ (designed §4.3/§7.3, missing from ch.11) |
 | — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ (feeding an army is now a P6 resolution rule, §8b — the 補給 *field* this action restores is still 待決) |
 | — | `ambush` | 設伏 | 1 | forest/hill | first-round dmg ×1.5, 敵士氣−20 | | ⏸ |
 | — | `raid_supply` / `cut_supply` | 劫糧 / 斷補 | 1 | 騎兵 | 補給−40 / 逃兵10%/季 | | ⏸ as actions (need cavalry); the 逃兵 10%/季 **consequence** is live for any unfed army since P6 (§8b) |
 | — | `retreat` / `relieve` | 撤退 / 救援 | 1 | — | 士氣−10 / join ally battle (信任+20, 威望+8) | | ⏸ |
+
+## 4b. 駐軍轉換 Garrison transfers — ✅ PR #3 (ADR-018)
+
+Two 1-號令 commands move troops between a city's garrison and a field army. Both are ordinary
+`ActionCommand`s through `Submit()` — no side channel — and both are logged privately (below).
+
+| # | id | 中文 | CP | `target_id` | `param_a` | Preconditions | Effect | Event |
+|---|---|---|---|---|---|---|---|---|
+| C1 | `convert_garrison` | 徵調駐軍 | **1** | own **city id** | troops to move (1..`city.Garrison`) | own city; no foreign army occupies the hex | `city.Garrison −= n`; if an **own** army stands on the hex → that army's `Troops += n` (**merge**), otherwise a new `ArmyState` is formed at the city (**formation**); the new/merged army's movement state follows the garrison (below) | `garrison_converted` owner_and_observers (`city_id`, `army_id`, `troops`, `mode = formed｜merged`) |
+| C2 | `garrison_army` | 入城駐守 | **1** | own **army id** | troops to move (1..`army.Troops`) | the army currently stands **inside one of the seat's own cities** | `army.Troops −= n`, `city.Garrison += n`; a **full** transfer (army reaches 0) destroys the army; the garrison records the movement state (below) | `army_garrisoned` owner_and_observers (`army_id`, `city_id`, `troops`, `remaining_troops`), emitted **before** the full-transfer `army_destroyed` (public) so replay order reads transfer→destruction |
+
+**Movement bookkeeping ✅ (conservative, ADR-018).** `CityState.GarrisonMarchedThisSeason` is internal
+rule state (not in the observation JSON): the garrison has absorbed troops that already marched this
+season. It is set by `garrison_army` when the army's `MarchedThisSeason` is true (and by the siege
+defensive merge, below), inherited by a **formed** army and OR-ed into a **merged** army, and cleared when
+the garrison empties or the city is captured. It resets in `BeginSeason()` alongside
+`ArmyState.MarchedThisSeason`. Deliberately a single conservative flag: a city that absorbed any marched
+troops treats its whole garrison as movement-spent until rollover. That over-restricts mixed garrisons but
+can never let marched troops move twice; per-troop provenance is OPEN_QUESTIONS 24, and morale laundering
+through a round-trip is explicitly **not** modelled in this pass.
+
+**Fog privacy ✅ (ADR-018).** The generic `action` record for C1/C2 is **owner-only**
+(`ActionType.IsOwnerOnlyLog`): its `param_a` is an exact troop count, which must not reach seats with no
+sight. The domain events above remain `owner_and_observers`, so a seat that can see the city still gets the
+city/army context. The private set is exactly the covert missions (§6), `research` (ADR-014 — the generic
+action leaked `args.line` until this pass, so this is enforcement of the pre-existing rule) and these two
+transfers; every other **ordinary** action keeps a public `action` record.
+
+**Unresolved:** siege restoration/retreat/destruction semantics (OPEN_QUESTIONS 25) and whether mixed
+garrisons should keep conservative movement provenance (OPEN_QUESTIONS 24).
 
 ## 5. 外交 Diplomacy — `target_id` = a **seat** (never a hex); Trust (−100..+100 per ordered pair) + 威望 + Treaty model
 
@@ -116,6 +146,8 @@ deferred behind research. All seven domestic actions emit their event with the v
 | `gift` | recipient seat | `param_a` = gold amount |
 | `declare_war` | seat | — |
 | `break_treaty` | seat | `args.treaty_type` |
+| `convert_garrison` | own **city id** | `param_a` = troops (1..garrison) — §4b |
+| `garrison_army` | own **army id** (standing in an own city) | `param_a` = troops (1..army troops) — §4b |
 | `research` | — | `args.line` ∈ `agri｜military｜espionage｜governance` |
 | `scout` | foreign or neutral **city id** | — (200 金, 諜報 1) |
 | `rumor` | foreign **city id** | — (500 金, 諜報 1; neutral cities refused) |
@@ -147,8 +179,11 @@ failure does nothing and exposes the attacker (§8.3 公開處決 path). Gold is
 
 **Covert logging ✅ (ADR-015):** a mission's generic `action` log entry is **owner-only** for E1-E3, so a
 successful mission never names its author to anyone else; the failure event `spy_exposed` is public and
-names both the attacker and the mission. This is the one place where the "everything is logged" invariant
-(AGENTS.md #4) is satisfied by a private record rather than a public one.
+names both the attacker and the mission. Espionage is not the only private-record case: `research` is
+owner-only by design (ADR-014) and the two garrison transfers are owner-only too (§4b, ADR-018). Both are
+places where the "everything is logged" invariant (AGENTS.md #4) is satisfied by a private record rather
+than a public one — the canonical log still holds the full truth; each seat's filtered log holds only what
+it earned.
 
 **Exposure roll ✅ (simplified §8.3).** `success chance = BalanceConfig.SpyBaseSuccessChance (70%, TBD)
 + 諜報 level × SpySuccessPerLevel (5%, TBD)` → **75/80/85/90/95%** at L1-L5, one seeded roll per mission.
@@ -175,8 +210,8 @@ it is observation-side, not an action, and the thesis needs it.
 
 One action, four lines. `target_id` is unused; `args.line` is required.
 
-| id | 中文 | CP | Cost | Preconditions | Effect | Event | Status |
-|---|---|---|---|---|---|---|---|
+| # | id | 中文 | CP | Cost | Preconditions | Effect | Event | Status |
+|---|---|---|---|---|---|---|---|---|
 | R1 | `research` | 研究 | **1 (TBD)** | `args.line` ∈ `agri｜military｜espionage｜governance` (農政/兵法/諜報/吏治) | `ResearchPoints ≥` the level's price; `level < 5` | level +1, points deducted immediately (20/40/70/110/160, LOCKED design §9); a level's effects are read at the point of use | `research` **owner-only** (`line`, `level`, `cost`, `research_points`) | ✅ |
 
 **Income ✅:** `ResearchPoints += 15` (TBD, design's 「約 15 點／季」) at every season rollover, ×1.25 with
@@ -185,12 +220,12 @@ One action, four lines. `target_id` is unused; `args.line` is required.
 **Level effects — implemented vs deferred (design §9 table).** A level with a deferred effect is still
 **purchasable**: it is progress up the line and unlocks what comes after it.
 
-| Line | L1 | L2 | L3 | L4 | L5 |
-|---|---|---|---|---|---|
-| 農政 agri | ✅ harvest ×1.10 | ⏸ 水利 (drought halving — no 天時 events) | ⏸ 屯田 (D9 自給 30%) | ⏸ 常平倉 (food cap — no cap modelled) | ✅ all harvests ×1.25 (stacks with L1) |
-| 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ⏸ 騎兵 (no unit types) | ⏸ 器械 (no siege weapons) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) |
+| Line | L1 | L2 | L3 | L4 | L5 | Notes |
+|---|---|---|---|---|---|---|
+| 農政 agri | ✅ harvest ×1.10 | ⏸ 水利 (drought halving — no 天時 events) | ⏸ 屯田 (D9 自給 30%) | ⏸ 常平倉 (food cap — no cap modelled) | ✅ all harvests ×1.25 (stacks with L1) | |
+| 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ⏸ 騎兵 (no unit types) | ⏸ 器械 (no siege weapons) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) | |
 | 諜報 espionage | 🟡 細作 → gates `scout`/`rumor` (P8) | 🟡 反諜 → gates `sow_distrust` (P8, TBD); the +10% 境內暴露率 effect is ⏸ | ⏸ 偽報 | ⏸ 諜網 | ⏸ 無間 | L1/L2 are the gates for the three P8 missions (§6); the defensive effects still need 治安/suspicion |
-| 吏治 governance | ✅ tax ×1.10 | ✅ 民心 +5/季 per city | ✅ 叛變機率 −50% (`RevoltChanceMult = 0.5`, synced at rollover) | ✅ research +25% (→19/season) | ✅ 威望 +10 one-time, on purchase |
+| 吏治 governance | ✅ tax ×1.10 | ✅ 民心 +5/季 per city | ✅ 叛變機率 −50% (`RevoltChanceMult = 0.5`, synced at rollover) | ✅ research +25% (→19/season) | ✅ 威望 +10 one-time, on purchase | |
 
 **Timing (ADR-014):** point-of-use effects (harvest, tax, combat, training cap, the 民心 grant) apply as
 soon as the level exists — a level bought before `EndSeason()` already pays that season. The two derived
@@ -229,6 +264,7 @@ game always opens in 春 and always has the same season sequence for a given see
 | Model | Add | Status |
 |---|---|---|
 | `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | ✅ defaults in `BalanceConfig`, 民心 clamps 0–100 |
+| `CityState` | `GarrisonMarchedThisSeason` (bool, internal) | ✅ PR #3 §4b — conservative movement bookkeeping for garrison round-trips; reset at rollover; **not** in the observation JSON |
 | `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
 | `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; **P7 吏治 3 syncs it to 0.5** at rollover (ADR-014) |
 | `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |
@@ -281,3 +317,17 @@ game always opens in 春 and always has the same season sequence for a given see
 >     its author. `scout`/`rumor` target a city id, `sow_distrust` takes a seat pair (§5 shapes table).
 > 18. 偵察 reports are banded (少/中/多) below 諜報 3 and exact at 3+; a report lives for the season it was
 >     taken plus the next one (TBD). No spy entity, no 嫌疑, no 偽造軍報, no 秘密反用, no 巡查/清查.
+
+> **PR #3 additions (2026-10-19, ADR-018 — garrison transfers + integration hardening):**
+> 19. `convert_garrison` (city → army) and `garrison_army` (army → garrison) are **1-號令** commands with
+>     `target_id` = own city / own army and `param_a` = the troop count (§4b). Formation vs merge is decided
+>     by whether an own army already stands on the city hex.
+> 20. Movement is preserved through garrison round-trips with the conservative
+>     `CityState.GarrisonMarchedThisSeason` flag: a marched army cannot be garrisoned and re-formed as a
+>     fresh mover, nor laundered through a merge; reset at rollover.
+> 21. The generic `action` records for the two garrison commands are **owner-only** (their `param_a` is a
+>     troop count); `garrison_converted`/`army_garrisoned` stay `owner_and_observers`. All other actions
+>     keep public `action` records.
+> 22. The four balance constants PR #3 had moved outside its stated scope are restored: watchtower range
+>     **5**, `CityBaseFoodYield` **200**, `StartFood` **500**, `SpringFoodYieldMult` **0.7** (spring is
+>     LOCKED by design §3). The P6-P8 harness baseline returns to green (see ADR-018).

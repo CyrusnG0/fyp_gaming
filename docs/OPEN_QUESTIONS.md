@@ -67,3 +67,30 @@
     scouted, while the engine accepts any city id. That makes 偵察 useful mainly for *keeping* eyes on a
     city (its report outlives the vision radius) rather than for reaching out to an unseen one. Team: add a
     per-seat "known city" memory (last-seen map + names) so agents can be sent into the fog?
+
+## Raised during PR #3 review (2026-10-19)
+
+24. **Morale laundering through full garrison/re-form; mixed-garrison movement provenance.**
+    A full `garrison_army` transfer removes the army, while a later `convert_garrison` forms a new army with
+    the default **60 morale**, so a battered army can use the round-trip to discard its low morale (and,
+    before the fix, gain a fresh movement allowance). The new `CityState.GarrisonMarchedThisSeason` blocks
+    the **movement** half by treating a garrison that absorbed marched troops as movement-spent until
+    rollover — deliberately conservative, so it over-restricts mixed garrisons — but it does not model morale
+    and cannot tell which troops in a mixed garrison have moved. Team: keep the conservative flag, or track
+    per-troop movement provenance? Should morale be preserved through transfers, reset by design, or pay a
+    transfer cost? (Morale laundering is recorded separately from the movement fix by design.)
+25. **Defensive siege merge: what happens to the merged army after a failed/held assault or a capture?**
+    PR #3 merges a same-owner defending army into the city garrison **before** siege resolution and removes
+    the army entity. If the assault fails or the city holds, the troops remain as garrison with no army to
+    command; if the city is captured, `city.Garrison` is zeroed and the old "retreat the defending army"
+    branch is effectively unreachable. Choose the semantics: restore survivors as an army (where?), destroy
+    them with the city, rout them to another city, or treat the merge as permanent? Also decide how losses
+    are attributed between the merged army and the original garrison.
+26. **Watchtower capture consequences.** Marching onto any tower not owned by the mover transfers ownership
+    (public `watch_tower_captured`), including an ally's tower, with no war/trust/prestige consequence.
+    Should taking an enemy tower count as an act of war / 偷襲 (with the derived reputation pricing), taking
+    an ally's tower be priced as betrayal, or is a tower a deniable neutral object?
+27. **Watchtower visibility.** The PR #3 UI always shows tower markers (neutral-tinted when out of sight),
+    while armies are fog-hidden and cities keep only a bare marker (ADR-016). Should tower **existence** be
+    always-visible terrain knowledge (current behaviour), or should towers be fog-hidden like armies
+    (ADR-011's "absent, not redacted" rule)?

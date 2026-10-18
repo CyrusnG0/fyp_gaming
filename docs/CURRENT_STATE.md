@@ -1,9 +1,37 @@
 # CURRENT_STATE.md
 
 > Day-to-day truth of where the project stands. **Update this file at the end of every work session.**
-> Last updated: 2026-10-12
+> Last updated: 2026-10-19
 
 ## Status summary
+
+**2026-10-19: PR #3 (garrison transfers, watchtower ownership, defensive siege) merged and hardened; the UI adapter split into seven partial files; ADR-014's research privacy rule enforced. Headless harness 249/249; Unity gate PENDING (now covers PR #2 + PR #3 + P6-P8 + the split).**
+
+Teammate **PR #3** (`5416365`, head `b78b68e`) added **garrison ↔ army transfers** (`convert_garrison` /
+`garrison_army`, 1 號令 each, `param_a` = troop count), **watchtower ownership** when an army marches onto a
+tower, and a **defensive-siege merge** (a same-owner army standing on the city counts toward the effective
+garrison and joins the garrison before the rounds). Independent review found four balance constants changed
+outside the PR's stated scope plus integration defects; the scoped fixes are `9c6e452` (**ADR-018**):
+the pre-PR economy restored (`CityBaseFoodYield` 200, `StartFood` 500, `SpringFoodYieldMult` 0.7 — spring is
+design-LOCKED — and `FogWatchTowerRange` 5); once-per-season movement preserved through full/partial
+garrison round-trips with the conservative `CityState.GarrisonMarchedThisSeason` flag (reset at rollover,
+not in the observation JSON); the generic `action` records for the two garrison commands made **owner-only**
+(their `param_a` is an exact troop count; their domain events stay `owner_and_observers`); the scripted AI's
+`attack_city` guard now uses the validator's effective garrison; and garrison validation is atomic with the
+transfer event logged before a full-transfer `army_destroyed`. The UI adapter was then split by
+responsibility (`6b91dd0`) into seven `partial class KingdomDemo` files — contract/state/bootstrap +
+`Visuals`, `Input`, `TurnFlow`, `Panels`, `Report`, `Tabs` — members moved verbatim, all serialized fields
+kept in `KingdomDemo.cs` in their original order, and its `.meta` GUID unchanged so the scene reference
+still resolves.
+
+Verification: headless harness **249 passed / 0 failed** (all P6-P8 assertions plus the focused PR #3
+regression tests and the research generic-action privacy checks; determinism replays included); `KingdomDemo`
+dotnet-builds against Unity 6000.6.2f1's managed assemblies with **0 warnings / 0 errors**, all seven
+partials included. **Unity editor compile and
+play-mode verification remain PENDING** — the editor has not been available; no claim is made that the
+split or the PR #3 UI renders correctly in-engine. Unresolved design semantics are **OPEN_QUESTIONS 24-27**
+(morale laundering / mixed-garrison movement provenance; siege restore/rout/destruction; watchtower capture
+consequences; watchtower visibility).
 
 **2026-10-12: PR #2 merged; P6–P8 make the game push back — revolt, desertion, seasons, victory, research, espionage lite. All headless-verified (175 assertions); Unity play-mode gate PENDING (see Known issues).**
 
@@ -77,18 +105,29 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
 - **Smoke round 2 — PASSED**: combat (`battle_field` with `round_log`, the 3:1 siege gate enforced), hotseat handover (陛下請坐 blocker, per-seat fog map) and opaque panels, screenshots `docs/screenshots/smoke2_*.png`.
 - **Smoke round 3 — gate PASSED (`12af419`)**: initialisation is frame-1 synchronous (the old `yield return null` meant an unfocused editor window never initialised the demo at all); scrollbars appear only on overflow; the 史官 panel is content-sized and the report panel hugs its lines.
 - **Docs sync (`6950a78`)**: FEATURES/ACTIONS/CURRENT_STATE aligned with P0-P4, ADR-011/ADR-012 appended, OPEN_QUESTIONS 16-20 added.
+- **PR #3 + integration fixes + UI split (2026-10-19)**: teammate PR #3 (`5416365`) merged garrison
+  transfers (`convert_garrison`/`garrison_army`), watchtower ownership on march and defensive-siege merging;
+  `9c6e452` restored the four out-of-scope balance constants, closed the march-reset exploit with
+  `CityState.GarrisonMarchedThisSeason`, made the garrison `action` records owner-only, fixed the scripted
+  siege guard and hardened validation/event order (ADR-018); `6b91dd0` split `KingdomDemo` into seven
+  responsibility-based partial files without behavioural change. Headless: 249/0; UI dotnet build 0/0.
+  **Unity editor gate still pending.**
 
 ## In progress
 
-- **Unity verification gate PENDING for PR #2 + P6/P7/P8.** Everything since `d4c38d0` is headless-verified
-  only (175 assertions + Unity-assembly dotnet builds). The editor's MCP bridge wedged on 2026-10-11 when
-  the PR #2 merge changed sources under the live editor (compile requested, never completed; assemblies in
-  `Library/ScriptAssemblies/` predate the merge). **Fix: restart the Unity editor** (scene is not dirty),
-  then re-run the gate with the Unity-driving subagent: compile check (assembly timestamps must postdate
-  the merge), play mode, watchtower capture at (6,2), fog overlays present, 研究/諜報 tabs render, victory
-  banner, screenshot `docs/screenshots/pr2_smoke.png`. Lesson recorded: merge git work while Unity is
-  CLOSED, or restart it right after.
-- P5 (LLM adapter) not started — see Next actions.
+- **Unity verification gate PENDING for PR #2 + PR #3 + P6-P8 + the partial split.** Everything since
+  `d4c38d0` is headless-verified only (249 assertions + Unity-assembly dotnet builds). The editor's MCP
+  bridge wedged on 2026-10-11 when the PR #2 merge changed sources under the live editor (compile requested,
+  never completed; assemblies in `Library/ScriptAssemblies/` predate the merge and every later commit).
+  **Fix: restart the Unity editor** (scene is not dirty), then re-run the gate with the Unity-driving
+  subagent: compile check (all seven `KingdomDemo*.cs` partials, assembly timestamps must postdate `6b91dd0`;
+  the scene still references the unchanged `KingdomDemo.cs` GUID), play mode, and check **PR #3 garrison
+  convert/enter in both directions** (formation, merge, full and partial), **defensive siege** (same-owner
+  army merged; effective garrison gate; held vs captured result), watchtower capture at (6,2) and tower tint,
+  fog overlays, the live 研究/諜報 tabs, hotseat handover, victory banner; screenshot
+  `docs/screenshots/pr3_smoke.png`. Lesson recorded: merge git work while Unity is CLOSED, or restart it
+  right after.
+- P5 (LLM-facing controller) not started — see Next actions, Track B.
 
 ## Known integration issues (TBTK ↔ this project)
 
@@ -116,25 +155,38 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
 
 ## Next actions (priority order)
 
-1. **Unity gate for PR #2 + P6-P8** (see In progress) — restart editor, verify, screenshot.
-2. **P5 — controllers** (the FYP core): extract `IPlayerController` (Human/Scripted/LLM,
-   CONTROLLER_PROTOCOL §2) out of KingdomDemo, then build the LLM adapter (observation → prompt → JSON →
-   validate → retry/fallback + `LLMRun` logging) and the HandoverBundle from `Observation` + pending
-   proposals. Two blockers of its own: **the engine's JSON support is writer-only** (`MiniJson` has no
-   parser — a small hand-rolled one is the first engine task), and the provider/model/budget decision is
-   still open (OPEN_QUESTIONS 4). After that: state snapshots and a JSON balance file.
-3. **Professor demo rehearsal** on the smoke-tested build: grow 魏都 (recruit/train with the economy
-   ticking), capture neutral 南城, fight a field battle (戰報 + `round_log`), buy a research level, run a
-   spy mission, propose → accept a treaty, hand the chair to a second human (陛下請坐) to show per-seat fog,
+1. **Unity gate for PR #2 + PR #3 + P6-P8 + the partial split** (see In progress) — restart the editor,
+   compile, play-mode smoke, screenshot.
+2. **Track A — meaningful decision depth (ADR-017 north star).** P9 seeded world variability (map/setup as
+   data + a seeded parameterized generator; the seed stays an explicit experiment parameter — identical
+   seeds for human-vs-LLM, different seeds for robustness) → P10 天時 weather and choice-bearing events →
+   P11 uncertain information / counter-intelligence → P12 multiple victory routes → P13 adaptive LLM
+   opponents. Smallest next step: P9.
+3. **Track B — the LLM-facing interface (P5 core).** Extract `IPlayerController`, then build the LLM
+   adapter as: rules summary + **filtered observation** (`Observation.ToJson()`) + **private memory**
+   (own research/tech state, its own past actions and reasoning) + legal-action list → **strict JSON
+   output** → validate/retry/fallback → `LLMRun` logging; then the HandoverBundle (`Observation` + pending
+   proposals + filtered log). Two blockers of its own: **the engine's JSON support is writer-only**
+   (`MiniJson` has no parser — a small hand-rolled parser is the first engine task), and the
+   provider/model/budget decision is still open (OPEN_QUESTIONS 4). After that: state snapshots (ADR-005)
+   and a JSON balance file.
+4. **Professor demo rehearsal** on the smoke-tested build: grow 魏都 (recruit/train with the economy
+   ticking), capture neutral 南城, deploy a garrison into an army and re-enter it, fight a field battle
+   (戰報 + `round_log`), run a defensive siege, capture the watchtower, buy a research level, run a spy
+   mission, propose → accept a treaty, hand the chair to a second human (陛下請坐) to show per-seat fog,
    and use the JSON feed for the thesis argument that UI clicks and LLM output are the same commands.
-4. **Team: answer `docs/OPEN_QUESTIONS.md`** — items 16-23 (宣戰 vs treaties, 遣使 trust, validator-oracle
-   leak, 民心 25 vs 30, estimation levels, 諜報 gates, exposure trust, known-cities memory), then the
-   blocking Phase 0/1 list (seat count, faction roster, map size, LLM provider/budget, turn order).
+5. **Team: answer `docs/OPEN_QUESTIONS.md`** — items 16-23 (宣戰 vs treaties, 遣使 trust, validator-oracle
+   leak, 民心 25 vs 30, estimation levels, 諜報 gates, exposure trust, known-cities memory) **and the new
+   24-27** (morale laundering / mixed-garrison provenance, siege restore/rout/destruction, watchtower
+   capture consequences, watchtower visibility), then the blocking Phase 0/1 list (seat count, faction
+   roster, map size, LLM provider/budget, turn order).
 
 ## Blockers
 
 - **Unity editor restart needed** (In progress #1) — only the user can do this on their machine.
-- LLM provider/model/budget decision (OPEN_QUESTIONS 4) blocks P5's adapter tail.
+- LLM provider/model/budget decision (OPEN_QUESTIONS 4) blocks Track B's adapter tail.
+- Design decisions pending for garrison/siege/tower semantics (OPEN_QUESTIONS 24-27); the implementation
+  is conservative in the meantime and flags each gap rather than guessing.
 
 ## LuanShi_Demo scene anatomy (as of 2026-09-26)
 
@@ -162,5 +214,15 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
 - The formal report docx lags `docs/`; on conflict, **v1.1 docx + docs/ win**.
 - Game design detail (numbers, tables, 41 actions) in `doc/LuanShi-Game-Design-v1.md`; MVP scope per report §14: 4 seats, 2 maps, 15–20 seasons.
 - The demo's JSON feed + `luanshi_log.jsonl` are the thesis artifact: identical schema for human clicks and (future) LLM output. Keep it that way — no side channels.
-- **Process rule (standing, earned over three smoke rounds):** a change to `KingdomDemo.cs` must pass a **compile check in the editor before the next full smoke round**. A standalone compile of the adapter cannot see Unity-namespace, arity or serialization-attribute errors — CS7036 and the `UnityEngine.Serialization` namespace both slipped through it. Cheap headless pre-checks that do work: `arity_audit.py` (call-site arity vs declaration, including code inside interpolated strings), `external_audit.py` (adapter→engine signatures), `namespace_guard.py` (attribute and fully-qualified-name namespaces), plus a grep for fully-qualified `UnityEngine.*` usages after any adapter edit.
+- **Process rule (standing, earned over three smoke rounds):** a change to the `KingdomDemo*.cs` partials
+  must pass a **compile check in the editor before the next full smoke round**. A standalone compile of the
+  adapter cannot see Unity-namespace, arity or serialization-attribute errors — CS7036 and the
+  `UnityEngine.Serialization` namespace both slipped through it. Cheap headless pre-checks that do work:
+  `arity_audit.py` (call-site arity vs declaration, including code inside interpolated strings),
+  `external_audit.py` (adapter→engine signatures), `namespace_guard.py` (attribute and
+  fully-qualified-name namespaces), plus a grep for fully-qualified `UnityEngine.*` usages after any
+  adapter edit. Current harnesses: `/tmp/luanshi-p6` (engine, 249 assertions) and `/tmp/luanshi-ui-check`
+  (engine + all seven UI partials against Unity assemblies).
+- **`fyp_gaming/Assets/_Recovery.meta` is untracked user state** (left by the editor after a crash) — leave
+  it untracked and do not add it to git.
 - Unity editor restart still pending for `activeInputHandler=Both` (TBTK legacy-input loops broken until then; KingdomDemo UI unaffected).
