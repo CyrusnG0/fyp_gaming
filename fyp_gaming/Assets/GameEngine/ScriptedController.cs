@@ -53,7 +53,12 @@ namespace LuanShi.Engine
                     if (!state.Map.AreAdjacent(army.X, army.Z, city.X, city.Z)) continue;
                     int assaultCost = BalanceConfig.CommandPointCost(ActionType.AttackCity);
                     if (cp < assaultCost) break;
-                    if (army.Troops * 100 < city.Garrison * BalanceConfig.AssaultTroopRatio
+                    // the engine's 3:1 check counts a same-owner army defending the city as garrison, so
+                    // the baseline must see the same effective garrison (with its own safety margin on top)
+                    var defender = state.ArmyAt(city.X, city.Z);
+                    int effectiveGarrison = city.Garrison
+                        + (defender != null && defender.OwnerSeatId == city.OwnerSeatId ? defender.Troops : 0);
+                    if (army.Troops * 100 < effectiveGarrison * BalanceConfig.AssaultTroopRatio
                                                             * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
                     plan.Add(Order(ActionType.AttackCity, seatId, army.Id, "Capture city", city.X, city.Z));
                     cp -= assaultCost;

@@ -125,6 +125,16 @@ namespace LuanShi.Engine
         /// owner-only, so a successful mission never names its author to anyone else.</summary>
         public static bool IsCovert(string actionType)
             => actionType == Scout || actionType == Rumor || actionType == SowDistrust;
+
+        /// <summary>
+        /// Types whose generic `action` record is owner-only: the covert missions, plus the garrison
+        /// transfers, whose `param_a` troop count would otherwise be readable by every seat regardless of
+        /// sight. Their domain events (`garrison_converted` / `army_garrisoned`) stay
+        /// `owner_and_observers`, so a seat that can see the city still gets the context. Every other
+        /// action keeps its public record.
+        /// </summary>
+        public static bool IsOwnerOnlyLog(string actionType)
+            => IsCovert(actionType) || actionType == ConvertGarrison || actionType == GarrisonArmy;
     }
 
     /// <summary>

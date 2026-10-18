@@ -10,9 +10,9 @@ namespace LuanShi.Engine
         public const int CommandPointsPerOrder = 1;       // default 號令 per accepted command (§3 domestic)
         public const int CommandPointsPerAttackCity = 2;  // LOCKED (ACTIONS.md §4 M3): 攻城 costs 2
         public const int ArmyMoveCostPerSeason = 6;       // TBD: total hex-cost an army may spend per season
-        public const int FogWatchTowerRange = 7;          // watchtower vision radius
+        public const int FogWatchTowerRange = 5;          // watchtower vision radius
 
-        public const int CityBaseFoodYield = 800;         // TBD: passive food per owned city per season (pre-開墾)
+        public const int CityBaseFoodYield = 200;         // TBD: passive food per owned city per season (pre-開墾)
 
         public const int TaxLevyAmount = 200;             // TBD: 徵稅 D1 gold gained (design §11 quotes no number)
         public const int TaxLevyMoraleCost = 5;           // LOCKED (design §11): 徵稅 民心 −5
@@ -55,7 +55,7 @@ namespace LuanShi.Engine
         public const float StarvationPopLoss = 0.10f;     // TBD: pop fraction lost when food runs out
 
         public const int StartPopulation = 10000;         // TBD
-        public const int StartFood = 10000;                 // TBD
+        public const int StartFood = 500;                 // TBD
         public const int StartGold = 300;                 // TBD
         public const int StartFieldArmyTroops = 2000;     // TBD
 
@@ -117,7 +117,7 @@ namespace LuanShi.Engine
         // ---- 天時 seasonal modifiers (design §3 「季節對糧食的影響」 table) --------
         // Seasons cycle 春 → 夏 → 秋 → 冬 by (Season − 1) % 4; SeasonReport/observation carry the name.
 
-        public const float SpringFoodYieldMult = 0.8f;    // LOCKED (design §3 table): 春 糧產 ×0.7
+        public const float SpringFoodYieldMult = 0.7f;    // LOCKED (design §3 table): 春 糧產 ×0.7
         public const float SummerFoodYieldMult = 1.0f;    // LOCKED (design §3 table): 夏 糧產 ×1.0
         public const float AutumnFoodYieldMult = 2.0f;    // LOCKED (design §3 table): 秋 糧產 ×2.0 (大收)
         public const float WinterFoodYieldMult = 0.3f;    // LOCKED (design §3 table): 冬 糧產 ×0.3

@@ -45,7 +45,11 @@ namespace LuanShi.Engine
                 // (design §8.2, window TBD), so nothing stale survives a rollover.
                 f.ScoutedCities.RemoveAll(r => r.UntilSeason < State.Season);
             }
-            foreach (var c in State.Cities) c.ReclaimedThisSeason = false;
+            foreach (var c in State.Cities)
+            {
+                c.ReclaimedThisSeason = false;
+                c.GarrisonMarchedThisSeason = false;   // movement resets with the army flags below
+            }
             foreach (var a in State.Armies) a.MarchedThisSeason = false;
             Emit(null, null, "season_start", "public",
                 P("season", State.Season.ToString(),
@@ -327,11 +331,12 @@ namespace LuanShi.Engine
             if (!r.Ok) return Reject(cmd, r.Error);
 
             fac.CommandPoints -= cpCost;
-            // A covert order is logged for its author only (ADR-015): espionage is worth nothing if the
-            // target can read who sent the agent. A failed mission becomes public on its own via
-            // `spy_exposed`; a successful one stays deniable.
+            // Covert missions and garrison troop transfers are logged for their author only: both carry
+            // numbers (an agent's mission, a garrison's size) that must not reach seats without sight.
+            // A failed covert mission becomes public on its own via `spy_exposed`; the garrison domain
+            // events stay owner_and_observers. Every other action keeps its public record.
             Emit(fac.SeatId, fac.Controller, "action",
-                ActionType.IsCovert(cmd.Type) ? "owner_only" : "public",
+                ActionType.IsOwnerOnlyLog(cmd.Type) ? "owner_only" : "public",
                 P("action", cmd.Type, "target_id", cmd.TargetId ?? "",
                   "param_a", cmd.ParamA.ToString(), "param_b", cmd.ParamB.ToString(),
                   "reason", cmd.Reason ?? ""), cmd.ActionId, cmd.Args, cmd.Text);
@@ -414,38 +419,45 @@ namespace LuanShi.Engine
             if (cmd.ParamA <= 0 || cmd.ParamA > city.Garrison)
                 return ValidationResult.Fail("troops to convert must be between 1 and the city's garrison");
 
+            // validate the hex before mutating the garrison: a refused order leaves state untouched
+            var cityArmy = State.ArmyAt(city.X, city.Z);
+            if (cityArmy != null && cityArmy.OwnerSeatId != fac.SeatId)
+                return ValidationResult.Fail("city is occupied by another faction's army");
+
             int troops = cmd.ParamA;
             city.Garrison -= troops;
-            var cityArmy = State.ArmyAt(city.X, city.Z);
+
             if (cityArmy != null)
             {
-                if (cityArmy.OwnerSeatId != fac.SeatId)
-                {
-                    city.Garrison += troops;
-                    return ValidationResult.Fail("city is occupied by another faction's army");
-                }
-
                 cityArmy.Troops += troops;
+                // troops that already marched this season stay movement-spent in the merged army
+                cityArmy.MarchedThisSeason |= city.GarrisonMarchedThisSeason;
                 Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
                     P("city_id", city.Id, "army_id", cityArmy.Id, "troops", troops.ToString(), "mode", "merged"),
                     cmd.ActionId);
-                return ValidationResult.Success;
+            }
+            else
+            {
+                string armyId = NewArmyId(fac.SeatId);
+                var newArmy = new ArmyState
+                {
+                    Id = armyId,
+                    Name = city.Name + " Army",
+                    OwnerSeatId = fac.SeatId,
+                    Troops = troops,
+                    X = city.X,
+                    Z = city.Z,
+                    // a garrison that absorbed a marched army may not mint a fresh mover
+                    MarchedThisSeason = city.GarrisonMarchedThisSeason,
+                };
+                State.Armies.Add(newArmy);
+                Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
+                    P("city_id", city.Id, "army_id", armyId, "troops", troops.ToString(), "mode", "formed"),
+                    cmd.ActionId);
             }
 
-            string armyId = NewArmyId(fac.SeatId);
-            var newArmy = new ArmyState
-            {
-                Id = armyId,
-                Name = city.Name + " Army",
-                OwnerSeatId = fac.SeatId,
-                Troops = troops,
-                X = city.X,
-                Z = city.Z,
-            };
-            State.Armies.Add(newArmy);
-            Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
-                P("city_id", city.Id, "army_id", armyId, "troops", troops.ToString(), "mode", "formed"),
-                cmd.ActionId);
+            // an emptied garrison carries no movement history (the troops live in the army now)
+            if (city.Garrison == 0) city.GarrisonMarchedThisSeason = false;
             return ValidationResult.Success;
         }
 
@@ -458,17 +470,23 @@ namespace LuanShi.Engine
 
             var city = State.CityAt(army.X, army.Z);
             if (city == null) return ValidationResult.Fail("army is not inside a city");
-            if (city.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("city is not allied");
+            if (city.OwnerSeatId != fac.SeatId)
+                return ValidationResult.Fail("army is not inside one of your cities");
             if (cmd.ParamA <= 0 || cmd.ParamA > army.Troops)
                 return ValidationResult.Fail("troops to garrison must be between 1 and the army's troops");
 
             int troops = cmd.ParamA;
             army.Troops -= troops;
             city.Garrison += troops;
-            if (army.Troops == 0) DestroyArmy(army, "garrisoned", cmd);
+            // movement state follows the troops into the garrison (see CityState.GarrisonMarchedThisSeason)
+            if (army.MarchedThisSeason) city.GarrisonMarchedThisSeason = true;
+
+            bool destroyed = army.Troops == 0;
+            // emit the transfer first: a full garrisoning reads "army_garrisoned" then "army_destroyed"
             Emit(fac.SeatId, fac.Controller, "army_garrisoned", "owner_and_observers",
                 P("army_id", cmd.TargetId, "city_id", city.Id, "troops", troops.ToString(),
                   "remaining_troops", army.Troops.ToString()), cmd.ActionId);
+            if (destroyed) DestroyArmy(army, "garrisoned", cmd);
             return ValidationResult.Success;
         }
 
@@ -1303,6 +1321,8 @@ namespace LuanShi.Engine
             {
                 int convertedTroops = defendingArmy.Troops;
                 city.Garrison += convertedTroops;
+                // the merged troops keep their movement state (no free mover is minted from the garrison)
+                if (defendingArmy.MarchedThisSeason) city.GarrisonMarchedThisSeason = true;
                 State.Armies.Remove(defendingArmy);
                 Emit(city.OwnerSeatId, State.FindFaction(city.OwnerSeatId)?.Controller,
                     "army_garrisoned", "public",
@@ -1385,6 +1405,7 @@ namespace LuanShi.Engine
                 var cityArmy = State.ArmyAt(city.X, city.Z);
                 city.OwnerSeatId = fac.SeatId;
                 city.Garrison = 0;
+                city.GarrisonMarchedThisSeason = false;   // the old garrison is gone; new troops start clean
                 city.Morale = BalanceConfig.MoraleMin;    // 佔領後民心歸零 (design §4.3)
                 if (State.ArmyAt(city.X, city.Z) == null) { army.X = city.X; army.Z = city.Z; }   // occupy
 

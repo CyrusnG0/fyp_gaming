@@ -202,6 +202,12 @@ namespace LuanShi.Engine
         public int Gold;
         public int Garrison;
         public bool ReclaimedThisSeason;
+        // Movement bookkeeping (not a game-visible stat): the garrison has absorbed troops that already
+        // marched this season. One conservative flag is enough to stop a marched army from being
+        // garrisoned and re-formed as a "fresh" army (and from laundering movement through a merge);
+        // per-troop provenance would need a much larger model. Reset with the army flags at rollover.
+        // Deliberately kept out of the observation JSON (internal rule state, not city detail).
+        public bool GarrisonMarchedThisSeason;
         public int Morale = BalanceConfig.MoraleStart;          // 民心, range MoraleMin..MoraleMax
         public int Defense = BalanceConfig.DefenseStart;        // 城防, range 0..DefenseMax
         public int Training = BalanceConfig.TrainingStart;      // 練兵, range 0..TrainingMax
