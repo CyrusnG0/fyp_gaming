@@ -19,6 +19,14 @@
 - The team confirmed the ADR-017 complexity roadmap (P9 seeded worlds → P10 weather/events → P11 uncertain
   information → P12 multiple victory routes → P13 adaptive opponents) as the agreed direction for the next
   demo cycle, alongside Track B (the LLM-facing interface).
+- **Design doc completed to v1.1: new §5.4 兵種的生產與訓練 + ADR-019.** The design named the four unit
+  types but never said how they're produced or fed; the team locked three decisions: **one type per
+  army/garrison** (same-type-only merge and garrison transfer), **research-only unlock** (步/弓 free,
+  兵法 2 → 騎， 兵法 3 → 器械； no new buildings), **per-type upkeep** (騎 600/1000/季 vs 步/弓 300).
+  §5.4 also reconciles the 6-vs-8 movement numbers (6 = 步/弓 baseline), prices recruiting per type (all
+  待決), lets 器械 waive the §4.3 3:1 assault requirement, and gives 弓兵 garrisons the 守城 +25%.
+  `recruit` will gain `args.unit_type` (schema v2 already carries `args`); ACTIONS.md D4 and FEATURES.md
+  carry the pointer. **Design only — implementation is future engine work (P14, after P9).**
 
 **2026-10-19: PR #3 (garrison transfers, watchtower ownership, defensive siege) merged and hardened; the UI adapter split into seven partial files; ADR-014's research privacy rule enforced. Headless harness 249/249; Unity gate PENDING (now covers PR #2 + PR #3 + P6-P8 + the split).**
 

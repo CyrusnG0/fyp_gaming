@@ -397,3 +397,34 @@ listed**; unresolved design semantics are in OPEN_QUESTIONS 24-27.
 - **Review items left out of scope here:** siege defensive-merge/capture-retreat semantics, watchtower
   capture reputation, UI fog policy for towers, and the TBTK `Hex_Highlight` material touched by PR #3 —
   each needs its own review (OPEN_QUESTIONS 25-27).
+
+## ADR-019 — Unit types: one type per army, research-only unlock, per-type upkeep
+**Date:** 2026-10-19 · **Status:** accepted · **Source:** team decision (user, 2026-10-19) · **Phase:** design completion (design doc §5.4)
+
+The design doc named the four unit types (§5.3 相剋 table, §6.1 兵種係數) and their research gates
+(§9 兵法 2/3) but never designed how they are produced, paid for, fed, or moved. Three questions were
+put to the team; all three recommended options were chosen:
+
+1. **One type per army.** Every field army and every city garrison has exactly one 兵種 (matching
+   §5.1's single-valued 兵種 field). Merge / garrison-convert only between the same type; 相剋 plays
+   out between armies on the map, not inside a mixed stack. Rationale: keeps the UI slider, the
+   `ActionCommand` schema and combat resolution simple — the LLM contract stays flat.
+2. **Research-only gating.** 步兵/弓兵 available from the start; 騎兵 requires 兵法 2, 攻城器械
+   requires 兵法 3. No new buildings (no 馬廄/工坊) — 兵營's effects apply to all types. Rationale:
+   research lines stay the "national direction" lever; the building system (D8) stays deferred.
+3. **Per-type upkeep.** 步/弓 300 糧/1000/季, 騎 600, 器械 150 (all 待決) — replaces §3's flat 300.
+   Rationale: cavalry becomes an economic decision, not a free upgrade; feeds directly into the
+   養兵壓力 engine.
+
+Design doc amended as **v1.1, new §5.4**: recruit costs per type (步 100 / 弓 150 / 騎 300 /
+器械 500 金 per 1,000, all 待決), movement budgets (步/弓 6 — reconciling §5.1's generic 6 with
+§5.3's 騎 8 — 騎 8, 器械 3), 器械 removes the §4.3 3:1 assault requirement, 弓兵 garrison gives
+the 守城 +25%. 募兵 gains an `args.unit_type` parameter (schema v2 already carries `args`, so no
+schema change); training stays per-army and type-agnostic; re-typing an army = disband and re-recruit
+(training does not transfer).
+
+**Implementation status: design only — no engine work in this commit.** The current engine has a
+single troop count with no types; 兵法 L2/L3 remain purchasable-but-deferred until the type system
+lands. When implemented, this is P14 engine work (after P9): `ArmyState.UnitType` +
+`CityState.GarrisonType`, per-type recruit costs/upkeep/movement in `BalanceConfig`, type-aware
+相剋 in the combat resolver, and the 募兵 UI gaining a type picker.
