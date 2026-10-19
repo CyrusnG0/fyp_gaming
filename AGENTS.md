@@ -58,6 +58,7 @@ This project is worked on across many sessions by different agents and two stude
 - Unity project: `fyp_gaming/` — open with Unity 6000.6.2f1. Do not edit `Library/`, `Temp/`, `Logs/`.
 - TBTK3 source under `Assets/TBTK/` is third-party: subclass/extend, don't patch in place.
 - Game rules go in the pure C# engine (`GameEngine/`), never in MonoBehaviours, UI, or LLM prompts.
+- **Write in modules, not monoliths.** Never grow a file past ~400 lines by appending to it. New responsibilities get their own file: engine features become a new class/partial in `GameEngine/` (e.g. `GameEngine.Research.cs`), UI features a new `KingdomDemo.<Area>.cs` partial (see ADR-018 for the existing seven-file split: contract/state, Visuals, Input, TurnFlow, Panels, Tabs, Report). Shared serialized fields stay in `KingdomDemo.cs`; behaviour-only helpers go in the partial that owns the feature. When you add a partial, create its `.meta` with a fresh GUID and never touch another file's `.meta`.
 - LLM API keys: environment variables or untracked local config only. Never commit secrets.
 - Commit messages: conventional commits (`feat:`, `fix:`, `docs:`, …).
 

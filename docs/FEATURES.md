@@ -66,7 +66,7 @@
 | Feature | Status | Notes |
 |---|---|---|
 | Map view: zoom/pan, terrain, cities, armies, fog mask | 🟡 | terrain/cities/banners/camera done (2D fake-3D, ADR-008); units outside the current seat's observation are hidden (ADR-011), but there is no terrain fog *mask* |
-| Nation/city/army panels + action menu (legal actions only) | ✅ | city panel: D1-D7 + 民心/開墾/城防/訓練 + **convert garrison** (slider + confirm); army panel: 士氣 + 攻擊/攻城 against adjacent enemies + **enter city garrison** (slider + confirm); CP cost on every label, greyed with a reason. Garrison controls are headless-verified; Unity gate pending |
+| Nation/city/army panels + action menu (legal actions only) | ✅ | city panel: D1-D7 + 民心/開墾/城防/訓練 + **convert garrison** (slider + confirm); army panel: 士氣 + 攻擊/攻城 against adjacent enemies + **enter city garrison** (slider + confirm); CP cost on every label — pluralized "(0 order) / (1 order) / (2 orders)" via one `OrderCost` helper reading `BalanceConfig`, greyed with a reason. Garrison controls are headless-verified; Unity gate pending |
 | KingdomDemo structure (partial classes) | ✅ | `6b91dd0`: seven responsibility-based partials under `Assets/GameUI/Scripts/` — `KingdomDemo.cs` (contract + serialized state + bootstrap), `.Visuals.cs`, `.Input.cs`, `.TurnFlow.cs`, `.Panels.cs`, `.Report.cs`, `.Tabs.cs`. Members moved verbatim (1857 code lines both sides); `KingdomDemo.cs` keeps its original `.meta` GUID, new partials have fresh GUIDs. Headless compile only — **editor compile pending** |
 | 朝報 / 朝議 / 史官 screens | 🟡 | per-seat filtered 朝報 (city lines, 戰報, 外交 news) + filtered 史官 tab; 朝議 not yet |
 | Concept tab bar （內政/外交/諜報/研究 live) | ✅ | all four tabs are live: 內政, 外交, 諜報 (P8, ADR-015) and 研究 (P7, ADR-014); 史官 renders the real log |

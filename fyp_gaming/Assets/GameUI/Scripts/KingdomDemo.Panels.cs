@@ -231,7 +231,7 @@ namespace LuanShi
                 var convertRect = new Rect(rightButtonLeft, buttonTop + 114f, buttonWidth, 34);
                 var previousEnabled = GUI.enabled;
                 GUI.enabled = city.Garrison > 0;
-                if (GUI.Button(convertRect, "Convert garrison 1 order", btn))
+                if (GUI.Button(convertRect, "Convert garrison " + OrderCostSuffix(ActionType.ConvertGarrison), btn))
                 {
                     garrisonConversionOpen = true;
                     garrisonConversionCityId = city.Id;
@@ -289,6 +289,16 @@ namespace LuanShi
             }
         }
 
+        /// <summary>Cost label for one action: "1 order", "2 orders" (singular for 0 and 1).</summary>
+        static string OrderCost(string type)
+        {
+            int cost = BalanceConfig.CommandPointCost(type);
+            return cost + (cost >= 2 ? " orders" : " order");
+        }
+
+        /// <summary>Parenthesized cost suffix for an order button: "(1 order)", "(2 orders)", "(0 order)".</summary>
+        static string OrderCostSuffix(string type) => "(" + OrderCost(type) + ")";
+
         /// <summary>
         /// One order button. It always submits a real ActionCommand through SubmitHuman and shows the
         /// action's order cost from BalanceConfig; the engine stays the only authority, so a stale hint
@@ -299,7 +309,7 @@ namespace LuanShi
             Dictionary<string, string> args = null, string text = null, System.Action onSubmitted = null)
         {
             bool available = blockedReason == null;
-            string buttonText = $"{label} {BalanceConfig.CommandPointCost(type)} order";
+            string buttonText = $"{label} {OrderCostSuffix(type)}";
             r.width = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
             var prev = GUI.enabled;
             GUI.enabled = available;
@@ -349,7 +359,7 @@ namespace LuanShi
             {
                 if (!garrisonArmyConversionOpen)
                 {
-                    if (GUI.Button(new Rect(p.x + 12f, p.y + 124f, p.width - 24f, 34), "Convert troops (1 order)", btn))
+                    if (GUI.Button(new Rect(p.x + 12f, p.y + 124f, p.width - 24f, 34), "Convert troops " + OrderCostSuffix(ActionType.GarrisonArmy), btn))
                         garrisonArmyConversionOpen = true;
                 }
                 else

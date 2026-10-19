@@ -5,6 +5,21 @@
 
 ## Status summary
 
+**2026-10-19 (later): order-cost labels pluralized; modularity rule added; Track A roadmap confirmed by the team.**
+
+- Every order-cost label now renders through one helper pair in `KingdomDemo.Panels.cs` (`OrderCost` /
+  `OrderCostSuffix`): **"(0 order)" / "(1 order)" / "(2 orders)"** — singular for 0 and 1, plural for 2+.
+  All labels read `BalanceConfig.CommandPointCost(type)` (including the two garrison buttons, previously
+  hardcoded "1 order"), so UI text can never drift from the validator. The domestic tab's cost rows and help
+  text use the same helper. `249/0` headless; UI dotnet build 0/0.
+- **AGENTS.md gained a modularity rule**: no file grows past ~400 lines by appending; new responsibilities
+  get their own file (engine feature → new class/partial in `GameEngine/`; UI feature → new
+  `KingdomDemo.<Area>.cs` partial; serialized fields stay in `KingdomDemo.cs`; new partials get fresh `.meta`
+  GUIDs).
+- The team confirmed the ADR-017 complexity roadmap (P9 seeded worlds → P10 weather/events → P11 uncertain
+  information → P12 multiple victory routes → P13 adaptive opponents) as the agreed direction for the next
+  demo cycle, alongside Track B (the LLM-facing interface).
+
 **2026-10-19: PR #3 (garrison transfers, watchtower ownership, defensive siege) merged and hardened; the UI adapter split into seven partial files; ADR-014's research privacy rule enforced. Headless harness 249/249; Unity gate PENDING (now covers PR #2 + PR #3 + P6-P8 + the split).**
 
 Teammate **PR #3** (`5416365`, head `b78b68e`) added **garrison ↔ army transfers** (`convert_garrison` /

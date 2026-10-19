@@ -75,13 +75,13 @@ namespace LuanShi
             // so this panel cannot drift from what the engine actually charges.
             string[] live =
             {
-                $"Tax      costs {BalanceConfig.CommandPointsPerOrder} order  Gold +{BalanceConfig.TaxLevyAmount}, morale -{BalanceConfig.TaxLevyMoraleCost}",
-                $"Lighten labor  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
-                $"Reclaim  costs {BalanceConfig.CommandPointsPerOrder} order  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
-                $"Recruit  costs {BalanceConfig.CommandPointsPerOrder} order  Gold -{BalanceConfig.RecruitGoldCost}, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
-                $"Train    costs {BalanceConfig.CommandPointsPerOrder} order  Training +1 (cap {MyTrainingCap()})",
-                $"Fortify  costs {BalanceConfig.CommandPointsPerOrder} order  Defense +1 (cap {BalanceConfig.DefenseMax})",
-                $"Relief   costs {BalanceConfig.CommandPointsPerOrder} order  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
+                $"Tax      costs {OrderCost(ActionType.LevyTax)}  Gold +{BalanceConfig.TaxLevyAmount}, morale -{BalanceConfig.TaxLevyMoraleCost}",
+                $"Lighten labor  costs {OrderCost(ActionType.LightenLabor)}  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
+                $"Reclaim  costs {OrderCost(ActionType.Reclaim)}  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
+                $"Recruit  costs {OrderCost(ActionType.Recruit)}  Gold -{BalanceConfig.RecruitGoldCost}, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
+                $"Train    costs {OrderCost(ActionType.Train)}  Training +1 (cap {MyTrainingCap()})",
+                $"Fortify  costs {OrderCost(ActionType.Fortify)}  Defense +1 (cap {BalanceConfig.DefenseMax})",
+                $"Relief   costs {OrderCost(ActionType.Relief)}  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
             };
             foreach (var row in live)
             {
@@ -105,7 +105,7 @@ namespace LuanShi
             y += 10;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
                 $"Select one of our cities, then issue orders from the city panel on the left; unavailable buttons are grey.\n" +
-                $"Select one of our armies to start a field battle against an adjacent enemy (1 order), or assault an enemy city ({BalanceConfig.CommandPointsPerAttackCity} orders, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).", body);
+                $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).", body);
         }
 
         void DrawDiplomacyPanel(Rect p, GUIStyle body)
