@@ -78,7 +78,7 @@ namespace LuanShi
                 $"Tax      costs {OrderCost(ActionType.LevyTax)}  Gold +{BalanceConfig.TaxLevyAmount}, morale -{BalanceConfig.TaxLevyMoraleCost}",
                 $"Lighten labor  costs {OrderCost(ActionType.LightenLabor)}  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
                 $"Reclaim  costs {OrderCost(ActionType.Reclaim)}  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
-                $"Recruit  costs {OrderCost(ActionType.Recruit)}  Gold -{BalanceConfig.RecruitGoldCost}, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
+                $"Recruit  costs {OrderCost(ActionType.Recruit)}  Gold -{UnitTypes.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Archer, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Cavalry, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Siege, BalanceConfig.RecruitTroopGain)} by type, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
                 $"Train    costs {OrderCost(ActionType.Train)}  Training +1 (cap {MyTrainingCap()})",
                 $"Fortify  costs {OrderCost(ActionType.Fortify)}  Defense +1 (cap {BalanceConfig.DefenseMax})",
                 $"Relief   costs {OrderCost(ActionType.Relief)}  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
@@ -497,8 +497,8 @@ namespace LuanShi
                     switch (level)
                     {
                         case 1: return $"Drill — training cap +{BalanceConfig.ResearchMilTrainingCapBonus} (now {BalanceConfig.TrainingCap(1)})";
-                        case 2: return "Cavalry unlock (deferred: no unit types)";
-                        case 3: return "Siege engines unlock (deferred: no 器械)";
+                        case 2: return "Cavalry unlock — 騎兵 can be recruited (300 gold/1,000, 8 move, double upkeep)";
+                        case 3: return "Siege engines unlock — 攻城器械 can be recruited (500 gold/1,000, waives the 3:1 assault)";
                         case 4: return $"Art of war — combat power ×{1f + BalanceConfig.ResearchMilCombatBonus:F2}";
                         case 5: return "Command — general coefficient +0.2 (deferred: no generals)";
                     }

@@ -43,15 +43,38 @@ namespace LuanShi.Engine
         public const int TrustMin = -100;
         public const int TrustMax = 100;
 
-        public const int RecruitGoldCost = 200;           // TBD: 募兵 D4 cost
         public const int RecruitPopCost = 1000;           // TBD: population drawn into service
         public const int RecruitTroopGain = 1000;         // TBD: garrison troops gained
+
+        // ---- 兵種 unit types (design §5.4 table, ADR-019) -----------------------
+        // Per 1,000 troops. 步/弓 are free at start; 騎 needs 兵法 2, 器械 needs 兵法 3 (§9).
+
+        public const int RecruitGoldCostInfantry = 100;   // TBD (design §5.4): 步兵 per 1,000
+        public const int RecruitGoldCostArcher = 150;     // TBD (design §5.4): 弓兵 per 1,000
+        public const int RecruitGoldCostCavalry = 300;    // TBD (design §5.4): 騎兵 per 1,000
+        public const int RecruitGoldCostSiege = 500;      // TBD (design §5.4): 攻城器械 per 1,000
+        public const int MarchPointsCavalry = 8;          // TBD (design §5.4): 騎兵 8 hex/season
+        public const int MarchPointsSiege = 3;            // TBD (design §5.4): 攻城器械 3 hex/season
+        public const int CavalryResearchLevel = 2;        // LOCKED (design §9 兵法 2): 騎兵解鎖
+        public const int SiegeResearchLevel = 3;          // LOCKED (design §9 兵法 3): 攻城器械解鎖
+
+        // Food per troop per season, following the design's 300/300/600/150 per 1,000 (§5.4)
+        // scaled to this model's per-troop convention (0.1 = 100 per 1,000).
+        public const float FoodPerTroopInfantry = 0.1f;   // TBD (design §5.4): 步兵
+        public const float FoodPerTroopArcher = 0.1f;     // TBD (design §5.4): 弓兵
+        public const float FoodPerTroopCavalry = 0.2f;    // TBD (design §5.4): 騎兵 600/1,000 (double)
+        public const float FoodPerTroopSiege = 0.05f;     // TBD (design §5.4): 器械 150/1,000
+
+        // 相剋 (design §5.3 / §6.1): 步>弓, 騎>步, 弓>騎; 器械 is weak in field battles.
+        public const float UnitCounterBonus = 1.3f;       // LOCKED (design §5.3/§6.1: 0.8–1.3)
+        public const float UnitCounterPenalty = 0.8f;     // LOCKED (design §5.3/§6.1)
+        public const float SiegeFieldPenalty = 0.5f;      // TBD: 器械 in a field battle
+        public const float ArcherSiegeDefenseBonus = 1.25f; // LOCKED (design §5.3/§5.4: 守城 +25%)
 
         public const float PopGrowthRate = 0.05f;         // TBD: per-season population growth
         public const float PopGrowthVariance = 0.02f;     // TBD: seeded random +/- on growth
         public const float TaxGoldPerPop = 0.01f;         // TBD: gold per citizen per season
         public const float FoodPerPop = 0.02f;            // TBD: food eaten per citizen per season
-        public const float FoodPerGarrisonTroop = 0.1f;   // TBD: food eaten per garrison troop
         public const float StarvationPopLoss = 0.10f;     // TBD: pop fraction lost when food runs out
 
         public const int StartPopulation = 10000;         // TBD
@@ -147,8 +170,11 @@ namespace LuanShi.Engine
         }
 
         /// <summary>Effective per-army hex budget this season: 冬 marches at WinterMarchBudgetMult (§10.1 嚴冬).</summary>
-        public static int MarchBudget(int season)
-            => (int)(ArmyMoveCostPerSeason * (IsWinter(season) ? WinterMarchBudgetMult : 1f));
+        public static int MarchBudget(int season, string unitType)
+            => (int)(UnitTypes.MovePoints(unitType) * (IsWinter(season) ? WinterMarchBudgetMult : 1f));
+
+        /// <summary>Infantry baseline (design §5.1: 6 hex/season); callers with an army should pass its type.</summary>
+        public static int MarchBudget(int season) => MarchBudget(season, UnitTypes.Infantry);
 
         // ---- 民變 revolt (design §4.1「民心 0–100；低於 25 有民變風險」+ §10.2「產出停擺」) ----
 
@@ -161,7 +187,7 @@ namespace LuanShi.Engine
 
         // Design gives armies a 補給 0–100 field that hits 0 away from home ("歸零則每季逃兵", §5.1) and
         // prices 斷補 at 10%/season (§6.3). MVP simplification: no 補給 field — an army eats
-        // Troops × FoodPerGarrisonTroop per season out of its faction's food; failing that, it deserts.
+        // Troops × UnitTypes.FoodPerTroop(army.UnitType) per season out of its faction's food; failing that, it deserts.
         public const float DesertionTroopLossPct = 0.10f;  // LOCKED (design §6.3 斷補): 逃兵 10%/季
         public const int DesertionMoraleLoss = 15;         // TBD: 士氣 lost with the deserters (design silent)
 

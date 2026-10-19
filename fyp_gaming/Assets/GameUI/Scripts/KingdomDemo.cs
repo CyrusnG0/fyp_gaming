@@ -92,6 +92,7 @@ namespace LuanShi
         // selection & UI state
         private CityState selCity;
         private ArmyState selArmy;
+        private string recruitUnitType = UnitTypes.Infantry;   // type picker in the city panel (ADR-019)
         private bool garrisonConversionOpen;
         private string garrisonConversionCityId;
         private int garrisonConversionAmount;

@@ -25,13 +25,17 @@ namespace LuanShi
 
         string FieldSummary(EventRecord rec)
                 => $"Field battle, {rec.Payload["rounds"]} rounds: {SeatShort(rec.Payload["attacker_seat_id"])}" +
-                    $" {rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} vs. " +
+                    $"（{UnitTypeIn(rec, "attacker_unit_type")}） {rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} vs. " +
                $"{SeatShort(rec.Payload["defender_seat_id"])}" +
-                    $" {rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
+                    $"（{UnitTypeIn(rec, "defender_unit_type")}） {rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
 
         string SiegeSummary(EventRecord rec)
                 => $"Siege of {CityName(rec.Payload["city_id"])} for {rec.Payload["rounds"]} rounds: " +
-                    $"attacker {rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}, garrison {rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
+                    $"attacker（{UnitTypeIn(rec, "attacker_unit_type")}） {rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}, " +
+                    $"garrison（{UnitTypeIn(rec, "garrison_unit_type")}） {rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
+
+        static string UnitTypeIn(EventRecord rec, string key)
+            => rec.Payload.TryGetValue(key, out string type) ? UnitTypes.Label(type) : "?";
 
         string CityName(string cityId)
         {
@@ -236,7 +240,9 @@ namespace LuanShi
             foreach (var kv in payload)
             {
                 if (sb.Length > 0) sb.Append(' ');
-                sb.Append(kv.Key).Append('=').Append(kv.Value);
+                string value = (kv.Key == "unit_type" || kv.Key == "garrison_type")
+                    ? UnitTypes.Label(kv.Value) : kv.Value;
+                sb.Append(kv.Key).Append('=').Append(value);
             }
             return sb.ToString();
         }

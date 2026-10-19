@@ -53,12 +53,14 @@ namespace LuanShi.Engine
                     if (!state.Map.AreAdjacent(army.X, army.Z, city.X, city.Z)) continue;
                     int assaultCost = BalanceConfig.CommandPointCost(ActionType.AttackCity);
                     if (cp < assaultCost) break;
-                    // the engine's 3:1 check counts a same-owner army defending the city as garrison, so
-                    // the baseline must see the same effective garrison (with its own safety margin on top)
+                    // the engine's 3:1 check counts a same-owner army defending the city as garrison; a siege
+                    // army waives it entirely (design §4.3), so mirror that before applying the margin
+                    bool siegeWaiver = UnitTypes.WaivesAssaultRatio(army.UnitType);
                     var defender = state.ArmyAt(city.X, city.Z);
                     int effectiveGarrison = city.Garrison
                         + (defender != null && defender.OwnerSeatId == city.OwnerSeatId ? defender.Troops : 0);
-                    if (army.Troops * 100 < effectiveGarrison * BalanceConfig.AssaultTroopRatio
+                    if (!siegeWaiver
+                        && army.Troops * 100 < effectiveGarrison * BalanceConfig.AssaultTroopRatio
                                                             * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
                     plan.Add(Order(ActionType.AttackCity, seatId, army.Id, "Capture city", city.X, city.Z));
                     cp -= assaultCost;
@@ -83,7 +85,7 @@ namespace LuanShi.Engine
             foreach (var city in cities)
             {
                 if (cp <= 0) break;
-                if (city.Gold >= BalanceConfig.RecruitGoldCost) continue;
+                if (city.Gold >= UnitTypes.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain)) continue;
                 if (city.Morale - BalanceConfig.TaxLevyMoraleCost < BalanceConfig.MoraleYieldPenaltyThreshold) continue;
                 plan.Add(Order(ActionType.LevyTax, seatId, city.Id, "Treasury is empty"));
                 cp--;
@@ -99,14 +101,29 @@ namespace LuanShi.Engine
                 cp--;
             }
 
-            // 募兵: reinforce the capital if the treasury allows.
+            // 募兵: reinforce the capital if the treasury allows. Match the garrison's type (one type per
+            // garrison, ADR-019); with 兵法 2 and a comfortable treasury an empty garrison recruits 騎兵
+            // every other season — a readable baseline, not a strategy.
             if (cp > 0 && cities.Count > 0)
             {
                 var capital = cities[0];
-                if (capital.Gold >= BalanceConfig.RecruitGoldCost
+                string recruitType;
+                if (capital.Garrison > 0)
+                    recruitType = UnitTypes.Normalize(capital.GarrisonType);
+                else if (fac.ResearchLevel(ResearchLine.Military) >= BalanceConfig.CavalryResearchLevel
+                         && state.Season % 2 == 0
+                         && capital.Gold >= 2 * BalanceConfig.RecruitGoldCostCavalry)
+                    recruitType = UnitTypes.Cavalry;
+                else
+                    recruitType = UnitTypes.Infantry;
+
+                int recruitCost = UnitTypes.RecruitGoldCost(recruitType, BalanceConfig.RecruitTroopGain);
+                if (fac.ResearchLevel(ResearchLine.Military) >= UnitTypes.RequiredMilitaryLevel(recruitType)
+                    && capital.Gold >= recruitCost
                     && capital.Population >= BalanceConfig.RecruitPopCost)
                 {
-                    plan.Add(Order(ActionType.Recruit, seatId, capital.Id, "Expand and prepare the army"));
+                    plan.Add(Order(ActionType.Recruit, seatId, capital.Id, "Expand and prepare the army",
+                        args: new Dictionary<string, string> { { "unit_type", recruitType } }));
                     cp--;
                 }
             }
@@ -150,7 +167,7 @@ namespace LuanShi.Engine
                 {
                     CityState target = null;
                     int bestCost = int.MaxValue;
-                    int budget = BalanceConfig.MarchBudget(state.Season);   // 冬 行軍 ×0.7 (design §10.1)
+                    int budget = BalanceConfig.MarchBudget(state.Season, best.UnitType);   // type-aware (design §5.4)
                     foreach (var c in state.Cities)
                     {
                         if (!c.IsNeutral) continue;

@@ -201,6 +201,7 @@ namespace LuanShi.Engine
         public int Food;
         public int Gold;
         public int Garrison;
+        public string GarrisonType = UnitTypes.Infantry;   // 兵種 (design §5.4/ADR-019): one type per garrison
         public bool ReclaimedThisSeason;
         // Movement bookkeeping (not a game-visible stat): the garrison has absorbed troops that already
         // marched this season. One conservative flag is enough to stop a marched army from being
@@ -228,6 +229,7 @@ namespace LuanShi.Engine
             sb.Append(",\"food\":").Append(MiniJson.Num(Food));
             sb.Append(",\"gold\":").Append(MiniJson.Num(Gold));
             sb.Append(",\"garrison\":").Append(MiniJson.Num(Garrison));
+            sb.Append(",\"garrison_type\":").Append(MiniJson.Str(GarrisonType));
             sb.Append(",\"morale\":").Append(MiniJson.Num(Morale));
             sb.Append(",\"defense\":").Append(MiniJson.Num(Defense));
             sb.Append(",\"training\":").Append(MiniJson.Num(Training));
@@ -243,6 +245,7 @@ namespace LuanShi.Engine
         public string Name;
         public string OwnerSeatId;
         public int Troops;
+        public string UnitType = UnitTypes.Infantry;   // 兵種 (design §5.4/ADR-019): one type per army
         public int X, Z;
         public bool MarchedThisSeason;
         public int Morale = BalanceConfig.ArmyMoraleStart;   // 士氣, range MoraleMin..MoraleMax; 0 = 潰散
@@ -255,6 +258,7 @@ namespace LuanShi.Engine
             sb.Append(",\"name\":").Append(MiniJson.Str(Name));
             sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
             sb.Append(",\"troops\":").Append(MiniJson.Num(Troops));
+            sb.Append(",\"unit_type\":").Append(MiniJson.Str(UnitType));
             sb.Append(",\"x\":").Append(MiniJson.Num(X));
             sb.Append(",\"z\":").Append(MiniJson.Num(Z));
             sb.Append(",\"morale\":").Append(MiniJson.Num(Morale));

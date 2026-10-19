@@ -100,7 +100,7 @@ namespace LuanShi.Engine
                                   * BalanceConfig.ResearchFoodYieldMult(agriLevel));
                 city.Food += harvest;
                 int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
-                                + city.Garrison * BalanceConfig.FoodPerGarrisonTroop);
+                                + city.Garrison * UnitTypes.FoodPerTroop(city.GarrisonType));
                 city.Food -= eaten;
 
                 string note = null;
@@ -148,6 +148,7 @@ namespace LuanShi.Engine
                     P("city_id", city.Id, "pop", city.Population.ToString(),
                       "food", city.Food.ToString(), "gold", city.Gold.ToString(),
                       "garrison", city.Garrison.ToString(),
+                      "garrison_type", city.GarrisonType,
                       "morale", city.Morale.ToString(),
                       "reclaim_pct", city.ReclaimPct.ToString()), null);
             }
@@ -185,13 +186,13 @@ namespace LuanShi.Engine
         /// <summary>
         /// One army's seasonal ration (design §5.1 補給 down → desert, §6.3 斷補 10%/季).
         /// Simplification (documented in ADR-013): 補給 0–100 and distance-from-home are not modelled.
-        /// The army eats Troops × FoodPerGarrisonTroop; the city it stands on pays first, the faction's
+        /// The army eats Troops × UnitTypes.FoodPerTroop(army.UnitType); the city it stands on pays first, the faction's
         /// other cities cover the rest in proportion to their stores. A faction pool that cannot cover
         /// the whole ration feeds nobody — the army deserts instead of eating a fraction.
         /// </summary>
         private void ResolveArmySupply(ArmyState army)
         {
-            int need = (int)(army.Troops * BalanceConfig.FoodPerGarrisonTroop);
+            int need = (int)(army.Troops * UnitTypes.FoodPerTroop(army.UnitType));
             if (need <= 0) return;
 
             if (FoodPoolOf(army.OwnerSeatId) < need)
@@ -399,16 +400,34 @@ namespace LuanShi.Engine
         {
             ValidationResult check = OwnCity(fac, cmd, out CityState city);
             if (!check.Ok) return check;
-            if (city.Gold < BalanceConfig.RecruitGoldCost)
-                return ValidationResult.Fail($"not enough gold (needs {BalanceConfig.RecruitGoldCost})");
+
+            string rawType = Arg(cmd, "unit_type");
+            string unitType = string.IsNullOrEmpty(rawType) ? UnitTypes.Infantry : rawType;
+            if (!UnitTypes.IsValid(unitType))
+                return ValidationResult.Fail($"unknown unit_type '{unitType}'");
+
+            int requiredMilitary = UnitTypes.RequiredMilitaryLevel(unitType);
+            if (fac.ResearchLevel(ResearchLine.Military) < requiredMilitary)
+                return ValidationResult.Fail($"{unitType} needs Military {requiredMilitary} research");
+
+            string garrisonType = UnitTypes.Normalize(city.GarrisonType);
+            if (city.Garrison > 0 && garrisonType != unitType)
+                return ValidationResult.Fail(
+                    $"garrison is {garrisonType}; recruit the same type or empty the garrison first");
+
+            int goldCost = UnitTypes.RecruitGoldCost(unitType, BalanceConfig.RecruitTroopGain);
+            if (city.Gold < goldCost)
+                return ValidationResult.Fail($"not enough gold (needs {goldCost})");
             if (city.Population < BalanceConfig.RecruitPopCost)
                 return ValidationResult.Fail($"not enough population (needs {BalanceConfig.RecruitPopCost})");
 
-            city.Gold -= BalanceConfig.RecruitGoldCost;
+            city.Gold -= goldCost;
             city.Population -= BalanceConfig.RecruitPopCost;
             city.Garrison += BalanceConfig.RecruitTroopGain;
+            city.GarrisonType = unitType;      // an empty garrison adopts the recruited type
             Emit(fac.SeatId, fac.Controller, "recruit", "owner_and_observers",
-                P("city_id", city.Id, "troops", BalanceConfig.RecruitTroopGain.ToString()), cmd.ActionId);
+                P("city_id", city.Id, "troops", BalanceConfig.RecruitTroopGain.ToString(),
+                  "unit_type", unitType), cmd.ActionId);
             return ValidationResult.Success;
         }
 
@@ -424,6 +443,12 @@ namespace LuanShi.Engine
             if (cityArmy != null && cityArmy.OwnerSeatId != fac.SeatId)
                 return ValidationResult.Fail("city is occupied by another faction's army");
 
+            // one type per army and per garrison (ADR-019): a merge only works between the same type
+            string garrisonType = UnitTypes.Normalize(city.GarrisonType);
+            if (cityArmy != null && UnitTypes.Normalize(cityArmy.UnitType) != garrisonType)
+                return ValidationResult.Fail(
+                    $"unit types differ (garrison {garrisonType}, army {UnitTypes.Normalize(cityArmy.UnitType)})");
+
             int troops = cmd.ParamA;
             city.Garrison -= troops;
 
@@ -433,7 +458,8 @@ namespace LuanShi.Engine
                 // troops that already marched this season stay movement-spent in the merged army
                 cityArmy.MarchedThisSeason |= city.GarrisonMarchedThisSeason;
                 Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
-                    P("city_id", city.Id, "army_id", cityArmy.Id, "troops", troops.ToString(), "mode", "merged"),
+                    P("city_id", city.Id, "army_id", cityArmy.Id, "troops", troops.ToString(),
+                      "mode", "merged", "unit_type", garrisonType),
                     cmd.ActionId);
             }
             else
@@ -445,6 +471,7 @@ namespace LuanShi.Engine
                     Name = city.Name + " Army",
                     OwnerSeatId = fac.SeatId,
                     Troops = troops,
+                    UnitType = garrisonType,      // a formed army inherits the garrison's type
                     X = city.X,
                     Z = city.Z,
                     // a garrison that absorbed a marched army may not mint a fresh mover
@@ -452,7 +479,8 @@ namespace LuanShi.Engine
                 };
                 State.Armies.Add(newArmy);
                 Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
-                    P("city_id", city.Id, "army_id", armyId, "troops", troops.ToString(), "mode", "formed"),
+                    P("city_id", city.Id, "army_id", armyId, "troops", troops.ToString(),
+                      "mode", "formed", "unit_type", garrisonType),
                     cmd.ActionId);
             }
 
@@ -475,9 +503,17 @@ namespace LuanShi.Engine
             if (cmd.ParamA <= 0 || cmd.ParamA > army.Troops)
                 return ValidationResult.Fail("troops to garrison must be between 1 and the army's troops");
 
+            // one type per army and per garrison (ADR-019); an empty garrison adopts the army's type
+            string armyType = UnitTypes.Normalize(army.UnitType);
+            if (city.Garrison > 0 && UnitTypes.Normalize(city.GarrisonType) != armyType)
+                return ValidationResult.Fail(
+                    $"unit types differ (garrison {UnitTypes.Normalize(city.GarrisonType)}, army {armyType})");
+
+            bool garrisonWasEmpty = city.Garrison == 0;
             int troops = cmd.ParamA;
             army.Troops -= troops;
             city.Garrison += troops;
+            if (garrisonWasEmpty) city.GarrisonType = armyType;
             // movement state follows the troops into the garrison (see CityState.GarrisonMarchedThisSeason)
             if (army.MarchedThisSeason) city.GarrisonMarchedThisSeason = true;
 
@@ -485,7 +521,7 @@ namespace LuanShi.Engine
             // emit the transfer first: a full garrisoning reads "army_garrisoned" then "army_destroyed"
             Emit(fac.SeatId, fac.Controller, "army_garrisoned", "owner_and_observers",
                 P("army_id", cmd.TargetId, "city_id", city.Id, "troops", troops.ToString(),
-                  "remaining_troops", army.Troops.ToString()), cmd.ActionId);
+                  "remaining_troops", army.Troops.ToString(), "unit_type", armyType), cmd.ActionId);
             if (destroyed) DestroyArmy(army, "garrisoned", cmd);
             return ValidationResult.Success;
         }
@@ -736,7 +772,7 @@ namespace LuanShi.Engine
             if (cityAtDest != null && !cityAtDest.IsNeutral && cityAtDest.OwnerSeatId != fac.SeatId)
                 return ValidationResult.Fail("enemy city — battle is beyond this demo");
 
-            int budget = BalanceConfig.MarchBudget(State.Season);   // 冬 行軍 ×0.7 (design §3/§10.1 嚴冬)
+            int budget = BalanceConfig.MarchBudget(State.Season, army.UnitType);   // type-aware (design §5.4)
             int cost = State.Map.PathCost(army.X, army.Z, tx, tz, budget);
             if (cost < 0) return ValidationResult.Fail(
                 $"destination out of reach this season (max cost {budget})");
@@ -1205,14 +1241,21 @@ namespace LuanShi.Engine
             int attackerTraining = TrainingOf(fac.SeatId), defenderTraining = TrainingOf(defender.OwnerSeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float defenderResearch = CombatResearchMult(defender.OwnerSeatId);
-            int previewAttackerStrength = Strength(army.Troops, attackerTraining, army.Morale, attackerResearch);
-            int previewDefenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale, defenderResearch);
+            string attackerType = UnitTypes.Normalize(army.UnitType);
+            string defenderType = UnitTypes.Normalize(defender.UnitType);
+            float attackerTypeMult = UnitTypes.FieldCombatMultiplier(attackerType, defenderType);
+            float defenderTypeMult = UnitTypes.FieldCombatMultiplier(defenderType, attackerType);
+            int previewAttackerStrength = Strength(army.Troops, attackerTraining, army.Morale,
+                                                   attackerResearch, attackerTypeMult);
+            int previewDefenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale,
+                                                   defenderResearch, defenderTypeMult);
             CombatDebugLogger?.Invoke(
                 $"[Combat][Field][Attempt] action={cmd.ActionId} attacker={army.Id} defender={defender.Id} " +
                 $"attacker_strength = troops({army.Troops}) * (1 + training({attackerTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {previewAttackerStrength}; " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {previewAttackerStrength}; " +
                 $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) = {previewDefenderStrength}; " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) * type_mult({defenderTypeMult}) = {previewDefenderStrength}; " +
+                $"attacker_type={attackerType}, defender_type={defenderType}, " +
                 $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}");
 
             string legitimacy = ApplyAttackReputation(fac, defender.OwnerSeatId, cmd);
@@ -1228,9 +1271,9 @@ namespace LuanShi.Engine
                 round++;
                 int attackerStart = army.Troops, defenderStart = defender.Troops;
                 int defenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale,
-                                                defenderResearch);
+                                                defenderResearch, defenderTypeMult);
                 int attackerStrength = Strength(army.Troops, attackerTraining, army.Morale,
-                                                attackerResearch);
+                                                attackerResearch, attackerTypeMult);
 
                 // Design §6.2: each side takes enemy 戰力 × CombatLossPerRound that round.
                 int toAttacker = CapLoss(Vary(defenderStrength
@@ -1241,9 +1284,9 @@ namespace LuanShi.Engine
                 CombatDebugLogger?.Invoke(
                     $"[Combat][Field] action={cmd.ActionId} round={round} attacker={army.Id} defender={defender.Id} " +
                     $"attacker_strength = troops({army.Troops}) * (1 + training({attackerTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {attackerStrength}; " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {attackerStrength}; " +
                     $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) = {defenderStrength}; " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) * type_mult({defenderTypeMult}) = {defenderStrength}; " +
                     $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
                     $"attacker_losses={toAttacker}, defender_losses={toDefender}");
 
@@ -1278,6 +1321,7 @@ namespace LuanShi.Engine
             Emit(fac.SeatId, fac.Controller, "battle_field", "public",
                 P("attacker_army_id", army.Id, "defender_army_id", defender.Id,
                   "attacker_seat_id", fac.SeatId, "defender_seat_id", defender.OwnerSeatId,
+                  "attacker_unit_type", attackerType, "defender_unit_type", defenderType,
                   "attacker_troops_before", attackerBefore.ToString(), "defender_troops_before", defenderBefore.ToString(),
                   "attacker_troops_after", army.Troops.ToString(), "defender_troops_after", defender.Troops.ToString(),
                   "attacker_losses", (attackerBefore - army.Troops).ToString(),
@@ -1308,40 +1352,52 @@ namespace LuanShi.Engine
             if (!State.Map.AreAdjacent(army.X, army.Z, city.X, city.Z))
                 return ValidationResult.Fail("target city is not adjacent");
 
+            string attackerType = UnitTypes.Normalize(army.UnitType);
+            bool siegeWaiver = UnitTypes.WaivesAssaultRatio(attackerType);
             var defendingArmy = State.ArmyAt(city.X, city.Z);
             int defendingArmyTroops = defendingArmy != null && defendingArmy.OwnerSeatId == city.OwnerSeatId
                 ? defendingArmy.Troops : 0;
             int effectiveGarrison = city.Garrison + defendingArmyTroops;
             int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
-            if (army.Troops < requiredTroops)
+            if (!siegeWaiver && army.Troops < requiredTroops)
                 return ValidationResult.Fail(
-                    $"assault needs {BalanceConfig.AssaultTroopRatio}:1 troops (have {army.Troops}, garrison {effectiveGarrison})");
+                    $"assault needs {BalanceConfig.AssaultTroopRatio}:1 troops (have {army.Troops}, garrison {effectiveGarrison}) or a siege army");
 
             if (defendingArmy != null && defendingArmy.OwnerSeatId == city.OwnerSeatId)
             {
                 int convertedTroops = defendingArmy.Troops;
+                bool garrisonWasEmpty = city.Garrison == 0;
                 city.Garrison += convertedTroops;
+                // one type per garrison (ADR-019): an empty garrison adopts the defender's type; a
+                // non-empty one keeps its own (the merge normalises rather than mixing — see the P14 report)
+                if (garrisonWasEmpty) city.GarrisonType = UnitTypes.Normalize(defendingArmy.UnitType);
                 // the merged troops keep their movement state (no free mover is minted from the garrison)
                 if (defendingArmy.MarchedThisSeason) city.GarrisonMarchedThisSeason = true;
                 State.Armies.Remove(defendingArmy);
                 Emit(city.OwnerSeatId, State.FindFaction(city.OwnerSeatId)?.Controller,
                     "army_garrisoned", "public",
                     P("army_id", defendingArmy.Id, "city_id", city.Id,
-                      "troops", convertedTroops.ToString(), "mode", "defensive_assault"), cmd.ActionId);
+                      "troops", convertedTroops.ToString(), "mode", "defensive_assault",
+                      "unit_type", UnitTypes.Normalize(defendingArmy.UnitType)), cmd.ActionId);
             }
 
+            string garrisonType = UnitTypes.Normalize(city.GarrisonType);
             int training = TrainingOf(fac.SeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float garrisonResearch = CombatResearchMult(city.OwnerSeatId);
-            int previewGarrisonStrength = GarrisonStrength(city, garrisonResearch);
-            int previewAttackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch);
+            float attackerTypeMult = 1f;      // no siege-attacker 相剋 in the locked P14 scope
+            float garrisonTypeMult = UnitTypes.SiegeDefenseMultiplier(garrisonType);
+            int previewGarrisonStrength = GarrisonStrength(city, garrisonResearch, garrisonTypeMult);
+            int previewAttackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch,
+                                                   attackerTypeMult);
             CombatDebugLogger?.Invoke(
                 $"[Combat][Siege][Attempt] action={cmd.ActionId} city={city.Id} army={army.Id} " +
                 $"garrison_strength = garrison_troops({city.Garrison}) * (1 + training({city.Training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) = {previewGarrisonStrength}; " +
+                $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) * type_mult({garrisonTypeMult}) = {previewGarrisonStrength}; " +
                 $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {previewAttackerStrength}; " +
-                $"assault_ratio={BalanceConfig.AssaultTroopRatio}:1, required_troops={BalanceConfig.AssaultTroopRatio * city.Garrison}, " +
+                $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {previewAttackerStrength}; " +
+                $"attacker_type={attackerType}, garrison_type={garrisonType}, siege_waiver={siegeWaiver}, " +
+                $"assault_ratio={BalanceConfig.AssaultTroopRatio}:1, required_troops={requiredTroops}, " +
                 $"available_troops={army.Troops}");
             string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
 
@@ -1355,8 +1411,9 @@ namespace LuanShi.Engine
             {
                 round++;
                 int troopsStart = army.Troops;
-                int garrisonStrength = GarrisonStrength(city, garrisonResearch);
-                int attackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch);
+                int garrisonStrength = GarrisonStrength(city, garrisonResearch, garrisonTypeMult);
+                int attackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch,
+                                                attackerTypeMult);
 
                 int toArmy = CapLoss(Vary(garrisonStrength
                                           * BalanceConfig.CombatLossPerRound), army.Troops);
@@ -1366,9 +1423,9 @@ namespace LuanShi.Engine
                 CombatDebugLogger?.Invoke(
                     $"[Combat][Siege] action={cmd.ActionId} round={round} city={city.Id} army={army.Id} " +
                     $"garrison_strength = garrison_troops({city.Garrison}) * (1 + training({city.Training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                    $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) = {garrisonStrength}; " +
+                    $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) * type_mult({garrisonTypeMult}) = {garrisonStrength}; " +
                     $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
-                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) = {attackerStrength}; " +
+                    $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {attackerStrength}; " +
                     $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
                     $"army_losses={toArmy}, garrison_losses={toGarrison}");
 
@@ -1390,6 +1447,7 @@ namespace LuanShi.Engine
             Emit(fac.SeatId, fac.Controller, "battle_siege", "public",
                 P("city_id", city.Id, "army_id", army.Id,
                   "attacker_seat_id", fac.SeatId, "defender_seat_id", city.OwnerSeatId,
+                  "attacker_unit_type", attackerType, "garrison_unit_type", garrisonType,
                   "garrison_before", garrisonBefore.ToString(), "garrison_after", city.Garrison.ToString(),
                   "troops_before", troopsBefore.ToString(), "troops_after", army.Troops.ToString(),
                   "army_losses", (troopsBefore - army.Troops).ToString(),
@@ -1522,23 +1580,25 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Design §6.1 戰力, reduced to the fields the MVP has: troops, 訓練 and 士氣, times the acting
-        /// faction's research multiplier (兵法 L4 兵法 +15%, design §9 — a faction-side bonus, so the
+        /// Design §6.1 戰力, reduced to the fields the MVP has: troops, 訓練, 士氣 and 兵種相剋, times the
+        /// acting faction's research multiplier (兵法 L4 兵法 +15%, design §9 — a faction-side bonus, so the
         /// opposite side of one battle can be fighting at a different multiplier).
         /// </summary>
-        private static int Strength(int troops, int training, int morale, float researchMult)
+        private static int Strength(int troops, int training, int morale, float researchMult, float typeMult)
             => (int)(troops
                    * (1f + training * BalanceConfig.CombatTrainingBonusPerLevel)
                    * (BalanceConfig.CombatMoraleFloor + morale / BalanceConfig.CombatMoraleScale)
-                   * researchMult);
+                   * researchMult
+                   * typeMult);
 
-        /// <summary>A city's garrison strength: 訓練 plus the 城防 multiplier (design §4.1/§6.1),
-        /// times its owner's 兵法 L4 research multiplier.</summary>
-        private static int GarrisonStrength(CityState city, float researchMult)
+        /// <summary>A city's garrison strength: 訓練 plus the 城防 multiplier (design §4.1/§6.1), times its
+        /// owner's 兵法 L4 research multiplier and the 弓兵 守城 bonus (design §5.3/§5.4).</summary>
+        private static int GarrisonStrength(CityState city, float researchMult, float typeMult)
             => (int)(city.Garrison
                    * (1f + city.Training * BalanceConfig.CombatTrainingBonusPerLevel)
                    * (1f + city.Defense * BalanceConfig.CombatDefenseBonusPerLevel)
-                   * researchMult);
+                   * researchMult
+                   * typeMult);
 
         /// <summary>The 兵法 L4 戰力 multiplier of one seat (1.0 without the research).</summary>
         private float CombatResearchMult(string seatId)

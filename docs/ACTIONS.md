@@ -45,7 +45,7 @@ JSON object, adding two optional fields:
 |---|---|---|
 | Command points (號令) per season | **5** (LOCKED, ADR-010 #1) | `BalanceConfig.CommandPointsPerSeason`; D1-D7/M1/M2/P4-P6 cost 1, M3 攻城 costs 2, 遣使/提案/回覆 cost 0 |
 | 遣使 / 提案 / 回覆 (talk, propose, reply) | **0 CP** | design §11: 說話永遠免費 |
-| Move points per army per season | 6 (cavalry 8 ⏸) | terrain cost via Dijkstra; **冬 ×0.7 ✅** (`BalanceConfig.MarchBudget`, P6 §8b) |
+| Move points per army per season | 步/弓 **6**, 騎 **8**, 械 **3** (design §5.4) | terrain cost via Dijkstra; **冬 ×0.7** ✅; type-aware `BalanceConfig.MarchBudget(season, unitType)` (ADR-019; the UI highlight and the validator share the call) |
 | Once-per-season flags | per city （開墾…) / per army (marched) | reset in `BeginSeason()` |
 | Seasonal harvest multiplier | 春 ×0.7 · 夏 ×1.0 · 秋 ×2.0 · 冬 ×0.3 | applied to every city's harvest at `EndSeason()` ✅ (P6 §8b); seasons cycle 春→夏→秋→冬 by `(Season−1) % 4` |
 | 研究 points per season | **15** (TBD) | `BalanceConfig.ResearchPointsPerSeason`; ×1.25 with 吏治 L4 學堂 → 19; paid at every rollover (`BeginSeason()`), no building income yet |
@@ -65,7 +65,7 @@ JSON object, adding two optional fields:
 | D1 | `levy_tax` | 徵稅 | 1 | — | — | `Gold += TaxLevyAmount (TBD 200)`; `民心 −5` | `tax_levied` public | ✅ |
 | D2 | `lighten_labor` | 輕徭 | 1 | `Gold −LightenLaborGoldCost (TBD 100)` | enough gold | `民心 +8` | `labor_lightened` | ✅ |
 | D3 | `reclaim` | 開墾 | 1 | — | `ReclaimPct < +60%` cap, once per city per season | city food yield `+15%` (cumulative, stored as `ReclaimPct`) | `land_reclaimed` | ✅ (renamed from `farm`, ADR-010 #2) |
-| D4 | `recruit` | 募兵 | 1 | 200 金， 1000 人口 | enough both | `Garrison += 1000` | `recruit` | ✅ — **unit types (design §5.4, ADR-019)**: gains `args.unit_type` ∈ `infantry\|archer\|cavalry\|siege` with per-type cost/upkeep/movement; type stored on garrison/army. ⏸ not yet implemented |
+| D4 | `recruit` | 募兵 | 1 | **per type** (TBD, design §5.4): 步 100 / 弓 150 / 騎 300 / 械 500 金 per 1,000, plus 1000 人口 | enough gold + population; **騎 兵法 2 / 械 兵法 3**; a non-empty garrison must match its 兵種 | `Garrison += 1000` of `args.unit_type` (default `infantry`); an empty garrison adopts the type | `recruit` **owner_and_observers** (`city_id`, `troops`, `unit_type`) | ✅ (P14, ADR-019) |
 | D5 | `train` | 練兵 | 1 | — | `Training < 5` | `Training +1` (city garrison; +10% combat per level, §6.1) | `troops_trained` | ✅ |
 | D6 | `fortify` | 修城 | 1 | — | `城防 < 5` | `城防 +1` (defender 戰力 +15%/級, §4.1) | `city_fortified` | ✅ |
 | D7 | `relief` | 賑災 | 1 | `糧 −ReliefFoodCost (TBD 300)` | enough food | `民心 +15` | `disaster_relieved` | ✅ |
@@ -84,9 +84,9 @@ deferred behind research. All seven domestic actions emit their event with the v
 
 | # | id | 中文 | CP | Preconditions | Effect | Event | Status |
 |---|---|---|---|---|---|---|---|
-| M1 | `march` | 行軍 | 1/軍 | path cost ≤ 6 (冬 ≤ 4, §8b), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下); a watchtower on the destination not owned by the mover → **tower captured** too (`watch_tower_captured`, public; no war/trust/威望 consequence yet — OPEN_QUESTIONS 26) | `army_moved` (+`city_captured` public, +`watch_tower_captured` public) | ✅ |
-| M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; 士氣 0 → 潰散 +30% and retreat | `battle_field` public | ✅ |
-| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3× effective garrison** (no 器械 in MVP), where **effective garrison = `city.Garrison` + the troops of a same-owner army standing on the city** (PR #3, ADR-018) | **assault only, single resolution** (ADR-010 #4): the same-owner defending army is **merged into the city garrison and removed from `Armies` before the rounds**; capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b). **Post-siege semantics are NOT locked**: a held assault leaves the merged troops as garrison with no army entity, and on capture the combined garrison is zeroed while the old retreat branch is effectively unreachable → OPEN_QUESTIONS 25 | `battle_siege` public (+`city_captured`; defensive merge emits `army_garrisoned` public with `mode=defensive_assault`) | ✅ (integration; restore/rout semantics ❓) |
+| M1 | `march` | 行軍 | 1/軍 | path cost ≤ the army's **type budget** (步/弓 6, 騎 8, 械 3; 冬 ×0.7 — §4c), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下); a watchtower on the destination not owned by the mover → **tower captured** too (`watch_tower_captured`, public; no war/trust/威望 consequence yet — OPEN_QUESTIONS 26) | `army_moved` (+`city_captured` public, +`watch_tower_captured` public) | ✅ |
+| M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; **兵種相剋** ×1.3 / ×0.8, and 攻城器械 in the field ×0.5 (§5.3/§4c); 士氣 0 → 潰散 +30% and retreat | `battle_field` public (payload includes both `unit_type`s) | ✅ |
+| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3× effective garrison** **unless the army is 攻城器械** (design §4.3 "或器械"); effective garrison = `city.Garrison` + a same-owner army standing on the city (PR #3, ADR-018) | **assault only, single resolution** (ADR-010 #4): the same-owner defending army is **merged into the city garrison and removed from `Armies` before the rounds**; an **弓兵 garrison defends at ×1.25** (§5.3/§5.4); capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b). **Post-siege semantics are NOT locked**: a held assault leaves the merged troops as garrison with no army entity, and on capture the combined garrison is zeroed while the old retreat branch is effectively unreachable → OPEN_QUESTIONS 25 | `battle_siege` public (+`city_captured`; defensive merge emits `army_garrisoned` public with `mode=defensive_assault`) | ✅ (integration; restore/rout semantics ❓) |
 | M4 | `massacre` | 屠城 | 0 | just captured a city | instant pacify; `民心 −30` perm, `威望 −20`, all factions' trust −35 | `city_massacred` public | ⏸ (designed §4.3/§7.3, missing from ch.11) |
 | — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ (feeding an army is now a P6 resolution rule, §8b — the 補給 *field* this action restores is still 待決) |
 | — | `ambush` | 設伏 | 1 | forest/hill | first-round dmg ×1.5, 敵士氣−20 | | ⏸ |
@@ -100,8 +100,8 @@ Two 1-號令 commands move troops between a city's garrison and a field army. Bo
 
 | # | id | 中文 | CP | `target_id` | `param_a` | Preconditions | Effect | Event |
 |---|---|---|---|---|---|---|---|---|
-| C1 | `convert_garrison` | 徵調駐軍 | **1** | own **city id** | troops to move (1..`city.Garrison`) | own city; no foreign army occupies the hex | `city.Garrison −= n`; if an **own** army stands on the hex → that army's `Troops += n` (**merge**), otherwise a new `ArmyState` is formed at the city (**formation**); the new/merged army's movement state follows the garrison (below) | `garrison_converted` owner_and_observers (`city_id`, `army_id`, `troops`, `mode = formed｜merged`) |
-| C2 | `garrison_army` | 入城駐守 | **1** | own **army id** | troops to move (1..`army.Troops`) | the army currently stands **inside one of the seat's own cities** | `army.Troops −= n`, `city.Garrison += n`; a **full** transfer (army reaches 0) destroys the army; the garrison records the movement state (below) | `army_garrisoned` owner_and_observers (`army_id`, `city_id`, `troops`, `remaining_troops`), emitted **before** the full-transfer `army_destroyed` (public) so replay order reads transfer→destruction |
+| C1 | `convert_garrison` | 徵調駐軍 | **1** | own **city id** | troops to move (1..`city.Garrison`) | own city; no foreign army occupies the hex; an own army on the hex must be the **same 兵種** | `city.Garrison −= n`; if an **own** army stands on the hex → that army's `Troops += n` (**merge**, same type only), otherwise a new `ArmyState` is formed at the city (**formation**, inherits the garrison's 兵種); the new/merged army's movement state follows the garrison (below) | `garrison_converted` owner_and_observers (`city_id`, `army_id`, `troops`, `mode = formed｜merged`, `unit_type`) |
+| C2 | `garrison_army` | 入城駐守 | **1** | own **army id** | troops to move (1..`army.Troops`) | the army currently stands **inside one of the seat's own cities**, and its 兵種 matches the garrison's (an **empty** garrison adopts the army's type) | `army.Troops −= n`, `city.Garrison += n`; a **full** transfer (army reaches 0) destroys the army; the garrison records the movement state (below) | `army_garrisoned` owner_and_observers (`army_id`, `city_id`, `troops`, `remaining_troops`, `unit_type`), emitted **before** the full-transfer `army_destroyed` (public) so replay order reads transfer→destruction |
 
 **Movement bookkeeping ✅ (conservative, ADR-018).** `CityState.GarrisonMarchedThisSeason` is internal
 rule state (not in the observation JSON): the garrison has absorbed troops that already marched this
@@ -122,6 +122,25 @@ transfers; every other **ordinary** action keeps a public `action` record.
 
 **Unresolved:** siege restoration/retreat/destruction semantics (OPEN_QUESTIONS 25) and whether mixed
 garrisons should keep conservative movement provenance (OPEN_QUESTIONS 24).
+
+## 4c. 兵種 Unit types — ✅ P14 (design §5.4, ADR-019)
+
+One type per army and per city garrison (`ArmyState.UnitType`, `CityState.GarrisonType`, default
+`infantry`). The four English keys are the frozen LLM contract; 募兵 takes `args.unit_type`, and combat,
+movement and upkeep read the same keys. A merge/garrison transfer must match the garrison's type (an
+**empty** garrison adopts the army's type; an empty garrison recruited into adopts the recruited type).
+
+| key | 中文 | Gate | Recruit 金/1,000 | 糧/troop/季 | Move/季 | 相剋 / notes |
+|---|---|---|---|---|---|---|
+| `infantry` | 步兵 | — | 100 | 0.10 | 6 | beats `archer` (剋 ×1.3) |
+| `archer` | 弓兵 | — | 150 | 0.10 | 6 | beats `cavalry`; a garrison defends a city ×1.25 |
+| `cavalry` | 騎兵 | 兵法 2 | 300 | 0.20 | 8 | beats `infantry`; double upkeep |
+| `siege` | 攻城器械 | 兵法 3 | 500 | 0.05 | 3 | ×0.5 in field battles; waives the 3:1 assault |
+
+相剋: 剋 ×1.3, 被剋 ×0.8, otherwise ×1.0 (design §5.3/§6.1). 攻城器械 stays out of the cycle and is ×0.5
+in field battles. Values are 待決 (design §5.4) except the gates (design §9) and the 0.8–1.3 / +25%
+figures. **Design gap:** §5.3's 「攻城器械 剋 城防」 has no numeric value in the locked P14 scope, so a siege
+army only waives 3:1 — no separate attacker bonus vs 城防 is applied.
 
 ## 5. 外交 Diplomacy — `target_id` = a **seat** (never a hex); Trust (−100..+100 per ordered pair) + 威望 + Treaty model
 
@@ -223,7 +242,7 @@ One action, four lines. `target_id` is unused; `args.line` is required.
 | Line | L1 | L2 | L3 | L4 | L5 | Notes |
 |---|---|---|---|---|---|---|
 | 農政 agri | ✅ harvest ×1.10 | ⏸ 水利 (drought halving — no 天時 events) | ⏸ 屯田 (D9 自給 30%) | ⏸ 常平倉 (food cap — no cap modelled) | ✅ all harvests ×1.25 (stacks with L1) | |
-| 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ⏸ 騎兵 (no unit types) | ⏸ 器械 (no siege weapons) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) | |
+| 兵法 military | ✅ 訓練 cap 5→6 (design reads 訓練 +1; implemented as the cap, see ADR-014) | ✅ 騎兵 unlock — 募兵 `cavalry` (300 gold/1,000, 8 move, double upkeep) | ✅ 攻城器械 unlock — 募兵 `siege` (500 gold/1,000, waives the 3:1 assault) | ✅ 戰力 ×1.15, faction-side | ⏸ 統帥 (no generals) | L2/L3 are real effects since P14 (§4c) |
 | 諜報 espionage | 🟡 細作 → gates `scout`/`rumor` (P8) | 🟡 反諜 → gates `sow_distrust` (P8, TBD); the +10% 境內暴露率 effect is ⏸ | ⏸ 偽報 | ⏸ 諜網 | ⏸ 無間 | L1/L2 are the gates for the three P8 missions (§6); the defensive effects still need 治安/suspicion |
 | 吏治 governance | ✅ tax ×1.10 | ✅ 民心 +5/季 per city | ✅ 叛變機率 −50% (`RevoltChanceMult = 0.5`, synced at rollover) | ✅ research +25% (→19/season) | ✅ 威望 +10 one-time, on purchase | |
 
@@ -265,6 +284,8 @@ game always opens in 春 and always has the same season sequence for a given see
 |---|---|---|
 | `CityState` | `民心 (0-100, start 60 待決)`, `城防 0-5`, `Training 0-5`, `ReclaimPct` | ✅ defaults in `BalanceConfig`, 民心 clamps 0–100 |
 | `CityState` | `GarrisonMarchedThisSeason` (bool, internal) | ✅ PR #3 §4b — conservative movement bookkeeping for garrison round-trips; reset at rollover; **not** in the observation JSON |
+| `CityState` | `GarrisonType` (兵種 key, default `infantry`) | ✅ P14 §4c — one type per garrison; exposed as `garrison_type` in the observation JSON under the normal visibility rules |
+| `ArmyState` | `UnitType` (兵種 key, default `infantry`) | ✅ P14 §4c — one type per army; exposed as `unit_type` (foreign armies in sight too) |
 | `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
 | `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; **P7 吏治 3 syncs it to 0.5** at rollover (ADR-014) |
 | `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |
@@ -331,3 +352,12 @@ game always opens in 春 and always has the same season sequence for a given see
 > 22. The four balance constants PR #3 had moved outside its stated scope are restored: watchtower range
 >     **5**, `CityBaseFoodYield` **200**, `StartFood` **500**, `SpringFoodYieldMult` **0.7** (spring is
 >     LOCKED by design §3). The P6-P8 harness baseline returns to green (see ADR-018).
+
+> **P14 additions (2026-10-20, ADR-019 — unit types implemented):**
+> 23. 兵種 keys are `infantry｜archer｜cavalry｜siege`; exactly one type per army and per garrison. 募兵
+>     takes `args.unit_type` (default `infantry`); 騎 needs 兵法 2, 械 needs 兵法 3; per-type gold,
+>     糧 upkeep and movement are the §4c table. A merge/garrison transfer requires matching types (an
+>     empty garrison adopts).
+> 24. Combat: 相剋 ×1.3/×0.8 in field battles, 攻城器械 ×0.5 in the field, 弓兵 garrison ×1.25 in a
+>     siege, and a 攻城器械 attacker waives the 3:1 assault. `battle_field`/`battle_siege` and the
+>     garrison events now carry `unit_type` (the observation JSON exposes `unit_type`/`garrison_type`).

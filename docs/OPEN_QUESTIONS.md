@@ -94,3 +94,15 @@
     while armies are fog-hidden and cities keep only a bare marker (ADR-016). Should tower **existence** be
     always-visible terrain knowledge (current behaviour), or should towers be fog-hidden like armies
     (ADR-011's "absent, not redacted" rule)?
+28. **Type-mismatched defensive siege merge (P14).** The player-driven merge/transfer paths require matching
+    兵種 (ADR-019), but PR #3's defensive siege *auto-merges* any same-owner defending army into the city
+    garrison before the rounds. Current implementation keeps one-type-per-garrison by letting an **empty**
+    garrison adopt the defender's type, while a **non-empty** garrison keeps its own type (the merged troops
+    are treated as the garrison's type). Is a mixed-type defensive stack acceptable as-is, should the
+    defender's type win, or should a mismatched defending army refuse the merge (and fight separately)?
+29. **攻城器械 剋 城防 has no number.** Design §5.3 lists 攻城器械 as countering 城防, but gives no
+    multiplier; P14 implements only the 3:1 assault waiver (§4.3). If a numeric 破城 bonus is wanted
+    (e.g. attacker ×1.3 vs garrison when bringing 器械）, set the value here.
+30. **偵察 reports and 兵種.** Scout reports (`ScoutedCityView`) expose garrison size/food (banded or
+    exact) but not `garrison_type`; only in-sight cities carry it (ADR-011 visibility rules). Should a
+    scout report also reveal the garrison's 兵種 (and at which 諜報 accuracy level)?

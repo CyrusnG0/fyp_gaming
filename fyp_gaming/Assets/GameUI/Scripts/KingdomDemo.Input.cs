@@ -99,7 +99,7 @@ namespace LuanShi
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + " — choose a destination";
+                statusMsg = "Selected " + army.Name + "（" + UnitTypes.Label(army.UnitType) + "） — choose a destination";
                 e.Use();
                 return;
             }
@@ -150,7 +150,7 @@ namespace LuanShi
             var targets = new List<TBTK.Node>();
             // the highlight and the validator must agree on the season's budget, or 冬 (floor(6 × 0.7) = 4)
             // highlights hexes the engine then refuses (P6 §8b; ACTIONS.md §2)
-            int budget = BalanceConfig.MarchBudget(engine.State.Season);
+            int budget = BalanceConfig.MarchBudget(engine.State.Season, army.UnitType);
             if (!army.MarchedThisSeason)
                 for (int x = 0; x < engine.State.Map.Width; x++)
                     for (int z = 0; z < engine.State.Map.Height; z++)
@@ -245,7 +245,7 @@ namespace LuanShi
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + " — choose a destination";
+                statusMsg = "Selected " + army.Name + "（" + UnitTypes.Label(army.UnitType) + "） — choose a destination";
             }
         }
 

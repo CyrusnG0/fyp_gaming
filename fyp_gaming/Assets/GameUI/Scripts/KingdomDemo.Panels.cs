@@ -152,14 +152,15 @@ namespace LuanShi
                 selCity = city;
                 selArmy = null;
             }
-            if (GUI.Button(new Rect(x + 12f, y + 76f, width - 24f, 28f), army.Name, btn))
+            if (GUI.Button(new Rect(x + 12f, y + 76f, width - 24f, 28f),
+                $"{army.Name}（{UnitTypes.Label(army.UnitType)}）", btn))
             {
                 locationChoiceOpen = false;
                 selArmy = army;
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(node);
                 ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + " — choose a destination";
+                statusMsg = "Selected " + army.Name + "（" + UnitTypes.Label(army.UnitType) + "） — choose a destination";
             }
         }
 
@@ -189,7 +190,7 @@ namespace LuanShi
             bool conversionOpen = mine && garrisonConversionOpen && garrisonConversionCityId == city.Id && city.Garrison > 0;
             var inSight = obs != null ? obs.FindCity(city.Id) : null;
             var report = obs != null ? obs.FindScoutedCity(city.Id) : null;
-            var p = new Rect(10, 50, 420, mine ? (conversionOpen ? 500 : 400) : (inSight != null || report != null ? 210 : 120));
+            var p = new Rect(10, 50, 420, mine ? (conversionOpen ? 520 : 480) : (inSight != null || report != null ? 230 : 120));
             uiRects.Add(p);
             DrawBackdrop(p);
             // the name and owner are themselves information: an unseen city with no report stays unnamed,
@@ -202,7 +203,7 @@ namespace LuanShi
             {
                 string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
                 GUI.Label(new Rect(22, 86, 400, 116),
-                    $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison}\n" +
+                    $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison} {UnitTypes.Label(city.GarrisonType)}\n" +
                     $"Morale {city.Morale}{moraleWarning}\n" +
                     $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{MyTrainingCap()}",
                     body);
@@ -219,9 +220,18 @@ namespace LuanShi
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Reclaim, city.Id, "Reclaim",
                     city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "Limit reached"
                     : city.ReclaimedThisSeason ? "Already reclaimed this season" : null, 0, 0, btn));
+                string recruitType = UnitTypes.Normalize(recruitUnitType);
+                int recruitRequired = UnitTypes.RequiredMilitaryLevel(recruitType);
+                int recruitCost = UnitTypes.RecruitGoldCost(recruitType, BalanceConfig.RecruitTroopGain);
+                string recruitBlocked =
+                    MilitaryLevel() < recruitRequired ? $"needs 兵法 {recruitRequired}"
+                    : city.Garrison > 0 && UnitTypes.Normalize(city.GarrisonType) != recruitType
+                        ? $"garrison is {UnitTypes.Label(city.GarrisonType)}"
+                    : city.Gold < recruitCost ? $"needs {recruitCost} gold"
+                    : city.Population < BalanceConfig.RecruitPopCost ? "Not enough population" : null;
                 hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Recruit, city.Id, "Recruit",
-                    city.Gold < BalanceConfig.RecruitGoldCost ? "Not enough gold"
-                    : city.Population < BalanceConfig.RecruitPopCost ? "Not enough population" : null, 0, 0, btn));
+                    recruitBlocked, 0, 0, btn,
+                    new Dictionary<string, string> { { "unit_type", recruitType } }));
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Train, city.Id, "Train",
                     city.Training >= MyTrainingCap() ? "Limit reached" : null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop + 76f, buttonWidth, 34), ActionType.Fortify, city.Id, "Fortify",
@@ -229,8 +239,11 @@ namespace LuanShi
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
                     city.Food < BalanceConfig.ReliefFoodCost ? "Not enough food" : null, 0, 0, btn));
                 var convertRect = new Rect(rightButtonLeft, buttonTop + 114f, buttonWidth, 34);
+                var armyOnCity = engine.State.ArmyAt(city.X, city.Z);
+                bool convertTypeMismatch = armyOnCity != null && armyOnCity.OwnerSeatId == currentSeat
+                    && UnitTypes.Normalize(armyOnCity.UnitType) != UnitTypes.Normalize(city.GarrisonType);
                 var previousEnabled = GUI.enabled;
-                GUI.enabled = city.Garrison > 0;
+                GUI.enabled = city.Garrison > 0 && !convertTypeMismatch;
                 if (GUI.Button(convertRect, "Convert garrison " + OrderCostSuffix(ActionType.ConvertGarrison), btn))
                 {
                     garrisonConversionOpen = true;
@@ -239,15 +252,44 @@ namespace LuanShi
                 }
                 GUI.enabled = previousEnabled;
                 if (city.Garrison <= 0) hint = FirstReason(hint, "Convert garrison: No garrison");
+                else if (convertTypeMismatch)
+                    hint = FirstReason(hint,
+                        $"Convert garrison: unit types differ (army is {UnitTypes.Label(armyOnCity.UnitType)})");
+
+                // 兵種 picker: four toggles, research-gated types greyed with their reason (ADR-019)
+                float typeLabelTop = 364f;
+                GUI.Label(new Rect(22, typeLabelTop, 400, 20),
+                    $"Recruit type: {UnitTypes.Label(recruitType)} · {recruitCost} gold, {BalanceConfig.RecruitPopCost} pop", body);
+                string gateHint = null;
+                int military = MilitaryLevel();
+                for (int i = 0; i < UnitTypes.All.Length; i++)
+                {
+                    string type = UnitTypes.All[i];
+                    int required = UnitTypes.RequiredMilitaryLevel(type);
+                    bool gated = military < required;
+                    var typeRect = new Rect(22 + i * 100f, typeLabelTop + 22f, 94f, 26f);
+                    var prevBg = GUI.backgroundColor;
+                    if (recruitType == type) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
+                    var prevEnabledFlag = GUI.enabled;
+                    GUI.enabled = !gated;
+                    if (GUI.Button(typeRect, UnitTypes.Label(type), btn)) recruitUnitType = type;
+                    GUI.enabled = prevEnabledFlag;
+                    GUI.backgroundColor = prevBg;
+                    if (gated)
+                        gateHint = gateHint == null
+                            ? $"{UnitTypes.Label(type)} needs 兵法 {required}"
+                            : gateHint + " · " + $"{UnitTypes.Label(type)} needs 兵法 {required}";
+                }
+                if (gateHint != null) GUI.Label(new Rect(22, typeLabelTop + 50f, 400, 20), gateHint, body);
 
                 if (conversionOpen)
                 {
-                    GUI.Label(new Rect(22, 366, 400, 22),
-                        $"Convert {garrisonConversionAmount} of {city.Garrison} garrison to army", body);
+                    GUI.Label(new Rect(22, 440, 400, 22),
+                        $"Convert {garrisonConversionAmount} of {city.Garrison} {UnitTypes.Label(city.GarrisonType)} garrison to army", body);
                     garrisonConversionAmount = Mathf.Clamp(garrisonConversionAmount, 1, city.Garrison);
                     garrisonConversionAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
-                        new Rect(22, 392, 290, 24), garrisonConversionAmount, 1, city.Garrison));
-                    if (GUI.Button(new Rect(320, 386, 90, 34), "Confirm", btn))
+                        new Rect(22, 466, 290, 24), garrisonConversionAmount, 1, city.Garrison));
+                    if (GUI.Button(new Rect(320, 460, 90, 34), "Confirm", btn))
                         SubmitHuman(new ActionCommand
                         {
                             Type = ActionType.ConvertGarrison,
@@ -257,7 +299,7 @@ namespace LuanShi
                         });
                 }
 
-                if (hint != null) GUI.Label(new Rect(22, conversionOpen ? 442 : 364, 400, 40), hint, body);
+                if (hint != null) GUI.Label(new Rect(22, conversionOpen ? 506 : 440, 400, 40), hint, body);
             }
             else
             {
@@ -266,7 +308,7 @@ namespace LuanShi
                     string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
                     GUI.Label(new Rect(22, 84, 400, 126),
                         $"{city.Name} — in sight\n" +
-                        $"Garrison {city.Garrison}\nMorale {city.Morale}{moraleWarning}\n" +
+                        $"Garrison {city.Garrison} {UnitTypes.Label(city.GarrisonType)}\nMorale {city.Morale}{moraleWarning}\n" +
                         $"Food {city.Food}  Gold {city.Gold}\n" +
                         $"Population {city.Population}\n" +
                         $"Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}",
@@ -325,6 +367,8 @@ namespace LuanShi
 
         static string FirstReason(string current, string candidate) => current ?? candidate;
 
+        int MilitaryLevel() => obs != null ? obs.ResearchLevel(ResearchLine.Military) : 0;
+
         void DrawArmyPanel(ArmyState army, GUIStyle body, GUIStyle btn)
         {
             var enemyArmies = AdjacentEnemyArmies(army);
@@ -345,15 +389,17 @@ namespace LuanShi
             var p = new Rect(10, 50, panelWidth, (orders > 0 ? 236 + orders * 38 : 150) + (canGarrison ? garrisonControlsHeight : 0));
             uiRects.Add(p);
             DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, panelWidth - 32f, 24), $"{army.Name} · Troops {army.Troops}", body);
-            int foodPerSeason = (int)(army.Troops * BalanceConfig.FoodPerGarrisonTroop);
+            GUI.Label(new Rect(22, 58, panelWidth - 32f, 24),
+                $"{army.Name} · {UnitTypes.Label(army.UnitType)} · Troops {army.Troops}", body);
+            int foodPerSeason = (int)(army.Troops * UnitTypes.FoodPerTroop(army.UnitType));
             int factionFood = 0;
             foreach (var city in engine.State.Cities)
                 if (city.OwnerSeatId == army.OwnerSeatId) factionFood += city.Food;
             GUI.Label(new Rect(22, 86, panelWidth - 32f, 78),
                 $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
                 $"Faction food {factionFood} (army need {foodPerSeason} / season)\n" +
-                (army.MarchedThisSeason ? "Already marched this season" : "Select a hex to march"), body);
+                (army.MarchedThisSeason ? "Already marched this season"
+                    : $"Select a hex to march ({BalanceConfig.MarchBudget(engine.State.Season, army.UnitType)} points)"), body);
 
             if (canGarrison)
             {
@@ -369,8 +415,15 @@ namespace LuanShi
                     garrisonArmyAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
                         new Rect(p.x + 12f, p.y + 142f, p.width - 24f, 20f),
                         garrisonArmyAmount, 1, army.Troops));
+                    string garrisonBlocked = occupiedCity.Garrison > 0
+                        && UnitTypes.Normalize(occupiedCity.GarrisonType) != UnitTypes.Normalize(army.UnitType)
+                        ? $"unit types differ (garrison {UnitTypes.Label(occupiedCity.GarrisonType)})" : null;
                     OrderButton(new Rect(p.x + 12f, p.y + 162f, p.width - 24f, 34), ActionType.GarrisonArmy,
-                        army.Id, $"Garrison in {occupiedCity.Name}", null, garrisonArmyAmount, 0, btn);
+                        army.Id,
+                        garrisonBlocked == null
+                            ? $"Garrison in {occupiedCity.Name}"
+                            : $"Garrison — {garrisonBlocked}",
+                        garrisonBlocked, garrisonArmyAmount, 0, btn);
                 }
             }
 
@@ -404,6 +457,7 @@ namespace LuanShi
                 int effectiveGarrison = city.Garrison + defensiveArmyTroops;
                 int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
                 string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight"
+                    : UnitTypes.WaivesAssaultRatio(army.UnitType) ? null
                     : army.Troops < requiredTroops
                         ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio ({requiredTroops} troops needed)" : null;
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackCity,

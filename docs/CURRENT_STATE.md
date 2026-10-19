@@ -1,9 +1,35 @@
 # CURRENT_STATE.md
 
 > Day-to-day truth of where the project stands. **Update this file at the end of every work session.**
-> Last updated: 2026-10-19
+> Last updated: 2026-10-20
 
 ## Status summary
+
+**2026-10-20: P14 unit types (兵種) — four types, research gates, per-type recruit/upkeep/movement, 相剋, siege waiver. Headless harness 297/297; Unity gate PENDING.**
+
+- **New `UnitTypes.cs`** (engine, pure C#): frozen keys `infantry/archer/cavalry/siege` (步兵/弓兵/騎兵/
+  攻城器械); exactly one type per army (`ArmyState.UnitType`) and per city garrison
+  (`CityState.GarrisonType`). 兵法 2 unlocks cavalry, 兵法 3 siege — their previously deferred research
+  effects are now real.
+- **募兵** takes `args.unit_type` (default infantry); per-type gold 100/150/300/500 per 1,000 plus 1,000
+  population; a non-empty garrison must match its type, an empty one adopts the recruited type. Per-type
+  upkeep 0.1/0.1/0.2/0.05 per troop (garrison **and** field-army supply) and movement 6/6/8/3 (冬 ×0.7)
+  through `BalanceConfig.MarchBudget(season, unitType)` — the UI highlight and the validator share it.
+- **Combat:** 相剋 ×1.3/×0.8 (步>弓, 騎>步, 弓>騎), 攻城器械 ×0.5 in field battles, 弓兵 garrison ×1.25 in
+  sieges, and a 攻城器械 attacker waives the 3:1 assault. Merges/garrison transfers require matching
+  types; the observation JSON exposes `unit_type`/`garrison_type`; battle/garrison events carry
+  `unit_type`; the UI shows 兵種 in the army panel, selection popup/status, city panel (garrison type +
+  recruit picker) and 史官/report lines.
+- **ScriptedController** recruits its garrison's type (infantry by default; cavalry every other season
+  once 兵法 2 + a comfortable treasury), uses the type-aware march budget and mirrors the siege waiver.
+- **Verification:** `/tmp/luanshi-p6` **297 passed / 0 failed** (+48 P14 assertions; all 249 previous
+  assertions still pass); `/tmp/luanshi-ui-check` **0 warnings / 0 errors** (new `UnitTypes.cs` included).
+  **Unity editor compile/play-mode remains PENDING**; the gate now also covers the recruit type picker,
+  相剋 battles, archer city defence and the siege waiver.
+- **Design gaps flagged for a decision:** a **type-mismatched defensive siege merge** (PR #3 auto-merges any
+  same-owner defending army; P14 keeps one type per garrison by letting an empty garrison adopt the
+  defender's type and otherwise keeping the city's type — a mixed-type defensive stack needs a ruling), and
+  design §5.3's 「攻城器械 剋 城防」 has no numeric value, so only the 3:1 waiver is implemented.
 
 **2026-10-19 (later): order-cost labels pluralized; modularity rule added; Track A roadmap confirmed by the team.**
 
@@ -135,21 +161,27 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
   siege guard and hardened validation/event order (ADR-018); `6b91dd0` split `KingdomDemo` into seven
   responsibility-based partial files without behavioural change. Headless: 249/0; UI dotnet build 0/0.
   **Unity editor gate still pending.**
+- **P14 unit types (2026-10-20)**: new `UnitTypes.cs`; four frozen keys (`infantry/archer/cavalry/siege`),
+  one per army/garrison; `args.unit_type` on 募兵 with per-type gold and research gates (兵法 2/3);
+  per-type upkeep and movement; 相剋 ×1.3/×0.8, 器械 field ×0.5, 弓兵 garrison ×1.25, 器械 3:1 waiver;
+  same-type transfers; `unit_type`/`garrison_type` in the observation and events; recruit type picker and
+  type labels in the UI. Headless: 297/0; UI dotnet build 0/0. **Unity editor gate still pending.**
 
 ## In progress
 
-- **Unity verification gate PENDING for PR #2 + PR #3 + P6-P8 + the partial split.** Everything since
-  `d4c38d0` is headless-verified only (249 assertions + Unity-assembly dotnet builds). The editor's MCP
+- **Unity verification gate PENDING for PR #2 + PR #3 + P6-P8 + P14 + the partial split.** Everything since
+  `d4c38d0` is headless-verified only (297 assertions + Unity-assembly dotnet builds). The editor's MCP
   bridge wedged on 2026-10-11 when the PR #2 merge changed sources under the live editor (compile requested,
   never completed; assemblies in `Library/ScriptAssemblies/` predate the merge and every later commit).
   **Fix: restart the Unity editor** (scene is not dirty), then re-run the gate with the Unity-driving
-  subagent: compile check (all seven `KingdomDemo*.cs` partials, assembly timestamps must postdate `6b91dd0`;
-  the scene still references the unchanged `KingdomDemo.cs` GUID), play mode, and check **PR #3 garrison
-  convert/enter in both directions** (formation, merge, full and partial), **defensive siege** (same-owner
-  army merged; effective garrison gate; held vs captured result), watchtower capture at (6,2) and tower tint,
-  fog overlays, the live 研究/諜報 tabs, hotseat handover, victory banner; screenshot
-  `docs/screenshots/pr3_smoke.png`. Lesson recorded: merge git work while Unity is CLOSED, or restart it
-  right after.
+  subagent: compile check (all seven `KingdomDemo*.cs` partials + the new `UnitTypes.cs`, assembly
+  timestamps must postdate the P14 changes; the scene still references the unchanged `KingdomDemo.cs` GUID),
+  play mode, and check **PR #3 garrison convert/enter in both directions** (formation, merge, full and
+  partial), **P14 unit types** (recruit picker + research gates, cavalry/siege movement, 相剋 battle
+  reports, archer city defence, siege waiver), **defensive siege** (same-owner army merged; effective
+  garrison gate; held vs captured result), watchtower capture at (6,2) and tower tint, fog overlays, the
+  live 研究/諜報 tabs, hotseat handover, victory banner; screenshot `docs/screenshots/p14_smoke.png`.
+  Lesson recorded: merge git work while Unity is CLOSED, or restart it right after.
 - P5 (LLM-facing controller) not started — see Next actions, Track B.
 
 ## Known integration issues (TBTK ↔ this project)
@@ -178,7 +210,7 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
 
 ## Next actions (priority order)
 
-1. **Unity gate for PR #2 + PR #3 + P6-P8 + the partial split** (see In progress) — restart the editor,
+1. **Unity gate for PR #2 + PR #3 + P6-P8 + P14 + the partial split** (see In progress) — restart the editor,
    compile, play-mode smoke, screenshot.
 2. **Track A — meaningful decision depth (ADR-017 north star).** P9 seeded world variability (map/setup as
    data + a seeded parameterized generator; the seed stays an explicit experiment parameter — identical
@@ -244,7 +276,7 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
   `arity_audit.py` (call-site arity vs declaration, including code inside interpolated strings),
   `external_audit.py` (adapter→engine signatures), `namespace_guard.py` (attribute and
   fully-qualified-name namespaces), plus a grep for fully-qualified `UnityEngine.*` usages after any
-  adapter edit. Current harnesses: `/tmp/luanshi-p6` (engine, 249 assertions) and `/tmp/luanshi-ui-check`
+  adapter edit. Current harnesses: `/tmp/luanshi-p6` (engine, 297 assertions) and `/tmp/luanshi-ui-check`
   (engine + all seven UI partials against Unity assemblies).
 - **`fyp_gaming/Assets/_Recovery.meta` is untracked user state** (left by the editor after a crash) — leave
   it untracked and do not add it to git.
