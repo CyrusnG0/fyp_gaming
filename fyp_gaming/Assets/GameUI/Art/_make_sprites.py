@@ -106,19 +106,72 @@ def make_city():
     ink_blur(img, 0.8).save(f"{OUT}/Prop_City.png")
 
 
-def make_banner():
+def banner_cloth():
+    """Shared silhouette for every army banner: pole, finial, light neutral cloth.
+
+    The cloth stays a light neutral so Unity's per-faction SpriteRenderer.color tint
+    still reads as the faction colour; only the dark emblem inside it changes.
+    """
     img = Image.new("RGBA", (256, 512), (0, 0, 0, 0))
     d = ImageDraw.Draw(img, "RGBA")
     d.ellipse([86, 460, 170, 492], fill=(50, 50, 46, 90))  # shadow
     d.line([118, 60, 118, 474], fill=(88, 66, 44, 255), width=10)  # pole
     d.ellipse([110, 44, 126, 64], fill=(196, 160, 84, 255))  # finial
-    # cloth (light neutral so Unity tint shows faction color)
     cloth = [(122, 70), (238, 84), (232, 240), (196, 258), (150, 238), (122, 250)]
     d.polygon(cloth, fill=(222, 202, 168, 255))
     d.line(cloth + [cloth[0]], fill=(92, 72, 52, 255), width=5, joint="curve")
+    return img, d
+
+
+def make_banner():
+    img, d = banner_cloth()
     d.ellipse([152, 130, 200, 178], outline=(92, 72, 52, 220), width=6)  # emblem ring
     d.line([176, 146, 176, 162], fill=(92, 72, 52, 220), width=6)
     ink_blur(img, 0.7).save(f"{OUT}/Prop_ArmyBanner.png")
+
+
+def make_unit_banner(name, motif):
+    """A banner per 兵種 (ADR-019): same silhouette, a dark heraldic motif in the cloth."""
+    img, d = banner_cloth()
+    ink = (92, 72, 52, 235)
+    motif(d, ink)
+    ink_blur(img, 0.7).save(f"{OUT}/{name}.png")
+
+
+def motif_infantry(d, ink):
+    d.line([182, 100, 182, 230], fill=ink, width=7)                # spear shaft
+    d.polygon([(182, 86), (172, 110), (182, 120), (192, 110)], fill=ink)  # blade
+    d.line([166, 180, 198, 180], fill=ink, width=5)                # crossguard
+    d.polygon([(182, 230), (170, 244), (194, 244)], fill=ink)      # butt spike
+
+
+def motif_archer(d, ink):
+    d.arc([138, 104, 210, 210], 290, 70, fill=ink, width=7)        # bow limbs
+    d.line([186, 108, 186, 206], fill=ink, width=4)                # string
+    d.line([148, 158, 220, 158], fill=ink, width=5)                # arrow shaft
+    d.polygon([(220, 158), (206, 150), (206, 166)], fill=ink)      # head
+    d.line([148, 158, 142, 146], fill=ink, width=4)                # fletching
+    d.line([148, 158, 142, 170], fill=ink, width=4)
+
+
+def motif_cavalry(d, ink):
+    d.ellipse([146, 142, 206, 186], fill=ink)                      # barrel
+    d.polygon([(188, 152), (206, 118), (216, 120), (212, 136), (200, 164)], fill=ink)
+    d.ellipse([202, 112, 228, 134], fill=ink)                      # head
+    d.polygon([(204, 116), (196, 102), (204, 104)], fill=ink)      # ear
+    for x in (156, 176, 194, 204):                                 # legs
+        d.line([x, 182, x - 4 if x < 190 else x + 2, 214], fill=ink, width=6)
+    d.line([148, 156, 132, 196], fill=ink, width=6)                # tail
+
+
+def motif_siege(d, ink):
+    d.line([136, 204, 226, 204], fill=ink, width=8)                # base beam
+    d.ellipse([140, 194, 164, 218], outline=ink, width=6)          # wheel
+    d.ellipse([200, 194, 224, 218], outline=ink, width=6)          # wheel
+    d.line([158, 200, 208, 128], fill=ink, width=7)                # throwing arm
+    d.line([208, 128, 220, 112], fill=ink, width=4)                # sling
+    d.ellipse([212, 102, 228, 118], fill=ink)                      # stone
+    d.line([(158, 200), (140, 156), (166, 156), (158, 200)], fill=ink, width=6)  # frame
 
 
 make_plains()
@@ -127,4 +180,11 @@ make_forest()
 make_mountain()
 make_city()
 make_banner()
+
+# per-兵種 banners (ADR-019): same silhouette, one heraldic motif each
+make_unit_banner("banner_infantry", motif_infantry)
+make_unit_banner("banner_archer", motif_archer)
+make_unit_banner("banner_cavalry", motif_cavalry)
+make_unit_banner("banner_siege", motif_siege)
+
 print("done")

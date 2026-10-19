@@ -20,6 +20,10 @@ namespace LuanShi
             activeTab = key;
         }
 
+        // one scroll offset per concept tab, so switching tabs does not lose the reader's place
+        private readonly Dictionary<string, Vector2> tabScrolls = new Dictionary<string, Vector2>();
+        private readonly Dictionary<string, float> tabContentHeights = new Dictionary<string, float>();
+
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
             float height = TabPanelHeight();
@@ -28,13 +32,39 @@ namespace LuanShi
             DrawBackdrop(p);
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
 
-            switch (activeTab)
+            bool scrolls = activeTab == "domestic" || activeTab == "diplomacy"
+                        || activeTab == "intel" || activeTab == "research";
+            if (scrolls)
             {
-                case "domestic":  DrawDomesticPanel(p, body); break;
-                case "diplomacy": DrawDiplomacyPanel(p, body); break;
-                case "intel":     DrawIntelPanel(p, body, btn); break;
-                case "research":  DrawResearchPanel(p, body, btn); break;
-                default:          DrawHistorianPanel(p, body, mono); break;
+                // A concept panel can outgrow the shell (diplomacy rows, intel missions, research lines):
+                // it gets a scroll view, and Input.cs switches TBTK's camera zoom off while the pointer
+                // is over a panel, so the wheel scrolls here instead of zooming the map underneath.
+                var view = new Rect(p.x + 4, p.y + 52, 792, height - 52f - 56f);
+                float contentHeight = tabContentHeights.TryGetValue(activeTab, out var measured) ? measured : 700f;
+                tabScrolls.TryGetValue(activeTab, out var scroll);
+                // 776 leaves room for the vertical bar (16px) without ever triggering a horizontal one
+                scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, 776f, contentHeight), false, false);
+                tabScrolls[activeTab] = scroll;
+
+                // x - 4 and y - 52 cancel the view's own offsets, so a panel keeps the exact layout it
+                // had outside the scroll view (its drawers still work in the old panel coordinates).
+                var inner = new Rect(-4f, -52f, 800f, contentHeight);
+                float endY;
+                switch (activeTab)
+                {
+                    case "domestic":  endY = DrawDomesticPanel(inner, body); break;
+                    case "diplomacy": endY = DrawDiplomacyPanel(inner, body); break;
+                    case "intel":     endY = DrawIntelPanel(inner, body, btn); break;
+                    default:          endY = DrawResearchPanel(inner, body, btn); break;
+                }
+                GUI.EndScrollView();
+
+                // measured this frame and used from the next one, so the scroll range hugs the content
+                tabContentHeights[activeTab] = Mathf.Max(1f, endY + 8f);
+            }
+            else
+            {
+                DrawHistorianPanel(p, body, mono);   // keeps its own content-sized scroll view
             }
 
             // pinned to the panel bottom, so a content-sized panel keeps its button inside
@@ -65,7 +95,7 @@ namespace LuanShi
             }
         }
 
-        void DrawDomesticPanel(Rect p, GUIStyle body)
+        float DrawDomesticPanel(Rect p, GUIStyle body)
         {
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 22), "Domestic actions (design document chapter 11 · 10 total)", body);
@@ -106,9 +136,10 @@ namespace LuanShi
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
                 $"Select one of our cities, then issue orders from the city panel on the left; unavailable buttons are grey.\n" +
                 $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).", body);
+            return y + 44f;
         }
 
-        void DrawDiplomacyPanel(Rect p, GUIStyle body)
+        float DrawDiplomacyPanel(Rect p, GUIStyle body)
         {
             var me = engine.State.FindFaction(currentSeat);
             var btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
@@ -213,6 +244,7 @@ namespace LuanShi
                 y += 4;
                 drawn++;
             }
+            return y;
         }
 
         /// <summary>Peace / war plus every treaty in force (with seasons left) and any pending offer,
@@ -289,7 +321,7 @@ namespace LuanShi
         /// engine stays the only authority; the targets are the foreign cities this seat can actually name
         /// (in sight, or already scouted) and the seat pairs for 挑撥離間.
         /// </summary>
-        void DrawIntelPanel(Rect p, GUIStyle body, GUIStyle btn)
+        float DrawIntelPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
             int espionage = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
             float y = p.y + 52;
@@ -403,6 +435,7 @@ namespace LuanShi
             {
                 GUI.Label(new Rect(p.x + 348, y - 26, 420, 20), "... (remaining pairs omitted)", body);
             }
+            return y;
         }
 
         /// <summary>Why a mission cannot be ordered right now (mirrors the engine's SpyGate), or null.</summary>
@@ -422,7 +455,7 @@ namespace LuanShi
         /// Every number on screen comes from BalanceConfig and the seat's own observation — research is
         /// private (ADR-014), so another seat's tech tree is never rendered.
         /// </summary>
-        void DrawResearchPanel(Rect p, GUIStyle body, GUIStyle btn)
+        float DrawResearchPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
             float y = p.y + 52;
             GUI.Label(new Rect(p.x + 20, y, 760, 22),
@@ -458,7 +491,8 @@ namespace LuanShi
             y += 6;
             GUI.Label(new Rect(p.x + 20, y, 760, 44),
                 "Points arrive at every season rollover. Harvest, tax, combat and training-cap effects apply as soon as they resolve;\n" +
-                "律法 (level 3) and the income bonus settle at the next rollover. 學堂 the building (+3/season) and Intelligence 3-5 effects are deferred.", body);
+                "Law (level 3) and the income bonus settle at the next rollover. The Academy building (+3/season) and Intelligence 3-5 effects are deferred.", body);
+            return y + 44f;
         }
 
         /// <summary>
@@ -487,8 +521,8 @@ namespace LuanShi
                     switch (level)
                     {
                         case 1: return $"Reclaim — city harvest +{(int)(BalanceConfig.ResearchAgriFoodBonus * 100)}%";
-                        case 2: return "Water works — drought damage halved (deferred: no 天時 events)";
-                        case 3: return "Military farms — garrison self-supply 30% (deferred: 屯田 D9)";
+                        case 2: return "Water works — drought damage halved (deferred: no weather events)";
+                        case 3: return "Military farms — garrison self-supply 30% (deferred: the D9 farm-garrison action)";
                         case 4: return "State granaries — food cap +50% (deferred: no food cap)";
                         case 5: return $"Shennong — all harvests +{(int)(BalanceConfig.ResearchAgriL5FoodBonus * 100)}%";
                     }
@@ -497,8 +531,8 @@ namespace LuanShi
                     switch (level)
                     {
                         case 1: return $"Drill — training cap +{BalanceConfig.ResearchMilTrainingCapBonus} (now {BalanceConfig.TrainingCap(1)})";
-                        case 2: return "Cavalry unlock — 騎兵 can be recruited (300 gold/1,000, 8 move, double upkeep)";
-                        case 3: return "Siege engines unlock — 攻城器械 can be recruited (500 gold/1,000, waives the 3:1 assault)";
+                        case 2: return "Cavalry unlock — Cavalry units can be recruited (300 gold/1,000, 8 move, double upkeep)";
+                        case 3: return "Siege engines unlock — Siege units can be recruited (500 gold/1,000, waives the 3:1 assault)";
                         case 4: return $"Art of war — combat power ×{1f + BalanceConfig.ResearchMilCombatBonus:F2}";
                         case 5: return "Command — general coefficient +0.2 (deferred: no generals)";
                     }
@@ -557,9 +591,9 @@ namespace LuanShi
             sb.Append(rec.Seq.ToString().PadLeft(2));
             sb.Append(" Season ").Append(rec.Season).Append(" ");
             sb.Append(rec.EventType);
-            sb.Append("　").Append(SeatShort(rec.ActorSeatId));
+            sb.Append("  ").Append(SeatShort(rec.ActorSeatId));
             string payload = PayloadText(rec.Payload);
-            if (payload.Length > 0) sb.Append("　").Append(payload);
+            if (payload.Length > 0) sb.Append("  ").Append(payload);
             return sb.ToString();
         }
     }

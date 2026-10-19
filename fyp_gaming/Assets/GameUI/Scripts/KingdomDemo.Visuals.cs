@@ -354,6 +354,7 @@ namespace LuanShi
                 var visualPosition = go.transform.position;
                 visualPosition.y = 0.5f;
                 go.transform.position = visualPosition;
+                armyBannerBases[armyId] = visualPosition;   // base for the idle bob below
             }
             foreach (var city in engine.State.Cities) TintCity(city.Id);   // capture may have changed owners
         }
@@ -368,25 +369,30 @@ namespace LuanShi
 
         GameObject CreateArmyBannerMarker(ArmyState army)
         {
-            if (armyBannerImage == null)
+            Texture2D bannerTexture = UnitBannerTexture(army.UnitType);
+            if (bannerTexture == null)
             {
-#if UNITY_EDITOR
-                armyBannerImage = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(
-                    "Assets/GameUI/Art/Prop_ArmyBanner.png");
-#endif
                 if (armyBannerImage == null)
                 {
-                    string bannerPath = Path.Combine(Application.dataPath, "GameUI/Art/Prop_ArmyBanner.png");
-                    if (File.Exists(bannerPath))
+#if UNITY_EDITOR
+                    armyBannerImage = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(
+                        "Assets/GameUI/Art/Prop_ArmyBanner.png");
+#endif
+                    if (armyBannerImage == null)
                     {
-                        armyBannerImage = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                        if (!armyBannerImage.LoadImage(File.ReadAllBytes(bannerPath), false))
-                            armyBannerImage = null;
+                        string bannerPath = Path.Combine(Application.dataPath, "GameUI/Art/Prop_ArmyBanner.png");
+                        if (File.Exists(bannerPath))
+                        {
+                            armyBannerImage = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                            if (!armyBannerImage.LoadImage(File.ReadAllBytes(bannerPath), false))
+                                armyBannerImage = null;
+                        }
                     }
                 }
+                bannerTexture = armyBannerImage;
             }
 
-            if (armyBannerImage == null)
+            if (bannerTexture == null)
                 return FindOrCreateMarker("ArmyMarker_" + army.Id, army.X, army.Z, army.OwnerSeatId);
 
             var node = TBTK.GridManager.GetNode(army.X, army.Z);
@@ -419,8 +425,8 @@ namespace LuanShi
             go.transform.localScale = new Vector3(0.28f, 0.28f, 0.28f);
 
             var renderer = go.AddComponent<SpriteRenderer>();
-            renderer.sprite = Sprite.Create(armyBannerImage,
-                new Rect(0f, 0f, armyBannerImage.width, armyBannerImage.height),
+            renderer.sprite = Sprite.Create(bannerTexture,
+                new Rect(0f, 0f, bannerTexture.width, bannerTexture.height),
                 new Vector2(0.5f, 0.5f), 100f);
             renderer.color = OwnerColor(army.OwnerSeatId);
             renderer.sortingOrder = convertedArmySortingOrder;
@@ -437,6 +443,74 @@ namespace LuanShi
             foreach (var army in engine.State.Armies) SyncArmyVisual(army.Id);
             if (selArmy != null && engine.State.FindArmy(selArmy.Id) == null) selArmy = null;
             if (selCity != null && engine.State.FindCity(selCity.Id) == null) selCity = null;
+        }
+
+        // ---- army banner art & idle bob ---------------------------------------
+
+        // 兵種 banner art (ADR-019), loaded once from Assets/GameUI/Art. Loading by path keeps a fresh
+        // clone working with no scene reference or manual import step, exactly like the fog photo.
+        private readonly Dictionary<string, Texture2D> unitBannerImages = new Dictionary<string, Texture2D>();
+        private readonly Dictionary<string, Vector3> armyBannerBases = new Dictionary<string, Vector3>();
+
+        private const float BannerBobAmplitude = 0.04f;   // world units; the banner is 0.7 units wide
+        private const float BannerBobSpeed = 1.7f;        // radians / second
+
+        /// <summary>
+        /// The texture for one unit type, or null when that PNG is missing (the caller then falls back to
+        /// the shared faction banner). A missing file is retried on the next army rather than cached as null.
+        /// </summary>
+        Texture2D UnitBannerTexture(string unitType)
+        {
+            string type = UnitTypes.Normalize(unitType);
+            if (unitBannerImages.TryGetValue(type, out var cached)) return cached;
+
+            string fileName = "banner_" + type + ".png";
+            Texture2D texture = null;
+#if UNITY_EDITOR
+            texture = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/GameUI/Art/" + fileName);
+#endif
+            if (texture == null)
+            {
+                string path = Path.Combine(Application.dataPath, "GameUI/Art/" + fileName);
+                if (File.Exists(path))
+                {
+                    texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    texture.name = "banner_" + type + "_runtime";
+                    if (!texture.LoadImage(File.ReadAllBytes(path), false)) texture = null;
+                }
+            }
+
+            if (texture != null) unitBannerImages[type] = texture;
+            return texture;
+        }
+
+        /// <summary>
+        /// Idle bob: every army banner drifts a few centimetres up and down, each at its own phase, so a
+        /// stack of banners on neighbouring hexes does not pulse in lockstep. The base position is written
+        /// by <see cref="SyncArmyVisual"/>; this only adds the offset, so marches still land exactly on a hex.
+        /// Called from the single per-frame Update in KingdomDemo.Input.cs (a partial class can only have one).
+        /// </summary>
+        void BobArmyBanners()
+        {
+            if (armyBannerBases.Count == 0) return;
+            foreach (var kv in armyBannerBases)
+            {
+                if (!armyObjs.TryGetValue(kv.Key, out var go) || go == null) continue;
+                float phase = BannerPhase(kv.Key);
+                go.transform.position = kv.Value
+                    + Vector3.up * (Mathf.Sin(Time.time * BannerBobSpeed + phase) * BannerBobAmplitude);
+            }
+        }
+
+        /// <summary>
+        /// Stable per-army phase in [0, 2π). string.GetHashCode is randomised per process on .NET Core,
+        /// so it would make the bob pattern differ between runs; a deterministic char hash does not.
+        /// </summary>
+        static float BannerPhase(string armyId)
+        {
+            int hash = 17;
+            foreach (char c in armyId) hash = unchecked(hash * 31 + c);
+            return (hash & 0xFFFF) / 65536f * (Mathf.PI * 2f);
         }
     }
 }

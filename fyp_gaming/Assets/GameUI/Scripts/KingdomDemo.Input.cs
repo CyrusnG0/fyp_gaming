@@ -99,7 +99,7 @@ namespace LuanShi
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + "（" + UnitTypes.Label(army.UnitType) + "） — choose a destination";
+                statusMsg = "Selected " + army.Name + " (" + UnitTypeName(army.UnitType) + ") — choose a destination";
                 e.Use();
                 return;
             }
@@ -190,6 +190,24 @@ namespace LuanShi
             return false;
         }
 
+        // TBTK's CameraControl reads the same wheel for zoom in its own Update. This class runs first
+        // ([DefaultExecutionOrder(-100)]), so switching enableZoom off for this frame while the pointer
+        // is over a panel (or a full-screen overlay replaces the map) leaves the wheel free for IMGUI
+        // ScrollViews instead of zooming the camera underneath them.
+        private TBTK.CameraControl cameraControl;
+
+        void Update()
+        {
+            bool blocked = handoverShowing || reportShowing || activeTab != "map"
+                || (engine != null && engine.State.WinnerSeatId != null);
+            if (!blocked && PointerOverUI(Input.mousePosition)) blocked = true;
+
+            if (cameraControl == null) cameraControl = FindAnyObjectByType<TBTK.CameraControl>();
+            if (cameraControl != null) cameraControl.enableZoom = !blocked;
+
+            BobArmyBanners();   // the partial's one Update also drives the banner idle animation
+        }
+
         void TryMarch(ArmyState army, int x, int z)
             => SubmitHuman(new ActionCommand { Type = ActionType.March, TargetId = army.Id, ParamA = x, ParamB = z });
 
@@ -245,7 +263,7 @@ namespace LuanShi
                 selCity = null;
                 TBTK.GridIndicator.SetSelect(TBTK.GridManager.GetNode(army.X, army.Z));
                 ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + "（" + UnitTypes.Label(army.UnitType) + "） — choose a destination";
+                statusMsg = "Selected " + army.Name + " (" + UnitTypeName(army.UnitType) + ") — choose a destination";
             }
         }
 
