@@ -61,14 +61,26 @@ namespace LuanShi
             }
 
             bool hotseat = SeatRotation.HumanSeats(engine.State).Count > 1;
-            // top bar
-            var top = new Rect(10, 8, 1000, 34);
-            uiRects.Add(top);
-            DrawBackdrop(top);
-            GUI.Label(new Rect(22, 12, 980, 28),
+            // Top bar: the header is data-driven (seat ids, larger populations), so it gets the full width
+            // left of the tab / End-turn column (x = 1400) instead of a fixed 1000 px. wordWrap is off — a
+            // long header must not wrap into a clipped second line — and the font steps down if that width
+            // is still not enough, so the trailing values (Food/Gold) always stay on screen.
+            string header =
                 $"Season {engine.State.Season} ({BalanceConfig.SeasonName(engine.State.Season)}) · {fac.Name} ({(hotseat ? currentSeat + " · Player" : "Player")})" +
                 $" · Orders {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
-                $" · Prestige {fac.Prestige} · Population {pop} · Food {food} · Gold {gold}", title);
+                $" · Prestige {fac.Prestige} · Population {pop} · Food {food} · Gold {gold}";
+            const float headerWidth = 1356f;
+            var headerStyle = new GUIStyle(title) { wordWrap = false };
+            foreach (int size in new[] { 20, 18, 16, 14 })
+            {
+                headerStyle.fontSize = size;
+                if (headerStyle.CalcSize(new GUIContent(header)).x <= headerWidth) break;
+            }
+
+            var top = new Rect(10, 8, 1380, 34);
+            uiRects.Add(top);
+            DrawBackdrop(top);
+            GUI.Label(new Rect(22, 12, headerWidth, 28), header, headerStyle);
 
             // tab bar — Map is the live view; the others preview the full design concept
             var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
@@ -387,9 +399,10 @@ namespace LuanShi
 
         void DrawArmyPanel(ArmyState army, GUIStyle body, GUIStyle btn)
         {
-            var enemyArmies = AdjacentEnemyArmies(army);
+            var enemyArmies = AttackableEnemyArmies(army);
             var enemyCities = AdjacentEnemyCities(army);
             int orders = enemyArmies.Count + enemyCities.Count;
+            int attackRange = UnitTypes.AttackRange(army.UnitType);
             var occupiedCity = engine.State.CityAt(army.X, army.Z);
             bool canGarrison = occupiedCity != null && occupiedCity.OwnerSeatId == army.OwnerSeatId;
             if (canGarrison && garrisonArmyId != army.Id)
@@ -414,7 +427,8 @@ namespace LuanShi
             GUI.Label(new Rect(22, 86, panelWidth - 32f, 78),
                 $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
                 $"Faction food {factionFood} (army need {foodPerSeason} / season)\n" +
-                (army.MarchedThisSeason ? "Already marched this season"
+                (army.MarchCountThisSeason >= UnitTypes.MarchesPerSeason(army.UnitType)
+                    ? "No marches left this season"
                     : $"Select a hex to march ({BalanceConfig.MarchBudget(engine.State.Season, army.UnitType)} points)"), body);
 
             if (canGarrison)
@@ -459,8 +473,10 @@ namespace LuanShi
             float buttonWidth = p.width - 24f;
             foreach (var enemy in enemyArmies)
             {
+                int distance = engine.State.Map.HexDistance(army.X, army.Z, enemy.X, enemy.Z, attackRange);
+                string label = (distance > 1 ? "Attack (ranged) " : "Attack ") + enemy.Name + $" · Troops {enemy.Troops}";
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackArmy,
-                    army.Id, $"Attack {enemy.Name} · Troops {enemy.Troops}",
+                    army.Id, label,
                     army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight" : null,
                     enemy.X, enemy.Z, btn));
                 row++;
@@ -487,15 +503,17 @@ namespace LuanShi
         /// <summary>
         /// Enemy armies the seat may actually act against: candidates come from this seat's observation, so
         /// the panel can never name or count a unit the fog hides (it used to read canonical state, which
-        /// also let a player attack an army they could not see). The engine still validates the order.
+        /// also let a player attack an army they could not see). P15: 弓兵 reaches 2 hexes, every other type
+        /// 1 — the same <see cref="UnitTypes.AttackRange"/> the validator uses. The engine still has the last word.
         /// </summary>
-        List<ArmyState> AdjacentEnemyArmies(ArmyState army)
+        List<ArmyState> AttackableEnemyArmies(ArmyState army)
         {
             var list = new List<ArmyState>();
             if (obs == null) return list;
+            int range = UnitTypes.AttackRange(army.UnitType);
             foreach (var other in obs.Armies)
                 if (other.OwnerSeatId != army.OwnerSeatId
-                    && engine.State.Map.AreAdjacent(army.X, army.Z, other.X, other.Z)) list.Add(other);
+                    && engine.State.Map.HexDistance(army.X, army.Z, other.X, other.Z, range) >= 0) list.Add(other);
             return list;
         }
 

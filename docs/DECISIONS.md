@@ -428,3 +428,44 @@ single troop count with no types; 兵法 L2/L3 remain purchasable-but-deferred u
 lands. When implemented, this is P14 engine work (after P9): `ArmyState.UnitType` +
 `CityState.GarrisonType`, per-type recruit costs/upkeep/movement in `BalanceConfig`, type-aware
 相剋 in the combat resolver, and the 募兵 UI gaining a type picker.
+
+## ADR-020 — Unit specials (P15) and the fog-edge march rule
+**Date:** 2026-10-20 · **Status:** accepted · **Source:** team direction (user, 2026-10-20) · **Phase:** P15
+
+Two design rulings, implemented together. Design doc amended to **v1.2** (new §5.5 兵種特性 and
+§5.6 迷霧邊界).
+
+- **Unit specials — each 兵種 gets one signature mechanic** beyond its P14 stat line, so a type is a
+  way of playing rather than a bigger number:
+  - 步兵 **耐打**: takes ×0.85 losses in field battles (`InfantryLossTakenMult`, TBD).
+  - 弓兵 **遠射**: may `attack_army` at range ≤ 2 (`ArcherAttackRange`, TBD); everyone else stays at
+    adjacency. Combat resolution unchanged — 相剋 still applies.
+  - 騎兵 **奔襲 ×2**: marches twice per season (`CavalryMarchesPerSeason`, TBD) — each march costs its
+    own 號令 and its own 8-point budget. State: `ArmyState.MarchCountThisSeason` alongside the binary
+    `MarchedThisSeason`, which keeps its ADR-018 meaning ("marched at all") for the garrison
+    movement-laundering guard — marched cavalry garrisoned and re-formed does NOT get its second march
+    back. The §5.3 平原衝鋒 (+30%, LOCKED) is also now implemented: cavalry attacking a defender on a
+    plains hex gets ×1.3 (`CavalryPlainsChargeBonus`; plains = walkable, cost ≤ 1).
+  - 攻城器械 **破城**: ×1.3 attacker multiplier against cities (`SiegeVsCityBonus`, LOCKED — the §5.3
+    相剋 range), on top of the P14 3:1 waiver. **This answers OPEN_QUESTIONS 29.**
+  Helpers live in `UnitTypes.cs` (`AttackRange` / `MarchesPerSeason` / `LossTakenMultiplier` /
+  `SiegeVsCityMultiplier` / `FieldAttackMultiplier`); all numbers in `BalanceConfig`.
+- **Fog-edge march rule (§5.6).** A march destination must be inside the acting seat's sight — the
+  same `InSight` radii as the observation (city ±3 / army ±2 / tower ±5), enforced engine-side for
+  every controller (invariant #3). Armies advance to the fog edge, reveal it instantly, and push
+  further next season; effective per-season movement is ~2–3 hexes regardless of the march budget,
+  which now bounds a single march instead of total seasonal movement. Scouts, watchtowers and
+  garrison-forward basing gain purpose. The scripted baseline mirrors the sight check (it remains the
+  documented canonical-state exception, ADR-011). Alternatives considered and rejected by the team:
+  marching through fog with reveal-along-path (faster expansion, but fog stops being a boundary).
+- **UI consequences.** March highlights skip out-of-sight hexes; ranged targets get an
+  "Attack (ranged)" button; the movement-spent message is march-count aware. Panel wheel scrolling was
+  hardened the same round (`TryWheelScroll`: whole-panel hit area, clamped offset, event consumed
+  before `BeginScrollView` can double-apply; content height is `max(measured, view.height)` so a
+  fitting panel has no phantom scroll range).
+- **Verified** headless 2026-10-20: **324/324** assertions (+27 P15: ranged accept/reject by type and
+  range, double-march accept/reject, garrison round-trip exhausts the second march, exact plains-charge
+  and 耐打 first-round numbers, 破城 ×1.3, fog-edge accept/reject with no state change, scripted
+  controller never plans out-of-sight marches). UI build 0/0; arity/namespace/external audits clean.
+  Unity editor compiled and entered play mode during this round (0 console errors, demo initialised);
+  full interactive gate (human wheel/click testing) still pending.

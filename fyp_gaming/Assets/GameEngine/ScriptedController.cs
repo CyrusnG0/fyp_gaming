@@ -35,7 +35,9 @@ namespace LuanShi.Engine
                 foreach (var enemy in state.Armies)
                 {
                     if (enemy.OwnerSeatId == seatId) continue;
-                    if (!state.Map.AreAdjacent(army.X, army.Z, enemy.X, enemy.Z)) continue;
+                    // P15: 弓兵 can open a field battle at range 2 (validator allows the same)
+                    int attackRange = UnitTypes.AttackRange(army.UnitType);
+                    if (state.Map.HexDistance(army.X, army.Z, enemy.X, enemy.Z, attackRange) < 0) continue;
                     int attackCost = BalanceConfig.CommandPointCost(ActionType.AttackArmy);
                     if (cp < attackCost) break;
                     if (army.Troops * 100 < enemy.Troops * (100 + BalanceConfig.ScriptedAttackTroopAdvantagePercent)) continue;
@@ -155,12 +157,15 @@ namespace LuanShi.Engine
                 cp--;
             }
 
-            // 行軍: send the strongest idle field army toward the nearest free neutral city.
+            // 行軍: send the strongest idle field army toward the nearest free neutral city it can SEE
+            // (fog-edge rule, user decision 2026-10-20). The sight predicate is the engine's own InSight,
+            // read from canonical state — the documented ScriptedController exception (ADR-011).
             if (cp > 0)
             {
                 ArmyState best = null;
                 foreach (var a in state.ArmiesOf(seatId))
-                    if (!a.MarchedThisSeason && !committed.Contains(a.Id) && (best == null || a.Troops > best.Troops))
+                    if (a.MarchCountThisSeason < UnitTypes.MarchesPerSeason(a.UnitType)
+                        && !committed.Contains(a.Id) && (best == null || a.Troops > best.Troops))
                         best = a;
 
                 if (best != null)
@@ -171,6 +176,7 @@ namespace LuanShi.Engine
                     foreach (var c in state.Cities)
                     {
                         if (!c.IsNeutral) continue;
+                        if (!GameEngine.InSight(state, seatId, c.X, c.Z)) continue;  // never plan a refused march
                         if (state.ArmyAt(c.X, c.Z) != null) continue;      // occupied hexes are refused by M1
                         int cost = state.Map.PathCost(best.X, best.Z, c.X, c.Z, budget);
                         if (cost >= 0 && cost < bestCost) { bestCost = cost; target = c; }

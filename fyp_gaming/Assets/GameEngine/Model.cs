@@ -247,7 +247,8 @@ namespace LuanShi.Engine
         public int Troops;
         public string UnitType = UnitTypes.Infantry;   // 兵種 (design §5.4/ADR-019): one type per army
         public int X, Z;
-        public bool MarchedThisSeason;
+        public bool MarchedThisSeason;                  // at least one march this season (garrison guard, ADR-018)
+        public int MarchCountThisSeason;                // P15: 騎兵 may march twice — count, not just the flag
         public int Morale = BalanceConfig.ArmyMoraleStart;   // 士氣, range MoraleMin..MoraleMax; 0 = 潰散
 
         public string ToJson()
@@ -305,6 +306,13 @@ namespace LuanShi.Engine
         public int Index(int x, int z) => z * Width + x;
         public bool InBounds(int x, int z) => x >= 0 && z >= 0 && x < Width && z < Height;
         public bool IsWalkable(int x, int z) => InBounds(x, z) && Walkable[Index(x, z)];
+
+        /// <summary>
+        /// 平原 (plains) for the 騎兵 平原衝鋒 rule (design §5.3): walkable terrain at the baseline
+        /// movement cost of 1. Forest (cost 2), mountains and rivers do not qualify.
+        /// </summary>
+        public bool IsPlains(int x, int z)
+            => IsWalkable(x, z) && Cost[Index(x, z)] <= 1;
 
         /// <summary>Same hex or hex-adjacent: the range-1 check for 野戰 / 攻城 (ACTIONS.md §4).</summary>
         public bool AreAdjacent(int x1, int z1, int x2, int z2)

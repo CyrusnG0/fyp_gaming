@@ -100,6 +100,40 @@ namespace LuanShi.Engine
             }
         }
 
+        // ---- signature specials (P15, design §5.3) ------------------------------------------
+
+        /// <summary>Attack range in hexes: 弓兵 2, everyone else 1 (design §5.3 弓兵 ranged).</summary>
+        public static int AttackRange(string type)
+            => Normalize(type) == Archer ? BalanceConfig.ArcherAttackRange : 1;
+
+        /// <summary>March orders allowed per season: 騎兵 2, everyone else 1 (design §5.3 騎兵).</summary>
+        public static int MarchesPerSeason(string type)
+            => Normalize(type) == Cavalry ? BalanceConfig.CavalryMarchesPerSeason : 1;
+
+        /// <summary>Field-battle losses taken multiplier: 步兵 ×0.85 (design §5.3 耐打), others 1.</summary>
+        public static float LossTakenMultiplier(string type)
+            => Normalize(type) == Infantry ? BalanceConfig.InfantryLossTakenMult : 1f;
+
+        /// <summary>Siege attacker multiplier vs 城防: 器械 ×1.3 (design §5.3 相剋, OQ-29), others 1.</summary>
+        public static float SiegeVsCityMultiplier(string type)
+            => Normalize(type) == Siege ? BalanceConfig.SiegeVsCityBonus : 1f;
+
+        /// <summary>
+        /// The attacking side's field multiplier: the 相剋 cycle, plus 平原衝鋒 when 騎兵 attacks an
+        /// army standing on plains (design §5.3). The defender never gets the charge bonus.
+        /// </summary>
+        public static float FieldAttackMultiplier(string attackerType, string defenderType, bool defenderOnPlains)
+        {
+            float multiplier = FieldCombatMultiplier(attackerType, defenderType);
+            if (Normalize(attackerType) == Cavalry && defenderOnPlains)
+                multiplier *= BalanceConfig.CavalryPlainsChargeBonus;
+            return multiplier;
+        }
+
+        /// <summary>True when the 騎兵 平原衝鋒 bonus applies (attacker is cavalry, defender on plains).</summary>
+        public static bool IsPlainsCharge(string attackerType, bool defenderOnPlains)
+            => Normalize(attackerType) == Cavalry && defenderOnPlains;
+
         private static bool Beats(string a, string b)
             => (a == Infantry && b == Archer)
             || (a == Cavalry && b == Infantry)

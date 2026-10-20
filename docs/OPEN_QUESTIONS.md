@@ -100,9 +100,10 @@
     garrison adopt the defender's type, while a **non-empty** garrison keeps its own type (the merged troops
     are treated as the garrison's type). Is a mixed-type defensive stack acceptable as-is, should the
     defender's type win, or should a mismatched defending army refuse the merge (and fight separately)?
-29. **攻城器械 剋 城防 has no number.** Design §5.3 lists 攻城器械 as countering 城防, but gives no
-    multiplier; P14 implements only the 3:1 assault waiver (§4.3). If a numeric 破城 bonus is wanted
-    (e.g. attacker ×1.3 vs garrison when bringing 器械）, set the value here.
+29. **攻城器械 剋 城防 — ANSWERED 2026-10-20: attacker ×1.3.** Design §5.3 listed 攻城器械 as countering
+    城防 without a number; the team fixed it at **×1.3** (inside the design's 0.8–1.3 相剋 range), implemented
+    as `BalanceConfig.SiegeVsCityBonus` in P15 and stacking with the 3:1 assault waiver. Decision
+    recorded in ADR-020.
 30. **偵察 reports and 兵種.** Scout reports (`ScoutedCityView`) expose garrison size/food (banded or
     exact) but not `garrison_type`; only in-sight cities carry it (ADR-011 visibility rules). Should a
     scout report also reveal the garrison's 兵種 (and at which 諜報 accuracy level)?

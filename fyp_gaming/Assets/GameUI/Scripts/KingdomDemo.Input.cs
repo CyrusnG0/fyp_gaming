@@ -151,12 +151,14 @@ namespace LuanShi
             // the highlight and the validator must agree on the season's budget, or 冬 (floor(6 × 0.7) = 4)
             // highlights hexes the engine then refuses (P6 §8b; ACTIONS.md §2)
             int budget = BalanceConfig.MarchBudget(engine.State.Season, army.UnitType);
-            if (!army.MarchedThisSeason)
+            if (army.MarchCountThisSeason < UnitTypes.MarchesPerSeason(army.UnitType))
                 for (int x = 0; x < engine.State.Map.Width; x++)
                     for (int z = 0; z < engine.State.Map.Height; z++)
                     {
                         if (x == army.X && z == army.Z) continue;
                         if (!engine.State.Map.IsWalkable(x, z)) continue;
+                        // fog-edge march rule: the validator refuses unseen destinations, so do not highlight them
+                        if (!engine.InSight(currentSeat, x, z)) continue;
 
                         // the highlight follows the seat's observation: units it cannot see do not
                         // block a destination it can click (the engine still has the last word)

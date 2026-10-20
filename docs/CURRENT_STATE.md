@@ -5,6 +5,62 @@
 
 ## Status summary
 
+**2026-10-20 (P15): unit specials (弓兵 ranged, 騎兵 double march + 平原衝鋒, 步兵 耐打, 器械 ×1.3 vs 城防) and the fog-edge march rule; tab scroll hardened. Headless 324/324; UI dotnet build 0/0; Unity gate PENDING.**
+
+- **弓兵 ranged attack:** `attack_army` now accepts a target at hex distance ≤ `BalanceConfig.ArcherAttackRange` (2,
+  TBD); every other type stays at 1. Resolution is untouched — the same field battle, only the gate widens.
+  The army panel lists distance-2 enemies as "Attack (ranged) …" through `UnitTypes.AttackRange`.
+- **騎兵 two marches + 平原衝鋒:** the binary `MarchedThisSeason` gate became `ArmyState.MarchCountThisSeason`
+  (capped by `UnitTypes.MarchesPerSeason`, `CavalryMarchesPerSeason = 2`, TBD); each march still costs 1 號令
+  and gets its own 8-point budget. `MarchedThisSeason` stays binary and is still what the garrison
+  round-trip guard reads (ADR-018); a garrison that absorbed a marched army also exhausts the second march
+  (`MarchCountThisSeason = MarchesPerSeason`). A cavalry attacker on a defender standing on **plains**
+  (walkable, cost 1 — `MapData.IsPlains`) gets `CavalryPlainsChargeBonus` ×1.3 (LOCKED design §5.3).
+- **步兵 耐打:** `UnitTypes.LossTakenMultiplier` ×0.85 (`InfantryLossTakenMult`, TBD) is applied to the rolled
+  first-round loss before `CapLoss`, for an infantry attacker **or** defender.
+- **器械 剋 城防 (OQ-29 answered):** `SiegeVsCityBonus` ×1.3 (LOCKED design §5.3 range) becomes the siege
+  attacker's type multiplier; it stacks with the existing 3:1 waiver. **`docs/OPEN_QUESTIONS.md` 29 is
+  marked answered**; the ADR entry is left to the main agent (DECISIONS.md untouched).
+- **Battle visibility:** `battle_field` now carries `attack_range`, `defender_on_plains`, `plains_charge`,
+  `attacker_type_mult`, `defender_type_mult`, `attacker_loss_mult`, `defender_loss_mult`; `battle_siege`
+  carries `siege_vs_city`, `attacker_type_mult`, `garrison_type_mult`. The `CombatDebugLogger` traces print
+  the same multipliers.
+- **Fog-edge march rule (user decision 2026-10-20):** `DoMarch` rejects any destination outside the acting
+  seat's sight with "destination is beyond your sight", reusing the existing `InSight` (new static
+  `InSight(GameState, …)` overload so controllers see the same predicate). The UI highlight
+  (`ShowArmyMoveTargets`) skips unseen hexes and is shown again for a cavalry army's second march;
+  `ScriptedController` skips out-of-sight neutral cities, so it never plans a refused march. **Consequence
+  (intended):** effective per-season movement is bounded by the vision ring (cities ±3, armies ±2,
+  towers ±5 — about 2–3 hexes), not the 6/8/3 budget, which now caps a single march.
+- **Tab scroll fix:** the rect math was re-audited: contents are measured in content space (`inner.y = -52`
+  cancels the panel offset, so Research measures **360** against a **372**-high view — it fits, and there is
+  nothing to scroll); the fragility was elsewhere — `BeginScrollView`'s internal wheel handler only sees the
+  clipped view and could be skipped/double-applied. `TryWheelScroll` now handles the wheel explicitly over
+  the **whole panel**, clamps to the measured content, consumes the event, and the content height is clamped
+  to at least the view height (content that fits gives a zero range, no phantom scrolling). The 史官
+  chronicle and the 朝報 use the same handler (the latter only when its line cap actually overflows).
+- **Gate fixes (from `docs/screenshots/gate_research.png` / `gate_shu_view.png`):** tab body labels are now
+  drawn at their **real wrapped height** (`WrappedLabel` → `GUIStyle.CalcHeight`), so the Research footer
+  reserves its 3 lines (the Domestic footer likewise), the measured content height covers them and the panel
+  gains a real small scroll range instead of hiding the third line at the bottom edge; the Research
+  `Now:`/`Next:` lines and the long Diplomacy/Intel rows use the same helper. The top bar widened from 1000
+  to **1380** design px (ends at x=1390, left of the tab/End-turn column), `wordWrap = false`, with a
+  20→18→16→14 font fallback chosen by `CalcSize`, so Shu's longer header no longer wraps into a clipped
+  second line before Food/Gold.
+- **Verification:** `/tmp/luanshi-p6` **324 passed / 0 failed** (+27 P15 assertions: archer range 2 / range 3,
+  infantry range 2, second/third cavalry march, garrison second-march guard, plains vs forest exact losses,
+  infantry 0.85 exact losses, siege 1.3× exact losses, fog-edge accept/reject, scripted no-out-of-sight
+  march; all 297 previous assertions still green). `/tmp/luanshi-ui-check` **0/0**; `arity_audit.py`,
+  `namespace_guard.py` and `external_audit.py` clean. **Unity compiled the P15 code with 0 errors and a fresh
+  Play session initialised**; the gate screenshots then exposed the two label-sizing defects fixed above
+  (Research footer clipped at 44 px while its wrapped text needs ~3 lines; Shu's header wrapping into a
+  clipped second line). Both fixes are UI-only: the engine harness is unchanged at **324/0** and the UI
+  dotnet build is **0/0** after the fix. **Unity re-verification of the two fixes is pending** (the MCP
+  bridge went unavailable at the end of the session) — re-run the gate and compare against
+  `docs/screenshots/gate_research.png` and `gate_shu_view.png`. The **interactive gate is still pending**:
+  clicking/wheel input, the P15 attack buttons and the fog-edge highlight were not driven by a human. The
+  gate now also covers the four specials, the fog-edge highlight/refusals and wheel scrolling on every tab.
+
 **2026-10-20 (later): UI polish — per-兵種 banner art + idle bob, wheel scrolls panels instead of zooming, English UI text. Headless 297/297; UI dotnet build 0/0; Unity gate PENDING.**
 
 - **Banner art:** `Assets/GameUI/Art/banner_infantry.png`, `banner_archer.png`, `banner_cavalry.png`,
@@ -211,23 +267,25 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
 
 ## In progress
 
-- **Unity verification gate PENDING for PR #2 + PR #3 + P6-P8 + P14 + the partial split + the UI polish.**
-  Everything since `d4c38d0` is headless-verified only (297 assertions + Unity-assembly dotnet builds). The
-  editor's MCP bridge wedged on 2026-10-11 when the PR #2 merge changed sources under the live editor
-  (compile requested, never completed; assemblies in `Library/ScriptAssemblies/` predate the merge and every
-  later commit). **Fix: restart the Unity editor** (scene is not dirty), then re-run the gate with the
-  Unity-driving subagent: compile check (all seven `KingdomDemo*.cs` partials + the new `UnitTypes.cs`,
-  assembly timestamps must postdate the P14/UI-polish changes; the scene still references the unchanged
-  `KingdomDemo.cs` GUID), play mode, and check **PR #3 garrison convert/enter in both directions**
-  (formation, merge, full and partial), **P14 unit types** (recruit picker + research gates,
-  cavalry/siege movement, 相剋 battle reports, archer city defence, siege waiver), **per-type banner swap**
-  (convert a cavalry/siege garrison into an army and confirm the matching PNG + bob), **wheel behaviour**
-  (over each tab and the 朝報 it scrolls, never zooms; over the bare map it still zooms; long diplomacy/intel
-  content scrolls), **English labels** (no CJK in any panel), **defensive siege** (same-owner army merged;
-  effective garrison gate; held vs captured result), watchtower capture at (6,2) and tower tint, fog
-  overlays, the live 研究/諜報 tabs, hotseat handover, victory banner; screenshot
-  `docs/screenshots/p14_smoke.png`. Lesson recorded: merge git work while Unity is CLOSED, or restart it
-  right after.
+- **Unity verification gate PENDING for PR #2 + PR #3 + P6-P8 + P14 + P15 + the partial split + the UI polish.**
+  Everything since `d4c38d0` is headless-verified only (324 assertions + Unity-assembly dotnet builds), apart
+  from the compile/Play-start probe below. The MCP bridge responds again (probed 2026-10-20); Unity compiled
+  the P15 code with 0 errors and a **fresh Play session initialised** (the previous session was stale after
+  a script reload — that alone can explain a "scroll does nothing" report). Interactive checks are still
+  outstanding: run the gate on this fresh session — compile is already green (all seven `KingdomDemo*.cs`
+  partials + `UnitTypes.cs`; the scene still references the unchanged `KingdomDemo.cs` GUID), then check
+  **PR #3 garrison convert/enter in both directions** (formation, merge, full and partial), **P14 unit
+  types** (recruit picker + research gates, movement, 相剋 battle reports, archer city defence, siege
+  waiver), **P15 specials** (the "Attack (ranged)" button at distance 2, a cavalry army's second march, the
+  plains-charge battle report, reduced infantry losses, 器械 ×1.3 vs a city), **fog-edge marches** (unseen
+  hexes are not highlighted and are refused with "destination is beyond your sight"; the scripted seat stops
+  at the horizon), **per-type banner swap** (convert a cavalry/siege garrison into an army and confirm the
+  matching PNG + bob), **wheel behaviour** (over each tab, the 史官 and the 朝報 it scrolls, never zooms;
+  over the bare map it still zooms; long diplomacy/intel content scrolls; Research fits and must not fake a
+  range), **English labels** (no CJK in any panel), **defensive siege** (same-owner army merged; effective
+  garrison gate; held vs captured result), watchtower capture at (6,2) and tower tint, fog overlays, the
+  live 研究/諜報 tabs, hotseat handover, victory banner; screenshot `docs/screenshots/p15_smoke.png`.
+  Lesson recorded: merge git work while Unity is CLOSED, or restart it right after.
 - P5 (LLM-facing controller) not started — see Next actions, Track B.
 
 ## Known integration issues (TBTK ↔ this project)
@@ -322,7 +380,7 @@ at (6,2), fog overlays, 研究/諜報 tabs rendered, screenshot `pr2_smoke.png`)
   `arity_audit.py` (call-site arity vs declaration, including code inside interpolated strings),
   `external_audit.py` (adapter→engine signatures), `namespace_guard.py` (attribute and
   fully-qualified-name namespaces), plus a grep for fully-qualified `UnityEngine.*` usages after any
-  adapter edit. Current harnesses: `/tmp/luanshi-p6` (engine, 297 assertions) and `/tmp/luanshi-ui-check`
+  adapter edit. Current harnesses: `/tmp/luanshi-p6` (engine, 324 assertions) and `/tmp/luanshi-ui-check`
   (engine + all seven UI partials against Unity assemblies).
 - **`fyp_gaming/Assets/_Recovery.meta` is untracked user state** (left by the editor after a crash) — leave
   it untracked and do not add it to git.

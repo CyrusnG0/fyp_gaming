@@ -71,6 +71,13 @@ namespace LuanShi.Engine
         public const float SiegeFieldPenalty = 0.5f;      // TBD: 器械 in a field battle
         public const float ArcherSiegeDefenseBonus = 1.25f; // LOCKED (design §5.3/§5.4: 守城 +25%)
 
+        // ---- 兵種 signature specials (P15, design §5.3, user decision 2026-10-20) -------------
+        public const int ArcherAttackRange = 2;           // TBD: 弓兵 may attack an army up to 2 hexes away
+        public const int CavalryMarchesPerSeason = 2;     // TBD: 騎兵 marches twice per season (each its own budget)
+        public const float CavalryPlainsChargeBonus = 1.3f;   // LOCKED (design §5.3 平原衝鋒: +30%)
+        public const float InfantryLossTakenMult = 0.85f; // TBD (design §5.3 耐打): 步兵 losses ×0.85 in the field
+        public const float SiegeVsCityBonus = 1.3f;       // LOCKED (design §5.3 相剋 0.8–1.3): 器械 vs 城防 ×1.3 (OQ-29)
+
         public const float PopGrowthRate = 0.05f;         // TBD: per-season population growth
         public const float PopGrowthVariance = 0.02f;     // TBD: seeded random +/- on growth
         public const float TaxGoldPerPop = 0.01f;         // TBD: gold per citizen per season

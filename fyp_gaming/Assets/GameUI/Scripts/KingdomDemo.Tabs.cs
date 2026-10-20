@@ -23,6 +23,7 @@ namespace LuanShi
         // one scroll offset per concept tab, so switching tabs does not lose the reader's place
         private readonly Dictionary<string, Vector2> tabScrolls = new Dictionary<string, Vector2>();
         private readonly Dictionary<string, float> tabContentHeights = new Dictionary<string, float>();
+        private const float TabScrollStep = 24f;   // design-space pixels per wheel notch
 
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
@@ -40,8 +41,14 @@ namespace LuanShi
                 // it gets a scroll view, and Input.cs switches TBTK's camera zoom off while the pointer
                 // is over a panel, so the wheel scrolls here instead of zooming the map underneath.
                 var view = new Rect(p.x + 4, p.y + 52, 792, height - 52f - 56f);
-                float contentHeight = tabContentHeights.TryGetValue(activeTab, out var measured) ? measured : 700f;
+                float contentHeight = tabContentHeights.TryGetValue(activeTab, out var measured)
+                    ? measured : view.height;
+                // Never below the view height: content that fits yields a zero scroll range (no phantom
+                // scrolling into blank space), while real overflow keeps its exact measured range.
+                contentHeight = Mathf.Max(contentHeight, view.height);
                 tabScrolls.TryGetValue(activeTab, out var scroll);
+                TryWheelScroll(p, view, contentHeight, ref scroll);
+
                 // 776 leaves room for the vertical bar (16px) without ever triggering a horizontal one
                 scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, 776f, contentHeight), false, false);
                 tabScrolls[activeTab] = scroll;
@@ -60,7 +67,7 @@ namespace LuanShi
                 GUI.EndScrollView();
 
                 // measured this frame and used from the next one, so the scroll range hugs the content
-                tabContentHeights[activeTab] = Mathf.Max(1f, endY + 8f);
+                tabContentHeights[activeTab] = Mathf.Max(endY + 8f, view.height);
             }
             else
             {
@@ -69,6 +76,40 @@ namespace LuanShi
 
             // pinned to the panel bottom, so a content-sized panel keeps its button inside
             if (GUI.Button(new Rect(p.x + 320, p.y + height - 56, 160, 40), "Close", btn)) activeTab = "map";
+        }
+
+        /// <summary>
+        /// Wheel scrolling for a panel, handled here instead of relying on
+        /// <see cref="GUI.BeginScrollView"/>'s internal hit test. The wheel is consumed over the whole
+        /// panel (title band and margins included), the offset is clamped to the content range, and the
+        /// event is marked used so the ScrollView cannot apply the same notch a second time. Returns true
+        /// when it consumed the wheel.
+        /// </summary>
+        bool TryWheelScroll(Rect panel, Rect view, float contentHeight, ref Vector2 scroll)
+        {
+            var e = Event.current;
+            if (e == null || e.type != EventType.ScrollWheel) return false;
+            if (!panel.Contains(e.mousePosition)) return false;
+
+            float range = contentHeight - view.height;
+            if (range <= 0f) return false;    // the content fits — there is nothing to scroll
+
+            scroll.y = Mathf.Clamp(scroll.y + e.delta.y * TabScrollStep, 0f, range);
+            e.Use();
+            return true;
+        }
+
+        /// <summary>
+        /// Draws body text at its real wrapped height instead of a guessed one. CalcHeight honours the
+        /// style's wordWrap, so a footer that wraps to three lines reserves three lines and the panel's
+        /// measured content height includes all of it — nothing bleeds under the Close button. The
+        /// minimum keeps single-line rows at their old spacing.
+        /// </summary>
+        static float WrappedLabel(GUIStyle style, string text, float x, float y, float width, float minHeight)
+        {
+            float height = Mathf.Max(minHeight, style.CalcHeight(new GUIContent(text), width));
+            GUI.Label(new Rect(x, y, width, height), text, style);
+            return height;
         }
 
         /// <summary>
@@ -97,9 +138,10 @@ namespace LuanShi
 
         float DrawDomesticPanel(Rect p, GUIStyle body)
         {
+            var wrap = new GUIStyle(body) { wordWrap = true };
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), "Domestic actions (design document chapter 11 · 10 total)", body);
-            y += 30;
+            y += WrappedLabel(wrap, "Domestic actions (design document chapter 11 · 10 total)",
+                              p.x + 20, y, 760, 22) + 8;
 
             // Live actions mirror ACTIONS.md §3 and read their numbers from BalanceConfig,
             // so this panel cannot drift from what the engine actually charges.
@@ -114,10 +156,7 @@ namespace LuanShi
                 $"Relief   costs {OrderCost(ActionType.Relief)}  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",
             };
             foreach (var row in live)
-            {
-                GUI.Label(new Rect(p.x + 36, y, 744, 22), "Available  " + row, body);
-                y += 24;
-            }
+                y += WrappedLabel(wrap, "Available  " + row, p.x + 36, y, 744, 22) + 2;
 
             y += 10;
             string[] planned =
@@ -128,29 +167,31 @@ namespace LuanShi
             };
             foreach (var row in planned)
             {
-                PlannedLabel(new Rect(p.x + 36, y, 744, 22), "[Planned] " + row, body);
-                y += 24;
+                string text = "[Planned] " + row;
+                float height = Mathf.Max(22f, wrap.CalcHeight(new GUIContent(text), 744f));
+                PlannedLabel(new Rect(p.x + 36, y, 744, height), text, wrap);
+                y += height + 2;
             }
 
             y += 10;
-            GUI.Label(new Rect(p.x + 20, y, 760, 44),
+            string footer =
                 $"Select one of our cities, then issue orders from the city panel on the left; unavailable buttons are grey.\n" +
-                $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).", body);
-            return y + 44f;
+                $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).";
+            return y + WrappedLabel(wrap, footer, p.x + 20, y, 760, 44);
         }
 
         float DrawDiplomacyPanel(Rect p, GUIStyle body)
         {
+            var wrap = new GUIStyle(body) { wordWrap = true };
             var me = engine.State.FindFaction(currentSeat);
             var btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
             const int shownFactions = 3;      // placeholder layout: the rest are summarised
 
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+            y += WrappedLabel(wrap,
                 $"Diplomacy ({me.Name})  Orders {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}  Prestige {me.Prestige}" +
                 $"  Treaties {(obs != null ? obs.Treaties.Count : 0)}" +
-                $"  Pending proposals {(obs != null ? obs.Proposals.Count : 0)}", body);
-            y += 26;
+                $"  Pending proposals {(obs != null ? obs.Proposals.Count : 0)}", p.x + 20, y, 760, 22) + 4;
 
             // Envoy message: type here, then press Send message on a faction row to submit it.
             GUI.Label(new Rect(p.x + 36, y, 120, 22), "Envoy message", body);
@@ -165,20 +206,16 @@ namespace LuanShi
                 foreach (var proposal in obs.Proposals)
                     if (proposal.ToSeatId == currentSeat) incoming.Add(proposal);
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 22), $"Pending proposals ({incoming.Count})", body);
-            y += 24;
+            y += WrappedLabel(wrap, $"Pending proposals ({incoming.Count})", p.x + 20, y, 760, 22) + 2;
 
             if (incoming.Count == 0)
-            {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20), "No incoming proposals.", body);
-                y += 24;
-            }
+                y += WrappedLabel(wrap, "No incoming proposals.", p.x + 36, y, 744, 20) + 4;
             foreach (var proposal in incoming)
             {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20),
+                y += WrappedLabel(wrap,
                     $"{SeatShort(proposal.FromSeatId)} proposes {TreatyLabel(proposal.Type)} for {proposal.DurationSeasons} seasons" +
-                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"  Note: {proposal.Text}"), body);
-                y += 22;
+                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"  Note: {proposal.Text}"),
+                    p.x + 36, y, 744, 20) + 2;
                 OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Accept",
                     null, 0, 0, btn, new Dictionary<string, string> { { "response", "accept" } });
                 OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Reject",
@@ -193,7 +230,7 @@ namespace LuanShi
                 if (other.SeatId == currentSeat) continue;
                 if (drawn == shownFactions)
                 {
-                    GUI.Label(new Rect(p.x + 36, y, 744, 20), "... (remaining factions omitted)", body);
+                    WrappedLabel(wrap, "... (remaining factions omitted)", p.x + 36, y, 744, 20);
                     break;
                 }
 
@@ -202,9 +239,9 @@ namespace LuanShi
                 int theirTrust = relation != null ? relation.TheirTrust : 0;
                 bool atWar = relation != null && relation.AtWar;
 
-                GUI.Label(new Rect(p.x + 20, y, 760, 20),
-                    $"{other.Name}  Trust me→them {myTrust} / them→me {theirTrust}  {StatusLine(other.SeatId)}", body);
-                y += 22;
+                y += WrappedLabel(wrap,
+                    $"{other.Name}  Trust me→them {myTrust} / them→me {theirTrust}  {StatusLine(other.SeatId)}",
+                    p.x + 20, y, 760, 20) + 2;
 
                 string hint = null;
                 hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.DeclareWar,
@@ -237,10 +274,7 @@ namespace LuanShi
                 y += 34;
 
                 if (hint != null)
-                {
-                    GUI.Label(new Rect(p.x + 20, y, 760, 20), hint, body);
-                    y += 22;
-                }
+                    y += WrappedLabel(wrap, hint, p.x + 20, y, 760, 20) + 2;
                 y += 4;
                 drawn++;
             }
@@ -323,19 +357,19 @@ namespace LuanShi
         /// </summary>
         float DrawIntelPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
+            var wrap = new GUIStyle(body) { wordWrap = true };
             int espionage = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+            y += WrappedLabel(wrap,
                 $"Intelligence ({engine.State.FindFaction(currentSeat)?.Name})  Espionage level {espionage}" +
                 $"  ·  success {BalanceConfig.SpySuccessChance(espionage) * 100f:F0}% per mission" +
-                $"  ·  gold {Treasury()}  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}", body);
-            y += 24;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22),
-                "Fog of war: 3 hexes around our cities, 2 around our armies. A failed mission exposes the agent publicly (prestige −8).", body);
-            y += 26;
+                $"  ·  gold {Treasury()}  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}",
+                p.x + 20, y, 760, 22) + 2;
+            y += WrappedLabel(wrap,
+                "Fog of war: 3 hexes around our cities, 2 around our armies. A failed mission exposes the agent publicly (prestige −8).",
+                p.x + 20, y, 760, 22) + 4;
 
-            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Missions", body);
-            y += 20;
+            y += WrappedLabel(wrap, "Missions", p.x + 20, y, 760, 20);
             string[] missions =
             {
                 $"Scout {BalanceConfig.ScoutGoldCost} gold · Espionage {BalanceConfig.ScoutResearchLevel} — target city's garrison and food (banded below Espionage {BalanceConfig.ScoutExactAccuracyLevel})",
@@ -343,70 +377,68 @@ namespace LuanShi
                 $"Sow distrust {BalanceConfig.SowDistrustGoldCost} gold · Espionage {BalanceConfig.SowDistrustResearchLevel} — two other seats lose {BalanceConfig.SowDistrustTrustPenalty} trust in each other",
             };
             foreach (string mission in missions)
-            {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20), mission, body);
-                y += 20;
-            }
+                y += WrappedLabel(wrap, mission, p.x + 36, y, 744, 20);
             y += 8;
 
             // targets: the foreign cities this seat can see right now
-            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Targets (foreign cities in sight)", body);
-            y += 22;
+            y += WrappedLabel(wrap, "Targets (foreign cities in sight)", p.x + 20, y, 760, 20) + 2;
             var targets = new List<CityState>();
             if (obs != null)
                 foreach (var city in obs.Cities)
                     if (city.OwnerSeatId != currentSeat) targets.Add(city);
             if (targets.Count == 0)
-            {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20),
-                    "No foreign city is in sight — march an army closer, then send an agent.", body);
-                y += 22;
-            }
+                y += WrappedLabel(wrap,
+                    "No foreign city is in sight — march an army closer, then send an agent.",
+                    p.x + 36, y, 744, 20) + 2;
             int shown = 0;
             foreach (var city in targets)
             {
-                if (shown == 2) { GUI.Label(new Rect(p.x + 36, y, 744, 20), "... (remaining cities omitted)", body); y += 22; break; }
+                if (shown == 2)
+                {
+                    y += WrappedLabel(wrap, "... (remaining cities omitted)", p.x + 36, y, 744, 20) + 2;
+                    break;
+                }
                 shown++;
                 var report = obs.FindScoutedCity(city.Id);
-                GUI.Label(new Rect(p.x + 36, y, 384, 20),
+                string cityLine =
                     $"{city.Name} ({OwnerName(city)})  garrison {city.Garrison}, morale {city.Morale}" +
-                    (report != null ? $", report until season {report.UntilSeason}" : ""), body);
+                    (report != null ? $", report until season {report.UntilSeason}" : "");
+                float cityHeight = WrappedLabel(wrap, cityLine, p.x + 36, y, 384, 20);
                 OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, city.Id, "Scout",
                     SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
                 OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, city.Id, "Rumours",
                     city.IsNeutral ? "no faction to undermine"
                                    : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
                     0, 0, btn);
-                y += 26;
+                y += Mathf.Max(cityHeight, 24f) + 2;
             }
 
             // live reports on cities nothing of ours can see — and the way to extend them, since a report
             // is the only handle a seat has on a city outside its fog (ADR-015)
             if (obs != null && obs.ScoutedCities.Count > 0)
             {
-                GUI.Label(new Rect(p.x + 20, y, 760, 20), "Live reports", body);
-                y += 22;
+                y += WrappedLabel(wrap, "Live reports", p.x + 20, y, 760, 20) + 2;
                 foreach (var report in obs.ScoutedCities)
                 {
                     string detail = report.Accuracy == "exact"
                         ? $"exact · garrison {report.Garrison}, food {report.Food}, morale {report.Morale}"
                         : $"band · troops {report.GarrisonBand}, food {report.FoodBand}";
-                    GUI.Label(new Rect(p.x + 36, y, 384, 20),
-                        $"{report.Name} ({SeatShort(report.OwnerSeatId)})  {detail}  ·  to season {report.UntilSeason}", body);
+                    string reportLine =
+                        $"{report.Name} ({SeatShort(report.OwnerSeatId)})  {detail}  ·  to season {report.UntilSeason}";
+                    float reportHeight = WrappedLabel(wrap, reportLine, p.x + 36, y, 384, 20);
                     OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, report.CityId, "Scout",
                         SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
                     OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, report.CityId, "Rumours",
                         string.IsNullOrEmpty(report.OwnerSeatId) ? "no faction to undermine"
                             : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
                         0, 0, btn);
-                    y += 26;
+                    y += Mathf.Max(reportHeight, 24f) + 2;
                 }
                 y += 4;
             }
 
             // 挑撥離間 needs two other seats: offer the first pairs and say so when there are more
-            GUI.Label(new Rect(p.x + 20, y, 760, 20), "Sow distrust between", body);
-            y += 22;
+            y += WrappedLabel(wrap, "Sow distrust between", p.x + 20, y, 760, 20) + 2;
             var others = new List<string>();
             if (obs != null)
                 foreach (var view in obs.Factions)
@@ -427,14 +459,9 @@ namespace LuanShi
                 if (pairs == 2) break;
             }
             if (pairs == 0)
-            {
-                GUI.Label(new Rect(p.x + 36, y, 744, 20), "No other seat is known yet.", body);
-                y += 20;
-            }
+                y += WrappedLabel(wrap, "No other seat is known yet.", p.x + 36, y, 744, 20);
             else if (others.Count > 2)
-            {
-                GUI.Label(new Rect(p.x + 348, y - 26, 420, 20), "... (remaining pairs omitted)", body);
-            }
+                WrappedLabel(wrap, "... (remaining pairs omitted)", p.x + 348, y - 26, 420, 20);
             return y;
         }
 
@@ -457,12 +484,13 @@ namespace LuanShi
         /// </summary>
         float DrawResearchPanel(Rect p, GUIStyle body, GUIStyle btn)
         {
+            var wrap = new GUIStyle(body) { wordWrap = true };
             float y = p.y + 52;
-            GUI.Label(new Rect(p.x + 20, y, 760, 22),
+            y += WrappedLabel(wrap,
                 $"Research points {obs.ResearchPoints}  (+{BalanceConfig.ResearchIncome(obs.ResearchLevel(ResearchLine.Governance))}/season)" +
                 $"  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
-                $"  ·  level costs {string.Join(" / ", System.Array.ConvertAll(BalanceConfig.ResearchLevelCosts, v => v.ToString()))}", body);
-            y += 30;
+                $"  ·  level costs {string.Join(" / ", System.Array.ConvertAll(BalanceConfig.ResearchLevelCosts, v => v.ToString()))}",
+                p.x + 20, y, 760, 22) + 8;
 
             for (int i = 0; i < ResearchLine.All.Length; i++)
             {
@@ -475,24 +503,26 @@ namespace LuanShi
                                : obs.CommandPoints < BalanceConfig.CommandPointCost(ActionType.Research) ? "No orders left"
                                : null;
 
-                GUI.Label(new Rect(p.x + 20, y, 560, 22),
-                    $"{ResearchLine.Label(line)}  {ResearchPips(level)}  {level}/{BalanceConfig.ResearchMaxLevel}", body);
+                WrappedLabel(wrap,
+                    $"{ResearchLine.Label(line)}  {ResearchPips(level)}  {level}/{BalanceConfig.ResearchMaxLevel}",
+                    p.x + 20, y, 560, 22);
                 OrderButton(new Rect(p.x + 596, y, 184, 30), ActionType.Research, null, "Research",
                     blocked, 0, 0, btn, new Dictionary<string, string> { { "line", line } });
 
-                GUI.Label(new Rect(p.x + 36, y + 26, 744, 20),
-                    "Now:  " + (level > 0 ? ResearchEffect(line, level) : "—"), body);
-                GUI.Label(new Rect(p.x + 36, y + 44, 744, 20),
+                float nowHeight = WrappedLabel(wrap,
+                    "Now:  " + (level > 0 ? ResearchEffect(line, level) : "—"), p.x + 36, y + 26, 744, 20);
+                float nextHeight = WrappedLabel(wrap,
                     maxed ? "All five levels researched."
-                          : $"Next: level {level + 1} for {cost} points — {ResearchEffect(line, level + 1)}", body);
-                y += 70;
+                          : $"Next: level {level + 1} for {cost} points — {ResearchEffect(line, level + 1)}",
+                    p.x + 36, y + 26 + nowHeight, 744, 20);
+                y += 26 + nowHeight + nextHeight + 4;   // 70 for two single-line effects
             }
 
             y += 6;
-            GUI.Label(new Rect(p.x + 20, y, 760, 44),
+            string footer =
                 "Points arrive at every season rollover. Harvest, tax, combat and training-cap effects apply as soon as they resolve;\n" +
-                "Law (level 3) and the income bonus settle at the next rollover. The Academy building (+3/season) and Intelligence 3-5 effects are deferred.", body);
-            return y + 44f;
+                "Law (level 3) and the income bonus settle at the next rollover. The Academy building (+3/season) and Intelligence 3-5 effects are deferred.";
+            return y + WrappedLabel(wrap, footer, p.x + 20, y, 760, 44);
         }
 
         /// <summary>
@@ -574,6 +604,7 @@ namespace LuanShi
             float viewHeight = HistorianViewHeight();
             float contentHeight = records.Count * HistorianLineHeight + 8f;
             var view = new Rect(p.x + 20, p.y + 80, 760, viewHeight);
+            TryWheelScroll(p, view, contentHeight, ref historianScroll);
             historianScroll = GUI.BeginScrollView(view, historianScroll,
                                                   new Rect(0, 0, 744, contentHeight), false, false);
             for (int i = 0; i < records.Count; i++)

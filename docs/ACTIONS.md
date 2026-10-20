@@ -84,9 +84,9 @@ deferred behind research. All seven domestic actions emit their event with the v
 
 | # | id | 中文 | CP | Preconditions | Effect | Event | Status |
 |---|---|---|---|---|---|---|---|
-| M1 | `march` | 行軍 | 1/軍 | path cost ≤ the army's **type budget** (步/弓 6, 騎 8, 械 3; 冬 ×0.7 — §4c), dest walkable, no army on the destination | move; neutral city → **capture** (may end the game, §8b 一統天下); a watchtower on the destination not owned by the mover → **tower captured** too (`watch_tower_captured`, public; no war/trust/威望 consequence yet — OPEN_QUESTIONS 26) | `army_moved` (+`city_captured` public, +`watch_tower_captured` public) | ✅ |
-| M2 | `attack_army` | 野戰 | 1 | enemy army within 1 格 (`param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; **兵種相剋** ×1.3 / ×0.8, and 攻城器械 in the field ×0.5 (§5.3/§4c); 士氣 0 → 潰散 +30% and retreat | `battle_field` public (payload includes both `unit_type`s) | ✅ |
-| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3× effective garrison** **unless the army is 攻城器械** (design §4.3 "或器械"); effective garrison = `city.Garrison` + a same-owner army standing on the city (PR #3, ADR-018) | **assault only, single resolution** (ADR-010 #4): the same-owner defending army is **merged into the city garrison and removed from `Armies` before the rounds**; an **弓兵 garrison defends at ×1.25** (§5.3/§5.4); capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b). **Post-siege semantics are NOT locked**: a held assault leaves the merged troops as garrison with no army entity, and on capture the combined garrison is zeroed while the old retreat branch is effectively unreachable → OPEN_QUESTIONS 25 | `battle_siege` public (+`city_captured`; defensive merge emits `army_garrisoned` public with `mode=defensive_assault`) | ✅ (integration; restore/rout semantics ❓) |
+| M1 | `march` | 行軍 | 1/軍 per march | path cost ≤ the army's **type budget** (步/弓 6, 騎 8, 械 3; 冬 ×0.7 — §4c), dest walkable, **dest inside the acting seat's sight** (fog-edge rule, 2026-10-20), no army on the destination; 步/弓/械 march **once** per season, 騎兵 **twice** (§4c specials) | move; neutral city → **capture** (may end the game, §8b 一統天下); a watchtower on the destination not owned by the mover → **tower captured** too (`watch_tower_captured`, public; no war/trust/威望 consequence yet — OPEN_QUESTIONS 26) | `army_moved` (+`city_captured` public, +`watch_tower_captured` public; carries `march_count`, `marches_per_season`) | ✅ |
+| M2 | `attack_army` | 野戰 | 1 | enemy army within **1 格** (**弓兵 2 格** — ranged; `param_a/b` = its hex) | field battle (§6): ≤5 rounds, loss/round = enemy 戰力×8%; **兵種相剋** ×1.3 / ×0.8, 攻城器械 in the field ×0.5, 弓兵 ranged, 騎兵 平原衝鋒 ×1.3, 步兵 耐打 ×0.85 losses (§5.3/§4c); 士氣 0 → 潰散 +30% and retreat | `battle_field` public (payload includes both `unit_type`s, `attack_range`, `plains_charge`, the type/loss multipliers) | ✅ |
+| M3 | `attack_city` | 攻城 | 2 | adjacent to enemy city (`param_a/b` = its hex); 兵力 ≥**3× effective garrison** **unless the army is 攻城器械** (design §4.3 "或器械"); effective garrison = `city.Garrison` + a same-owner army standing on the city (PR #3, ADR-018) | **assault only, single resolution** (ADR-010 #4): the same-owner defending army is **merged into the city garrison and removed from `Armies` before the rounds**; an **弓兵 garrison defends at ×1.25** (§5.3/§5.4) and a **攻城器械 attacker deals ×1.3 vs 城防** (P15, §4c, OQ-29); capture → ownership transfer, `駐軍 0`, `民心 0`, attacker +威望 (may end the game, §8b). **Post-siege semantics are NOT locked**: a held assault leaves the merged troops as garrison with no army entity, and on capture the combined garrison is zeroed while the old retreat branch is effectively unreachable → OPEN_QUESTIONS 25 | `battle_siege` public (+`city_captured`; defensive merge emits `army_garrisoned` public with `mode=defensive_assault`) | ✅ (integration; restore/rout semantics ❓) |
 | M4 | `massacre` | 屠城 | 0 | just captured a city | instant pacify; `民心 −30` perm, `威望 −20`, all factions' trust −35 | `city_massacred` public | ⏸ (designed §4.3/§7.3, missing from ch.11) |
 | — | `encamp` | 紮營 | 1 | — | 士氣+10, 補給+20 | | ⏸ (feeding an army is now a P6 resolution rule, §8b — the 補給 *field* this action restores is still 待決) |
 | — | `ambush` | 設伏 | 1 | forest/hill | first-round dmg ×1.5, 敵士氣−20 | | ⏸ |
@@ -123,24 +123,27 @@ transfers; every other **ordinary** action keeps a public `action` record.
 **Unresolved:** siege restoration/retreat/destruction semantics (OPEN_QUESTIONS 25) and whether mixed
 garrisons should keep conservative movement provenance (OPEN_QUESTIONS 24).
 
-## 4c. 兵種 Unit types — ✅ P14 (design §5.4, ADR-019)
+## 4c. 兵種 Unit types — ✅ P14 (design §5.4, ADR-019) · signature specials ✅ P15 (design §5.3)
 
 One type per army and per city garrison (`ArmyState.UnitType`, `CityState.GarrisonType`, default
 `infantry`). The four English keys are the frozen LLM contract; 募兵 takes `args.unit_type`, and combat,
 movement and upkeep read the same keys. A merge/garrison transfer must match the garrison's type (an
 **empty** garrison adopts the army's type; an empty garrison recruited into adopts the recruited type).
 
-| key | 中文 | Gate | Recruit 金/1,000 | 糧/troop/季 | Move/季 | 相剋 / notes |
-|---|---|---|---|---|---|---|
-| `infantry` | 步兵 | — | 100 | 0.10 | 6 | beats `archer` (剋 ×1.3) |
-| `archer` | 弓兵 | — | 150 | 0.10 | 6 | beats `cavalry`; a garrison defends a city ×1.25 |
-| `cavalry` | 騎兵 | 兵法 2 | 300 | 0.20 | 8 | beats `infantry`; double upkeep |
-| `siege` | 攻城器械 | 兵法 3 | 500 | 0.05 | 3 | ×0.5 in field battles; waives the 3:1 assault |
+| key | 中文 | Gate | Recruit 金/1,000 | 糧/troop/季 | Move/季 | 相剋 | Signature special (P15) |
+|---|---|---|---|---|---|---|---|
+| `infantry` | 步兵 | — | 100 | 0.10 | 6 | beats `archer` (剋 ×1.3) | **耐打**: takes ×0.85 losses in field battles (attacker or defender) |
+| `archer` | 弓兵 | — | 150 | 0.10 | 6 | beats `cavalry`; a garrison defends a city ×1.25 | **Ranged**: may `attack_army` an army up to 2 hexes away (all others 1) |
+| `cavalry` | 騎兵 | 兵法 2 | 300 | 0.20 | 8 | beats `infantry`; double upkeep | **2 marches/season** (each 1 號令, its own 8-point budget); **平原衝鋒** ×1.3 when attacking an army on a plains hex |
+| `siege` | 攻城器械 | 兵法 3 | 500 | 0.05 | 3 | ×0.5 in field battles; waives the 3:1 assault | **剋 城防**: ×1.3 attacker multiplier in a siege (OQ-29, answered) |
 
 相剋: 剋 ×1.3, 被剋 ×0.8, otherwise ×1.0 (design §5.3/§6.1). 攻城器械 stays out of the cycle and is ×0.5
-in field battles. Values are 待決 (design §5.4) except the gates (design §9) and the 0.8–1.3 / +25%
-figures. **Design gap:** §5.3's 「攻城器械 剋 城防」 has no numeric value in the locked P14 scope, so a siege
-army only waives 3:1 — no separate attacker bonus vs 城防 is applied.
+in field battles. 平原 is a walkable hex at the base movement cost 1 (`MapData.IsPlains`), so forests (cost 2),
+mountains and rivers never trigger the charge. The specials live in `BalanceConfig`:
+`ArcherAttackRange` (TBD), `CavalryMarchesPerSeason` (TBD), `CavalryPlainsChargeBonus` (LOCKED design §5.3
++30%), `InfantryLossTakenMult` (TBD, 耐打), `SiegeVsCityBonus` (LOCKED design §5.3 相剋 range 0.8–1.3 —
+**answers OPEN_QUESTIONS 29**). A cavalry army that marched even once remains movement-spent for the
+garrison round-trip guard (ADR-018), including its second march.
 
 ## 5. 外交 Diplomacy — `target_id` = a **seat** (never a hex); Trust (−100..+100 per ordered pair) + 威望 + Treaty model
 
@@ -286,6 +289,7 @@ game always opens in 春 and always has the same season sequence for a given see
 | `CityState` | `GarrisonMarchedThisSeason` (bool, internal) | ✅ PR #3 §4b — conservative movement bookkeeping for garrison round-trips; reset at rollover; **not** in the observation JSON |
 | `CityState` | `GarrisonType` (兵種 key, default `infantry`) | ✅ P14 §4c — one type per garrison; exposed as `garrison_type` in the observation JSON under the normal visibility rules |
 | `ArmyState` | `UnitType` (兵種 key, default `infantry`) | ✅ P14 §4c — one type per army; exposed as `unit_type` (foreign armies in sight too) |
+| `ArmyState` | `MarchCountThisSeason` (int) | ✅ P15 §4c — 騎兵 may march twice; `MarchedThisSeason` stays the binary garrison-guard flag (ADR-018). Reset at rollover |
 | `FactionState` | `威望 (0-100, start 50 待決)` | ✅ clamped, written by gifts/attacks/treaties |
 | `FactionState` | `RevoltChanceMult` (default 1.0) | ✅ P6 §8b — read by `RollRevolt`; **P7 吏治 3 syncs it to 0.5** at rollover (ADR-014) |
 | `DiplomacyState` (new) | `Trust[from][to] ∈ −100..+100` (start 0 待決), `Treaties` list, `WarWith` set, `Proposals` list | ✅ trust is directional and clamped; one pending offer per pair; expiry enforced at rollover |

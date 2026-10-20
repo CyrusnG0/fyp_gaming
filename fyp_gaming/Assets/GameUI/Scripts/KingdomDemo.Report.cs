@@ -202,6 +202,7 @@ namespace LuanShi
             if (lines * ReportLineHeight > textHeight)
             {
                 float contentHeight = lines * ReportLineHeight + 4f;
+                TryWheelScroll(p, view, contentHeight, ref reportScroll);
                 reportScroll = GUI.BeginScrollView(view, reportScroll,
                                                    new Rect(0, 0, 744, contentHeight), false, false);
                 GUI.Label(new Rect(0, 0, 736, contentHeight), sb.ToString(), body);

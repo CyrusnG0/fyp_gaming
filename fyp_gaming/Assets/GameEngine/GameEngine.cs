@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace LuanShi.Engine
@@ -50,7 +51,11 @@ namespace LuanShi.Engine
                 c.ReclaimedThisSeason = false;
                 c.GarrisonMarchedThisSeason = false;   // movement resets with the army flags below
             }
-            foreach (var a in State.Armies) a.MarchedThisSeason = false;
+            foreach (var a in State.Armies)
+            {
+                a.MarchedThisSeason = false;
+                a.MarchCountThisSeason = 0;   // P15: 騎兵 may march twice, everyone else once
+            }
             Emit(null, null, "season_start", "public",
                 P("season", State.Season.ToString(),
                   "season_name", BalanceConfig.SeasonName(State.Season)), null);
@@ -457,6 +462,9 @@ namespace LuanShi.Engine
                 cityArmy.Troops += troops;
                 // troops that already marched this season stay movement-spent in the merged army
                 cityArmy.MarchedThisSeason |= city.GarrisonMarchedThisSeason;
+                // ...and spent troops exhaust every march that type gets (P15: 騎兵's second one too)
+                if (city.GarrisonMarchedThisSeason)
+                    cityArmy.MarchCountThisSeason = UnitTypes.MarchesPerSeason(cityArmy.UnitType);
                 Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
                     P("city_id", city.Id, "army_id", cityArmy.Id, "troops", troops.ToString(),
                       "mode", "merged", "unit_type", garrisonType),
@@ -474,8 +482,11 @@ namespace LuanShi.Engine
                     UnitType = garrisonType,      // a formed army inherits the garrison's type
                     X = city.X,
                     Z = city.Z,
-                    // a garrison that absorbed a marched army may not mint a fresh mover
+                    // a garrison that absorbed a marched army may not mint a fresh mover — not even the
+                    // second 騎兵 march (ADR-018: "marched at all" means movement-spent for garrison purposes)
                     MarchedThisSeason = city.GarrisonMarchedThisSeason,
+                    MarchCountThisSeason = city.GarrisonMarchedThisSeason
+                        ? UnitTypes.MarchesPerSeason(garrisonType) : 0,
                 };
                 State.Armies.Add(newArmy);
                 Emit(fac.SeatId, fac.Controller, "garrison_converted", "owner_and_observers",
@@ -759,11 +770,23 @@ namespace LuanShi.Engine
             var army = State.FindArmy(cmd.TargetId);
             if (army == null) return ValidationResult.Fail($"unknown army '{cmd.TargetId}'");
             if (army.OwnerSeatId != fac.SeatId) return ValidationResult.Fail("not your army");
-            if (army.MarchedThisSeason) return ValidationResult.Fail("army already marched this season");
+
+            // P15: 騎兵 gets two marches a season, each paid for and budgeted separately; everyone else one.
+            int marches = UnitTypes.MarchesPerSeason(army.UnitType);
+            if (army.MarchCountThisSeason >= marches)
+                return ValidationResult.Fail(marches > 1
+                    ? $"army already marched {marches} times this season"
+                    : "army already marched this season");
 
             int tx = cmd.ParamA, tz = cmd.ParamB;
             if (!State.Map.IsWalkable(tx, tz)) return ValidationResult.Fail("destination not walkable");
             if (tx == army.X && tz == army.Z) return ValidationResult.Fail("already there");
+
+            // Fog-edge march rule (user decision 2026-10-20): a seat may only order a march to a hex it
+            // can actually see. Sight comes from the same InSight() used by Observe — no duplicate radius
+            // logic. This bounds effective movement to the vision ring (~2-3 hexes), by design.
+            if (!InSight(fac.SeatId, tx, tz))
+                return ValidationResult.Fail("destination is beyond your sight");
 
             var blocker = State.ArmyAt(tx, tz);
             if (blocker != null && blocker.Id != army.Id) return ValidationResult.Fail("destination occupied by an army");
@@ -779,9 +802,12 @@ namespace LuanShi.Engine
 
             int fx = army.X, fz = army.Z;
             army.X = tx; army.Z = tz;
-            army.MarchedThisSeason = true;
+            army.MarchCountThisSeason++;
+            army.MarchedThisSeason = true;   // stays binary: garrison movement guard (ADR-018) reads this
             Emit(fac.SeatId, fac.Controller, "army_moved", "owner_and_observers",
-                P("army_id", army.Id, "from", $"[{fx},{fz}]", "to", $"[{tx},{tz}]", "cost", cost.ToString()),
+                P("army_id", army.Id, "from", $"[{fx},{fz}]", "to", $"[{tx},{tz}]", "cost", cost.ToString(),
+                  "march_count", army.MarchCountThisSeason.ToString(),
+                  "marches_per_season", marches.ToString()),
                 cmd.ActionId);
 
             if (cityAtDest != null && cityAtDest.IsNeutral)
@@ -901,17 +927,25 @@ namespace LuanShi.Engine
         /// army, or FogWatchTowerRange of an own watchtower is seen regardless of who stands there. Terrain
         /// does not block sight (a radius, not a line).
         /// </summary>
-        public bool InSight(string seatId, int x, int z)
+        public bool InSight(string seatId, int x, int z) => InSight(State, seatId, x, z);
+
+        /// <summary>
+        /// State-only form of <see cref="InSight(string,int,int)"/>, for code that holds a GameState rather
+        /// than the engine instance — the ScriptedController's documented canonical-state exception
+        /// (ADR-011) uses it so its march plans mirror the validator instead of rejecting orders.
+        /// </summary>
+        public static bool InSight(GameState state, string seatId, int x, int z)
         {
-            foreach (var city in State.Cities)
+            if (state == null || state.Map == null) return false;
+            foreach (var city in state.Cities)
                 if (city.OwnerSeatId == seatId
-                    && State.Map.HexDistance(city.X, city.Z, x, z, BalanceConfig.FogCityRange) >= 0) return true;
-            foreach (var army in State.Armies)
+                    && state.Map.HexDistance(city.X, city.Z, x, z, BalanceConfig.FogCityRange) >= 0) return true;
+            foreach (var army in state.Armies)
                 if (army.OwnerSeatId == seatId
-                    && State.Map.HexDistance(army.X, army.Z, x, z, BalanceConfig.FogArmyRange) >= 0) return true;
-            foreach (var tower in State.WatchTowers)
+                    && state.Map.HexDistance(army.X, army.Z, x, z, BalanceConfig.FogArmyRange) >= 0) return true;
+            foreach (var tower in state.WatchTowers)
                 if (tower.OwnerSeatId == seatId
-                    && State.Map.HexDistance(tower.X, tower.Z, x, z, BalanceConfig.FogWatchTowerRange) >= 0) return true;
+                    && state.Map.HexDistance(tower.X, tower.Z, x, z, BalanceConfig.FogWatchTowerRange) >= 0) return true;
             return false;
         }
 
@@ -1235,16 +1269,24 @@ namespace LuanShi.Engine
             var defender = State.ArmyAt(cmd.ParamA, cmd.ParamB);
             if (defender == null) return ValidationResult.Fail($"no army at [{cmd.ParamA},{cmd.ParamB}]");
             if (defender.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own army");
-            if (!State.Map.AreAdjacent(army.X, army.Z, defender.X, defender.Z))
-                return ValidationResult.Fail("target army is not adjacent");
+
+            // P15 弓兵 ranged attack: archers reach 2 hexes, every other type 1. Resolution is unchanged —
+            // a ranged attack is a normal field battle, only the range gate differs.
+            int attackRange = UnitTypes.AttackRange(army.UnitType);
+            if (State.Map.HexDistance(army.X, army.Z, defender.X, defender.Z, attackRange) < 0)
+                return ValidationResult.Fail($"target army is out of range (max {attackRange})");
 
             int attackerTraining = TrainingOf(fac.SeatId), defenderTraining = TrainingOf(defender.OwnerSeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float defenderResearch = CombatResearchMult(defender.OwnerSeatId);
             string attackerType = UnitTypes.Normalize(army.UnitType);
             string defenderType = UnitTypes.Normalize(defender.UnitType);
-            float attackerTypeMult = UnitTypes.FieldCombatMultiplier(attackerType, defenderType);
+            bool defenderOnPlains = State.Map.IsPlains(defender.X, defender.Z);
+            bool plainsCharge = UnitTypes.IsPlainsCharge(attackerType, defenderOnPlains);
+            float attackerTypeMult = UnitTypes.FieldAttackMultiplier(attackerType, defenderType, defenderOnPlains);
             float defenderTypeMult = UnitTypes.FieldCombatMultiplier(defenderType, attackerType);
+            float attackerLossMult = UnitTypes.LossTakenMultiplier(attackerType);
+            float defenderLossMult = UnitTypes.LossTakenMultiplier(defenderType);
             int previewAttackerStrength = Strength(army.Troops, attackerTraining, army.Morale,
                                                    attackerResearch, attackerTypeMult);
             int previewDefenderStrength = Strength(defender.Troops, defenderTraining, defender.Morale,
@@ -1256,6 +1298,8 @@ namespace LuanShi.Engine
                 $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
                 $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) * type_mult({defenderTypeMult}) = {previewDefenderStrength}; " +
                 $"attacker_type={attackerType}, defender_type={defenderType}, " +
+                $"attack_range={attackRange}, defender_on_plains={defenderOnPlains}, plains_charge={plainsCharge}, " +
+                $"attacker_loss_mult={Fmt(attackerLossMult)}, defender_loss_mult={Fmt(defenderLossMult)}, " +
                 $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}");
 
             string legitimacy = ApplyAttackReputation(fac, defender.OwnerSeatId, cmd);
@@ -1275,11 +1319,12 @@ namespace LuanShi.Engine
                 int attackerStrength = Strength(army.Troops, attackerTraining, army.Morale,
                                                 attackerResearch, attackerTypeMult);
 
-                // Design §6.2: each side takes enemy 戰力 × CombatLossPerRound that round.
-                int toAttacker = CapLoss(Vary(defenderStrength
-                                              * BalanceConfig.CombatLossPerRound), army.Troops);
-                int toDefender = CapLoss(Vary(attackerStrength
-                                              * BalanceConfig.CombatLossPerRound), defender.Troops);
+                // Design §6.2: each side takes enemy 戰力 × CombatLossPerRound that round. P15 耐打 scales
+                // the losses an 步兵 unit takes (attacker or defender) before CapLoss.
+                int toAttacker = CapLoss(ScaledLoss(
+                    Vary(defenderStrength * BalanceConfig.CombatLossPerRound), attackerLossMult), army.Troops);
+                int toDefender = CapLoss(ScaledLoss(
+                    Vary(attackerStrength * BalanceConfig.CombatLossPerRound), defenderLossMult), defender.Troops);
 
                 CombatDebugLogger?.Invoke(
                     $"[Combat][Field] action={cmd.ActionId} round={round} attacker={army.Id} defender={defender.Id} " +
@@ -1287,6 +1332,8 @@ namespace LuanShi.Engine
                     $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {attackerStrength}; " +
                     $"defender_strength = troops({defender.Troops}) * (1 + training({defenderTraining}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
                     $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({defender.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({defenderResearch}) * type_mult({defenderTypeMult}) = {defenderStrength}; " +
+                    $"plains_charge={plainsCharge}, attacker_loss_mult={Fmt(attackerLossMult)}, " +
+                    $"defender_loss_mult={Fmt(defenderLossMult)}, " +
                     $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
                     $"attacker_losses={toAttacker}, defender_losses={toDefender}");
 
@@ -1329,6 +1376,11 @@ namespace LuanShi.Engine
                   "rounds", round.ToString(), "round_log", roundLog.ToString(),
                   "attacker_morale", army.Morale.ToString(), "defender_morale", defender.Morale.ToString(),
                   "attacker_training", attackerTraining.ToString(), "defender_training", defenderTraining.ToString(),
+                  "attack_range", attackRange.ToString(),
+                  "defender_on_plains", defenderOnPlains ? "true" : "false",
+                  "plains_charge", plainsCharge ? "true" : "false",
+                  "attacker_type_mult", Fmt(attackerTypeMult), "defender_type_mult", Fmt(defenderTypeMult),
+                  "attacker_loss_mult", Fmt(attackerLossMult), "defender_loss_mult", Fmt(defenderLossMult),
                   "outcome", outcome, "winner_seat_id", winnerSeatId ?? "",
                   "attack_legitimacy", legitimacy), cmd.ActionId);
 
@@ -1385,7 +1437,8 @@ namespace LuanShi.Engine
             int training = TrainingOf(fac.SeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
             float garrisonResearch = CombatResearchMult(city.OwnerSeatId);
-            float attackerTypeMult = 1f;      // no siege-attacker 相剋 in the locked P14 scope
+            float attackerTypeMult = UnitTypes.SiegeVsCityMultiplier(attackerType);   // P15: 器械 ×1.3 vs 城防 (OQ-29)
+            bool siegeVsCity = attackerType == UnitTypes.Siege;
             float garrisonTypeMult = UnitTypes.SiegeDefenseMultiplier(garrisonType);
             int previewGarrisonStrength = GarrisonStrength(city, garrisonResearch, garrisonTypeMult);
             int previewAttackerStrength = Strength(army.Troops, training, army.Morale, attackerResearch,
@@ -1397,6 +1450,7 @@ namespace LuanShi.Engine
                 $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
                 $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {previewAttackerStrength}; " +
                 $"attacker_type={attackerType}, garrison_type={garrisonType}, siege_waiver={siegeWaiver}, " +
+                $"siege_vs_city={siegeVsCity}, attacker_type_mult={Fmt(attackerTypeMult)}, " +
                 $"assault_ratio={BalanceConfig.AssaultTroopRatio}:1, required_troops={requiredTroops}, " +
                 $"available_troops={army.Troops}");
             string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
@@ -1426,6 +1480,7 @@ namespace LuanShi.Engine
                     $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) * type_mult({garrisonTypeMult}) = {garrisonStrength}; " +
                     $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
                     $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {attackerStrength}; " +
+                    $"siege_vs_city={siegeVsCity}, attacker_type_mult={Fmt(attackerTypeMult)}, " +
                     $"loss_rate={BalanceConfig.CombatLossPerRound}, variance={BalanceConfig.CombatVariance}, " +
                     $"army_losses={toArmy}, garrison_losses={toGarrison}");
 
@@ -1455,6 +1510,8 @@ namespace LuanShi.Engine
                   "rounds", round.ToString(), "round_log", roundLog.ToString(),
                   "attacker_morale", army.Morale.ToString(),
                   "defense", defense.ToString(), "city_training", garrisonTraining.ToString(),
+                  "siege_vs_city", siegeVsCity ? "true" : "false",
+                  "attacker_type_mult", Fmt(attackerTypeMult), "garrison_type_mult", Fmt(garrisonTypeMult),
                   "outcome", outcome, "attack_legitimacy", legitimacy), cmd.ActionId);
 
             if (outcome == "captured")
@@ -1626,6 +1683,14 @@ namespace LuanShi.Engine
                : (int)(100f * loss / troopsAtRoundStart * BalanceConfig.CombatMoraleLossPerLossPercent);
 
         private static int CapLoss(int loss, int troops) => loss > troops ? troops : loss;
+
+        /// <summary>Scales a rolled loss by a type multiplier (P15 耐打), rounding to a whole soldier.</summary>
+        private static int ScaledLoss(int loss, float multiplier)
+            => multiplier == 1f ? loss : (int)Math.Round(loss * multiplier);
+
+        /// <summary>Invariant one-decimal-ish multiplier text for debug traces and event payloads.</summary>
+        private static string Fmt(float value)
+            => value.ToString("0.###", CultureInfo.InvariantCulture);
 
         /// <summary>潰散: extra losses, then fall back to the nearest own city — or die trying.</summary>
         private void RoutArmy(ArmyState army, string cause, ActionCommand cmd, bool allowOccupiedCity = false)
