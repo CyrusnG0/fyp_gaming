@@ -99,6 +99,7 @@ internal static partial class Harness
         RunLlmRunner();
         RunLlmActivity();
         RunLlmSessionChat();
+        RunMovementOptions();
         RunDemoS4();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
