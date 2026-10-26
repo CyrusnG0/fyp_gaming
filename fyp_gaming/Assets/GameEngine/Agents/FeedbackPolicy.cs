@@ -18,6 +18,7 @@ namespace LuanShi.Engine
         public const string NoOrdersLeft = "no orders left";
         public const string CapReached = "cap reached";
         public const string AlreadyMarched = "already marched this season";
+        public const string AlreadyAtDestination = "already at that destination";
         public const string DestinationNotReachable = "destination not reachable this season";
         public const string DestinationNotVisible = "destination not visible";
         public const string DestinationBlocked = "destination blocked";
@@ -29,8 +30,8 @@ namespace LuanShi.Engine
         private static readonly string[] AllCategories =
         {
             NotEnoughGold, NotEnoughFood, NotEnoughPopulation, NoOrdersLeft, CapReached,
-            AlreadyMarched, DestinationNotReachable, DestinationNotVisible, DestinationBlocked,
-            InvalidTarget, UnsupportedAction, GameOver, Generic,
+            AlreadyMarched, AlreadyAtDestination, DestinationNotReachable, DestinationNotVisible,
+            DestinationBlocked, InvalidTarget, UnsupportedAction, GameOver, Generic,
         };
 
         private static readonly ReadOnlyCollection<string> AllCategoriesView =
@@ -93,6 +94,9 @@ namespace LuanShi.Engine
                 return CapReached;
 
             if (Contains(engineError, "already marched")) return AlreadyMarched;
+            // The army is already standing on the ordered cell. This describes only its own position,
+            // which the seat can see, so it is safe to name specifically.
+            if (Equals(engineError, "already there")) return AlreadyAtDestination;
 
             // March destination facts. Every advertised destination is in sight, so these describe
             // only what the seat can already see (or its own army's position/terrain).

@@ -22,6 +22,9 @@ namespace LuanShi
         private string spectatorSummaryPath;
         private string spectatorSetupError;
         private SpectatorState spectatorSummaryNotified = SpectatorState.NotStarted;
+        // Command counters of the last frame whose accepted commands were already reflected on the map.
+        private int spectatorSyncedTotalActions = -1;
+        private int spectatorSyncedTurnActions = -1;
 
         // ------------------------------------------------------------------ setup & tick
 
@@ -37,6 +40,8 @@ namespace LuanShi
             locationChoiceOpen = false;
             statusMsg = "Spectator pilot - both seats are LLM-controlled; orders are locked";
             spectatorSummaryNotified = SpectatorState.NotStarted;
+            spectatorSyncedTotalActions = -1;
+            spectatorSyncedTurnActions = -1;
 
             if (engine == null || agentRunner == null)
             {
@@ -73,8 +78,44 @@ namespace LuanShi
             if (session == null) return;
 
             session.Tick();
+            // SpectatorSession executes each seat's orders inside its own host, so the UI's
+            // SubmitAgentCommand (the single-LLM sync point) never sees them. Watch the conductor's
+            // command counters and re-sync the banners whenever a command advanced.
+            bool advanced = SpectatorCommandsAdvanced(session);
             RefreshSpectatorView();
+            if (advanced)
+            {
+                SyncSpectatorArmyVisuals();
+                ApplyFog();   // a banner just created outside the viewed seat's sight stays hidden
+            }
             UpdateSpectatorSummary(session);
+        }
+
+        /// <summary>
+        /// True when the session executed at least one more command since the previous frame. The
+        /// closed-turn total plus the open turn's action count covers both a march in flight and a
+        /// turn that closed in this Tick, while an idle frame does no banner work.
+        /// </summary>
+        bool SpectatorCommandsAdvanced(SpectatorSession session)
+        {
+            int total = session.TotalActions;
+            int current = session.Runner != null ? session.Runner.ActionsThisTurn : 0;
+            bool advanced = total != spectatorSyncedTotalActions
+                         || current != spectatorSyncedTurnActions;
+            spectatorSyncedTotalActions = total;
+            spectatorSyncedTurnActions = current;
+            return advanced;
+        }
+
+        /// <summary>
+        /// Presentation-only: places every banner from the engine's authoritative army positions, the
+        /// same routine the human and single-LLM march paths use. Visibility is still decided by
+        /// ApplyFog from the viewed seat's filtered observation, so hidden banners stay hidden.
+        /// </summary>
+        void SyncSpectatorArmyVisuals()
+        {
+            if (engine == null) return;
+            foreach (ArmyState army in engine.State.Armies) EnsureArmyVisual(army);
         }
 
         /// <summary>Keeps the map on the active (or most recently active) seat's filtered observation.</summary>

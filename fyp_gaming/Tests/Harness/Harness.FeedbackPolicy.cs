@@ -49,7 +49,7 @@ internal static partial class Harness
             ("army already marched this season", FeedbackPolicy.AlreadyMarched),
             ("army already marched 2 times this season", FeedbackPolicy.AlreadyMarched),
             ("destination not walkable", FeedbackPolicy.DestinationBlocked),
-            ("already there", FeedbackPolicy.Generic),
+            ("already there", FeedbackPolicy.AlreadyAtDestination),
             ("destination is beyond your sight", FeedbackPolicy.DestinationNotVisible),
             ("destination occupied by an army", FeedbackPolicy.DestinationBlocked),
             ("enemy city — battle is beyond this demo", FeedbackPolicy.UnsupportedAction),
