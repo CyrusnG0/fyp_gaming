@@ -22,6 +22,7 @@ namespace LuanShi.Engine
         HostError,
         PromptTooLarge,
         TransportError,
+        GameOver,
         Cancelled,
     }
 
@@ -54,6 +55,7 @@ namespace LuanShi.Engine
                     case EndReason.PromptTooLarge: return "Failed - prompt too large";
                     case EndReason.TransportError:
                         return "Failed - " + (FailureReason ?? "transport error");
+                    case EndReason.GameOver: return "Finished - game over";
                     case EndReason.Cancelled:
                         return "Cancelled - " + (FailureReason ?? "by host");
                     default: return "Turn not finished";
@@ -66,6 +68,17 @@ namespace LuanShi.Engine
             string commandJson = null;
             bool? resultOk = null;
             string resultError = null;
+
+            // Terminal stop: a winner declared while this request was in flight makes the response
+            // stale. Discard it (never parse or execute it) and stop before any new dispatch.
+            if (HasPlanningHost && PlanningHost.IsGameOver)
+            {
+                LastResult = "game over";
+                AddActivity("validation", "Game over: in-flight response discarded.");
+                FinishGameOver();
+                WriteRecord(flight, response, false, null, null, "game over");
+                return;
+            }
 
             if (!response.Ok)
             {
@@ -129,6 +142,27 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // A march is only advertised to a planning host. A plain domestic host must never let a
+            // model-submitted march reach the engine (it was not offered in that prompt).
+            if (action.Type == ActionType.March && !HasPlanningHost)
+            {
+                InvalidThisTurn++;
+                LastResult = FeedbackPolicy.UnsupportedAction;
+                LastCommandJson = null;
+                AddActivity("validation", "march is not advertised for this seat.");
+                AddActivity("result", "Rejected: " + LastResult);
+                AddHistory(HistoryLine(action, "rejected: " + LastResult));
+                Status = "order rejected; continuing";
+                resultOk = false;
+                resultError = LastResult;
+                WriteRecord(flight, response, true, null, resultOk, resultError);
+                if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
+                    FinishLimit("invalid-response limit reached", EndReason.InvalidResponseLimit);
+                else
+                    StartRequest();
+                return;
+            }
+
             ActionCommand command = LlmActionParser.ToCommand(action);
             ActionsThisTurn++;
             bool accepted = false;
@@ -136,9 +170,9 @@ namespace LuanShi.Engine
             {
                 ValidationResult validation = _host.Submit(command);
                 accepted = validation.Ok;
-                // The engine's target errors can distinguish a hidden-but-existing id from a
-                // nonexistent one. The model gets one indistinguishable answer in both cases.
-                resultError = accepted ? null : SanitizeModelFeedback(validation.Error);
+                // Deny-by-default feedback: raw engine text can distinguish a hidden-but-existing
+                // id from a nonexistent one, so only the typed allowlist reaches the model.
+                resultError = accepted ? null : FeedbackPolicy.ForModel(validation.Error);
             }
             catch (Exception)
             {
@@ -161,7 +195,21 @@ namespace LuanShi.Engine
                 AddHistory(HistoryLine(action, "rejected: " + resultError));
                 Status = "order rejected; continuing";
             }
-            AddActivity("result", accepted ? "Accepted by engine." : "Rejected: " + LastResult);
+
+            string capture = accepted && action.Type == ActionType.March
+                ? CapturedCityName(flight, action) : null;
+            string resultText = accepted ? "Accepted by engine." : "Rejected: " + LastResult;
+            if (!string.IsNullOrEmpty(capture)) resultText += " Captured " + capture + ".";
+            AddActivity("result", resultText);
+
+            // Terminal stop (c): the authoritative host signal right after execution, before limit
+            // handling or any new request. A game-ending order must cost no further provider call.
+            if (HasPlanningHost && PlanningHost.IsGameOver)
+            {
+                FinishGameOver();
+                WriteRecord(flight, response, true, commandJson, resultOk, resultError);
+                return;
+            }
 
             if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
             {
@@ -181,8 +229,74 @@ namespace LuanShi.Engine
             }
         }
 
+        /// <summary>
+        /// Calls the host's read-only movement query and rejects a view built for another seat.
+        /// A null view is allowed (the host may have no map); it means no advertised options.
+        /// </summary>
+        private bool TryPlanMovement(out MovementView movement, out string failure)
+        {
+            movement = null;
+            failure = null;
+            try { movement = PlanningHost.PlanMovement(); }
+            catch (Exception) { failure = "host movement query failed"; return false; }
+            if (movement != null && !string.IsNullOrEmpty(movement.SeatId)
+                && !string.Equals(movement.SeatId, _seatId, StringComparison.Ordinal))
+            { failure = "movement view seat mismatch"; return false; }
+            return true;
+        }
+
+        /// <summary>
+        /// Authoritative terminal stop. The turn finishes with a distinct GameOver reason and the
+        /// usual single EndTurn notification; no further request is ever dispatched.
+        /// </summary>
+        private void FinishGameOver()
+        {
+            FailureReason = null;
+            EndReason = EndReason.GameOver;
+            Status = "finished: game over";
+            FinishTerminal(RunnerState.Finished, "game over");
+        }
+
+        /// <summary>
+        /// The city captured by an accepted march, read from a FRESH seat-filtered observation and
+        /// only when the destination was previously not ours. Null when nothing observable changed.
+        /// Never consults canonical state.
+        /// </summary>
+        private string CapturedCityName(InFlight flight, LlmAction action)
+        {
+            try
+            {
+                Observation after = _host.Observe();
+                if (after == null || after.Cities == null) return null;
+                CityView city = after.Cities.Find(c => c != null
+                    && c.X == action.ParamA && c.Z == action.ParamB);
+                if (city == null
+                    || !string.Equals(city.OwnerSeatId, _seatId, StringComparison.Ordinal))
+                    return null;
+
+                Observation before = flight.Observation;
+                CityView prior = before == null || before.Cities == null ? null
+                    : before.Cities.Find(c => c != null
+                        && c.X == action.ParamA && c.Z == action.ParamB);
+                if (prior != null
+                    && string.Equals(prior.OwnerSeatId, _seatId, StringComparison.Ordinal))
+                    return null;   // it was already ours: a plain move, not a capture
+
+                return string.IsNullOrEmpty(city.Name) ? city.Id : city.Name;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private static string ActivityCommandText(LlmAction action)
         {
+            if (action.Type == ActionType.March)
+                return "march " + (action.TargetId ?? "?") + " -> ("
+                     + action.ParamA.ToString(System.Globalization.CultureInfo.InvariantCulture) + ","
+                     + action.ParamB.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+
             string text = action.Type ?? "?";
             if (!string.IsNullOrEmpty(action.TargetId)) text += " " + action.TargetId;
             if (action.Args != null && action.Args.TryGetValue("unit_type", out string unit)

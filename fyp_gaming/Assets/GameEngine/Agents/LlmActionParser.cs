@@ -35,6 +35,7 @@ namespace LuanShi.Engine
             ActionType.Train,
             ActionType.Fortify,
             ActionType.Relief,
+            ActionType.March,
             EndTurnType,
         };
 
@@ -46,7 +47,7 @@ namespace LuanShi.Engine
             new[] { "actor_seat_id", "action_id", "controller_type", "seat", "token", "seat_id" },
             StringComparer.Ordinal);
 
-        /// <summary>The exact demo-slice vocabulary, in catalogue order.</summary>
+        /// <summary>The exact demo-slice vocabulary, in catalogue order (domestic orders, march, end_turn).</summary>
         public static IReadOnlyCollection<string> SupportedTypes => VocabularyView;
 
         public static ParseResult Parse(string modelText)
@@ -123,6 +124,16 @@ namespace LuanShi.Engine
             else if (!hasTarget || string.IsNullOrEmpty(target))
             {
                 return ParseResult.Failure("target is required");
+            }
+
+            // A march carries the destination as two required small integers (map coordinates).
+            // The model never supplies a path or a cost; the engine revalidates the destination.
+            if (type == ActionType.March)
+            {
+                if (!hasParamA || !hasParamB)
+                    return ParseResult.Failure("coordinates are required");
+                if (paramA < 0 || paramA > 255 || paramB < 0 || paramB > 255)
+                    return ParseResult.Failure("coordinates out of range");
             }
 
             // Defaults are explicit here so an omitted field is not confused with a value of 0.

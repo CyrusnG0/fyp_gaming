@@ -44,10 +44,18 @@ internal static partial class Harness
         Check(end.Ok && end.Action.EndTurn && end.Action.TargetId == null
               && end.Action.ParamA == 0 && end.Action.ParamB == 0,
             "valid end_turn with zero defaults");
-        Check(LlmActionParser.SupportedTypes.Count == 8
+        var march = LlmActionParser.Parse(
+            "{\"type\":\"march\",\"target_id\":\"army-a-1\",\"param_a\":2,\"param_b\":1}");
+        Check(march.Ok && march.Action.Type == ActionType.March
+              && march.Action.TargetId == "army-a-1"
+              && march.Action.ParamA == 2 && march.Action.ParamB == 1
+              && LlmActionParser.ToCommand(march.Action).Type == ActionType.March,
+            "valid march carries the army id and destination coordinates");
+        Check(LlmActionParser.SupportedTypes.Count == 9
               && LlmActionParser.SupportedTypes.Contains(ActionType.Recruit)
+              && LlmActionParser.SupportedTypes.Contains(ActionType.March)
               && LlmActionParser.SupportedTypes.Contains("end_turn"),
-            "supported vocabulary has exactly the demo types");
+            "supported vocabulary has exactly the demo types plus march");
 
         var fenced = LlmActionParser.Parse("  ```json\n{\"type\":\"end_turn\",\"reason\":\"ok\"}\n```  ");
         Check(fenced.Ok, "one surrounding ```json fence tolerated");
@@ -78,7 +86,18 @@ internal static partial class Harness
         CheckRejected("root null", "null");
         CheckRejected("missing type", "{}");
         CheckRejected("type not string", "{\"type\":1}");
-        CheckRejected("unknown type march", "{\"type\":\"march\",\"target_id\":\"city-a\"}");
+        CheckRejected("unknown type attack",
+            "{\"type\":\"attack_army\",\"target_id\":\"army-a-1\",\"param_a\":1,\"param_b\":1}");
+        CheckRejected("march without coordinates", "{\"type\":\"march\",\"target_id\":\"army-a-1\"}");
+        CheckRejected("march missing param_b",
+            "{\"type\":\"march\",\"target_id\":\"army-a-1\",\"param_a\":1}");
+        CheckRejected("march coordinate too large",
+            "{\"type\":\"march\",\"target_id\":\"army-a-1\",\"param_a\":256,\"param_b\":1}");
+        CheckRejected("march negative coordinate",
+            "{\"type\":\"march\",\"target_id\":\"army-a-1\",\"param_a\":-1,\"param_b\":1}");
+        CheckRejected("march with args",
+            "{\"type\":\"march\",\"target_id\":\"army-a-1\",\"param_a\":1,\"param_b\":1,"
+            + "\"args\":{\"unit_type\":\"infantry\"}}");
         CheckRejected("unknown type levy", "{\"type\":\"levy\",\"target_id\":\"city-a\"}");
         CheckRejected("missing target", "{\"type\":\"levy_tax\"}");
         CheckRejected("empty target", "{\"type\":\"levy_tax\",\"target_id\":\"\"}");
@@ -272,7 +291,10 @@ internal static partial class Harness
         var history = new List<string> { "levy_tax city-a -> ok", "recruit city-a -> rejected" };
 
         string system = PromptBuilder.SystemPrompt();
-        Check(PromptBuilder.PromptVersion == "demo-slice-3", "prompt version tracks seasonal-food guidance");
+        Check(PromptBuilder.PromptVersion == "demo-slice-4",
+            "prompt version tracks the planning (march) contract");
+        Check(system.Contains("march") && system.Contains("MOVEMENT OPTIONS"),
+            "planning system prompt advertises the march order and its candidate source");
         Check(system.Contains("one JSON object") && system.Contains("\"target_id\"")
               && system.Contains("end_turn"),
             "system prompt contains the output schema and vocabulary");

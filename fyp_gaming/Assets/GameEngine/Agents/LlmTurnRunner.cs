@@ -26,7 +26,7 @@ namespace LuanShi.Engine
     /// </summary>
     public sealed partial class LlmTurnRunner
     {
-        public const int MaxPromptChars = 40000;
+        public const int MaxPromptChars = PromptBuilder.MaxPromptChars;
         public const int MaxRecentHistory = 12;
 
         private sealed class InFlight
@@ -38,13 +38,15 @@ namespace LuanShi.Engine
             public string ObservationJson;
             public string ObservationHash;
             public int Season;
+            public Observation Observation;
+            public string PromptVersion;
+            public string SchemaHash;
         }
 
         private readonly ILlmTransport _transport;
         private readonly LlmConfig _config;
         private readonly ILlmRunRecorder _recorder;
         private readonly string _runId;
-        private readonly string _schemaHash;
 
         // One bounded feedback list per seat. A shared runner drives both LLM seats in a spectator
         // pilot, so switching seats must never leak one seat's action history into the other's prompt.
@@ -99,7 +101,6 @@ namespace LuanShi.Engine
             _recorder = recorder;
             _runId = "run-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "-"
                    + Guid.NewGuid().ToString("N").Substring(0, 8);
-            _schemaHash = PromptBuilder.SchemaHash();
             if (recorder is LlmRunRecorder fileRecorder) fileRecorder.UseRunId(_runId);
             _costKnown = _config.UsdPerMTokIn.HasValue && _config.UsdPerMTokOut.HasValue;
         }
@@ -147,6 +148,8 @@ namespace LuanShi.Engine
             AddActivity("turn", "Turn started.");
             State = RunnerState.Requesting;
             Status = "requesting";
+            // Terminal stop (a): never dispatch for a game that is already decided.
+            if (HasPlanningHost && PlanningHost.IsGameOver) { FinishGameOver(); return; }
             StartRequest();
         }
 
@@ -219,6 +222,10 @@ namespace LuanShi.Engine
 
         private bool IsRunning => State == RunnerState.Requesting || State == RunnerState.Executing;
 
+        /// <summary>The host's planning capabilities; null for a plain domestic-only host.</summary>
+        private IPlanningHost PlanningHost => _host as IPlanningHost;
+        private bool HasPlanningHost => _host is IPlanningHost;
+
         private void StartRequest()
         {
             if (!IsRunning) return;
@@ -238,6 +245,11 @@ namespace LuanShi.Engine
                 { FinishLimit("usd budget reached", EndReason.UsdBudgetLimit); return; }
             }
 
+            // Terminal stop (b): re-check immediately before any observation or dispatch. A winner
+            // declared since Begin must cost no provider request.
+            bool planning = HasPlanningHost;
+            if (planning && PlanningHost.IsGameOver) { FinishGameOver(); return; }
+
             Observation observation;
             try { observation = _host.Observe(); }
             catch (Exception) { FinishFailed("host observation failed", EndReason.HostError); return; }
@@ -250,11 +262,18 @@ namespace LuanShi.Engine
             // Chat attribution comes from the seat-filtered observation, never canonical state.
             _factionName = observation.Faction(_seatId)?.Name;
 
+            MovementView movement = null;
+            if (planning && !TryPlanMovement(out movement, out string movementFailure))
+            { FinishFailed(movementFailure, EndReason.HostError); return; }
+
             // The prompt carries a bounded event history; record exactly that same JSON, not the full one.
             string observationJson = PromptBuilder.BoundedObservationJson(observation);
-            string system = PromptBuilder.SystemPrompt();
-            string user = PromptBuilder.UserPrompt(observation, ActionCatalogue.Build(observation),
-                _history, RemainingRequests(), RemainingActions());
+            string system = PromptBuilder.SystemPromptFor(planning);
+            string user = planning
+                ? PromptBuilder.UserPrompt(observation, ActionCatalogue.Build(observation),
+                    _history, RemainingRequests(), RemainingActions(), movement)
+                : PromptBuilder.UserPrompt(observation, ActionCatalogue.Build(observation),
+                    _history, RemainingRequests(), RemainingActions());
             if (system.Length + user.Length > MaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
@@ -292,6 +311,9 @@ namespace LuanShi.Engine
                 ObservationJson = observationJson,
                 ObservationHash = Hash(observationJson),
                 Season = observation.Season,
+                Observation = observation,
+                PromptVersion = PromptBuilder.VersionFor(planning),
+                SchemaHash = PromptBuilder.SchemaHashFor(planning),
             };
             State = RunnerState.Requesting;
             Status = "requesting response " + index;
@@ -370,26 +392,6 @@ namespace LuanShi.Engine
                         TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
                 }
             }
-        }
-
-        /// <summary>
-        /// Engine target-existence errors ("unknown city 'x'", "not your city", ...) reveal whether a
-        /// hidden id exists. All such errors become one fixed string for the model; resource/phase
-        /// errors pass through unchanged because they contain no hidden identifiers.
-        /// </summary>
-        private static string SanitizeModelFeedback(string error)
-        {
-            if (string.IsNullOrEmpty(error)) return error;
-            if (error.StartsWith("unknown city", StringComparison.Ordinal)
-                || error.StartsWith("unknown army", StringComparison.Ordinal)
-                || error.StartsWith("unknown seat", StringComparison.Ordinal)
-                || error.IndexOf("not your city", StringComparison.Ordinal) >= 0
-                || error.IndexOf("not your army", StringComparison.Ordinal) >= 0
-                || error.IndexOf("army is not yours", StringComparison.Ordinal) >= 0)
-            {
-                return "invalid target";
-            }
-            return error;
         }
     }
 }

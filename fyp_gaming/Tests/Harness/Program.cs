@@ -34,7 +34,7 @@ internal static partial class Harness
             if (!string.Equals(args[i], "--prompt-version", StringComparison.Ordinal)) continue;
             if (i + 1 >= args.Length)
             {
-                Console.Error.WriteLine("usage: --prompt-version <demo-slice-3|demo-slice-1>");
+                Console.Error.WriteLine("usage: --prompt-version <demo-slice-4|demo-slice-3|demo-slice-1>");
                 exitCode = 2;
                 return false;
             }
@@ -100,6 +100,10 @@ internal static partial class Harness
         RunLlmActivity();
         RunLlmSessionChat();
         RunMovementOptions();
+        RunLlmMovement();
+        RunLlmMovementPrompts();
+        RunFeedbackPolicy();
+        RunLlmTerminal();
         RunDemoS4();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");

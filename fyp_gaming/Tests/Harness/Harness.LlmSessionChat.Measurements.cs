@@ -105,13 +105,13 @@ internal static partial class Harness
 
     private static void RunChatPromptVersions()
     {
-        Section("Prompt guidance: demo-slice-3 is default, legacy is switch-only [CHAT]");
+        Section("Prompt guidance: demo-slice-4 is default, legacy is switch-only [CHAT]");
 
         PromptBuilder.ResetPromptVersion();
         string current = PromptBuilder.SystemPrompt();
-        Check(PromptBuilder.PromptVersion == "demo-slice-3"
-              && PromptBuilder.ActivePromptVersion == "demo-slice-3",
-            "[CHAT] the default prompt version is demo-slice-3");
+        Check(PromptBuilder.PromptVersion == "demo-slice-4"
+              && PromptBuilder.ActivePromptVersion == "demo-slice-4",
+            "[CHAT] the default prompt version is demo-slice-4 (planning)");
         // Guidance must not recommend a particular order. Action names are allowed in the rules /
         // schema vocabulary ("Supported orders: ..."), so only an imperative recommendation is a
         // violation; checking each catalogue type keeps this robust as the wording evolves.
@@ -140,9 +140,16 @@ internal static partial class Harness
               && !legacy.Contains("Spring harvest is x0.7"),
             "[CHAT] the harness switch selects the exact committed demo-slice-1 prompt");
 
+        bool domesticSwitched = PromptBuilder.TryUsePromptVersion("demo-slice-3", out string dError)
+              && PromptBuilder.ActivePromptVersion == "demo-slice-3"
+              && PromptBuilder.SystemPrompt() == PromptBuilder.DomesticSystemPrompt()
+              && !PromptBuilder.SystemPrompt().Contains("MOVEMENT OPTIONS");
+        Check(domesticSwitched && dError == null,
+            "[CHAT] the harness switch can select the exact domestic demo-slice-3 prompt");
+
         bool rejected = !PromptBuilder.TryUsePromptVersion("demo-slice-99", out _);
         PromptBuilder.ResetPromptVersion();
-        Check(rejected && PromptBuilder.ActivePromptVersion == "demo-slice-3"
+        Check(rejected && PromptBuilder.ActivePromptVersion == "demo-slice-4"
               && PromptBuilder.SystemPrompt() == current,
             "[CHAT] an unknown prompt version is rejected without changing the default");
     }

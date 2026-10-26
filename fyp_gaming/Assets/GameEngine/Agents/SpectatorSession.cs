@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : ITurnHost
+        private sealed class TurnHost : IPlanningHost
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -67,6 +67,12 @@ namespace LuanShi.Engine
             }
 
             public void EndTurn() => EndTurnCalled = true;
+
+            /// <summary>Seat-safe candidates for this host's own seat (read-only).</summary>
+            public MovementView PlanMovement() => MovementPlanner.Build(_engine, _seatId);
+
+            /// <summary>Authoritative terminal signal, never a cached observation or display value.</summary>
+            public bool IsGameOver => _engine.State.WinnerSeatId != null;
         }
 
         private readonly GameEngine _engine;
@@ -166,6 +172,7 @@ namespace LuanShi.Engine
             EndReason.HostError, EndReason.PromptTooLarge, EndReason.TransportError,
             EndReason.UsdBudgetUnknown);
         public int CancelledEndings => CountEndings(EndReason.Cancelled);
+        public int GameOverEndings => CountEndings(EndReason.GameOver);
 
         private int CountEndings(params EndReason[] reasons)
         {
