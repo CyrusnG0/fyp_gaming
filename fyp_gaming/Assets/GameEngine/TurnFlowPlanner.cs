@@ -39,16 +39,40 @@ namespace LuanShi.Engine
     /// </summary>
     public static class TurnFlowPlanner
     {
-        /// <summary>The first seat of a season or, when the game is already decided, GameOver.</summary>
+        /// <summary>
+        /// The first seat of a season or, when the game is already decided, GameOver. Play order is
+        /// authoritative: a scripted seat before the first human seat must still act first.
+        /// </summary>
         public static TurnFlowStep First(GameState state)
         {
             if (state == null) throw new ArgumentNullException(nameof(state));
             if (state.WinnerSeatId != null) return new TurnFlowStep(TurnFlowAction.GameOver);
 
-            string seatId = SeatRotation.FirstSeat(state);
-            return seatId == null
+            var order = SeatRotation.PlayOrder(state);
+            return order.Count == 0
                 ? new TurnFlowStep(TurnFlowAction.ResolveSeason)
-                : StepForSeat(state, seatId);
+                : StepForSeat(state, order[0]);
+        }
+
+        /// <summary>
+        /// True when the roster can advance without a human or a live model: at least one Human seat,
+        /// or one Llm seat accepted by <paramref name="isRunnableLlm"/>. A null predicate treats every
+        /// Llm controller as runnable (the pure-engine default); the Unity host passes the runner check.
+        /// An all-scripted roster is not playable for this interactive demo.
+        /// </summary>
+        public static bool HasHumanOrRunnableLlm(GameState state, Func<string, bool> isRunnableLlm = null)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            if (state.WinnerSeatId != null) return false;
+
+            foreach (var faction in state.Factions)
+            {
+                if (faction.Controller == ControllerType.Human) return true;
+                if (faction.Controller == ControllerType.Llm
+                    && (isRunnableLlm == null || isRunnableLlm(faction.SeatId)))
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>

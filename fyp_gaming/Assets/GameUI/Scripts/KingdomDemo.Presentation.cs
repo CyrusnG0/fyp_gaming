@@ -4,6 +4,7 @@
 // obs.ScoutedCities); no canonical city/army/ownership data is read here. The fog visibility rule is
 // untouched (see Visuals.Fog.cs); this file only changes how the map and labels are presented.
 
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using LuanShi.Engine;
@@ -60,9 +61,9 @@ namespace LuanShi
         {
             var e = Event.current;
             if (e == null || Screen.width <= 0) return false;
-            float scale = Screen.width / DesignWidth;
-            var mouse = new Vector2(e.mousePosition.x / scale, e.mousePosition.y / scale);
-            return rect.Contains(mouse);
+            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
+                Screen.width, out float mouseX, out float mouseY);
+            return rect.Contains(new Vector2(mouseX, mouseY));
         }
 
         static void DrawFittedLabel(Rect rect, string text, GUIStyle style, string tooltip = null)
@@ -85,8 +86,9 @@ namespace LuanShi
             if (string.IsNullOrEmpty(GUI.tooltip)) return;
             var e = Event.current;
             if (e == null) return;
-            float scale = Screen.width / DesignWidth;
-            var mouse = new Vector2(e.mousePosition.x / scale, e.mousePosition.y / scale);
+            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
+                Screen.width, out float mouseX, out float mouseY);
+            var mouse = new Vector2(mouseX, mouseY);
             float width = Mathf.Min(TooltipMaxWidth,
                 Mathf.Max(120f, uiSmall.CalcSize(new GUIContent(GUI.tooltip)).x + TooltipPadding * 2f));
             float height = uiSmallWrap.CalcHeight(new GUIContent(GUI.tooltip), width - TooltipPadding * 2f)
@@ -153,7 +155,9 @@ namespace LuanShi
             if (screen.z <= 0f) return false;
             float scale = Screen.width / DesignWidth;
             designPoint = new Vector2(screen.x / scale, (Screen.height - screen.y) / scale);
-            return true;
+            // Off-screen anchors must not all clamp to one edge and pile their labels together.
+            return designPoint.x >= LeftPanelX && designPoint.x <= ContentRight
+                && designPoint.y >= TopBarY + TopBarHeight && designPoint.y <= DesignHeight;
         }
 
         void DrawCityTag(CityView city, bool viewedCapital)
@@ -167,6 +171,7 @@ namespace LuanShi
                                   Mathf.Max(LeftPanelX, ContentRight - width));
             float y = anchor.y + CityLabelOffsetY;
             if (y + CityLabelHeight > DesignHeight || y < TopBarY + TopBarHeight) return;
+            if (CityTagBlocked(new Rect(x, y, width, CityLabelHeight))) return;
 
             Color owner = OwnerColor(city.OwnerSeatId);
             Color border = city.OwnerSeatId == null ? MutedInk : owner;
@@ -202,6 +207,7 @@ namespace LuanShi
                                   Mathf.Max(LeftPanelX, ContentRight - width));
             float y = anchor.y + CityLabelOffsetY;
             if (y + CityLabelHeight > DesignHeight || y < TopBarY + TopBarHeight) return;
+            if (CityTagBlocked(new Rect(x, y, width, CityLabelHeight))) return;
 
             FillRect(new Rect(x, y, width, CityLabelHeight), MutedInk);
             FillRect(new Rect(x + CityLabelBorder, y + CityLabelBorder,
@@ -210,6 +216,25 @@ namespace LuanShi
             DrawFittedLabel(new Rect(x + CityLabelPadX, y, width - CityLabelPadX * 2f, CityLabelHeight),
                             text, uiCityTagSmall, full);
         }
+
+        /// <summary>
+        /// A city tag may never be painted under an already drawn control or in the reserved right
+        /// dock (agent/spectator panel plus session chat) and status strip. Selection tags use their
+        /// own path in KingdomDemo.Selection.cs and are intentionally still drawn.
+        /// </summary>
+        static bool CityTagBlockedBy(Rect tag, List<Rect> drawnUi)
+        {
+            if (tag.Overlaps(new Rect(StatusBarX, StatusBarY, StatusBarWidth, StatusBarHeight)))
+                return true;
+            if (tag.Overlaps(new Rect(SidePanelX, SidePanelY, SidePanelWidth,
+                                       StatusBarY - SidePanelY)))
+                return true;
+            for (int i = 0; i < drawnUi.Count; i++)
+                if (tag.Overlaps(drawnUi[i])) return true;
+            return false;
+        }
+
+        bool CityTagBlocked(Rect tag) => CityTagBlockedBy(tag, uiRects);
 
         // ------------------------------------------------------------------ terrain seams
         /// <summary>

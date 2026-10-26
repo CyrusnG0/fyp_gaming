@@ -150,8 +150,9 @@ internal static partial class Harness
               && fake.Requests[1].User.Contains("\"reclaim_pct\":15")
               && fake.Requests[1].User.Contains("reclaim city-a -> ok"),
             "the next prompt carries a fresh observation and bounded action feedback");
-        Check(runner.LastSummary == "drill" && runner.LastResult == "end_turn",
-            "last decision summary and result are exposed");
+        Check(runner.LastSummary == null && runner.LastResult == "end_turn"
+              && runner.LastCommandJson == "{\"type\":\"end_turn\"}",
+            "end-turn display does not retain an earlier decision or command");
         Check(runner.TotalInputTokens == 300 && runner.TotalOutputTokens == 55
               && runner.CostUsd == null,
             "token totals are tracked and cost is unknown without prices");

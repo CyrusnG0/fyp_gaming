@@ -66,7 +66,7 @@ namespace LuanShi
                       EllipsizeToWidth(uiBody, AgentStateLine(), width), uiBody);
 
             GUI.Label(new Rect(x, area.y + AgentRequestsRowY, width, AgentRowHeight),
-                      EllipsizeToWidth(uiSmall, AgentRequestsLine(), width), uiSmall);
+                      AgentRequestsLine(), uiSmall);
 
             if (!turnRows) return;
 
@@ -100,9 +100,9 @@ namespace LuanShi
             }
 
             GUI.Label(new Rect(x, area.y + AgentTokensRowY, width, AgentRowHeight),
-                      EllipsizeToWidth(uiSmall, AgentTokensLabel(), width), uiSmall);
+                      AgentTokensLabel(), uiSmall);
             GUI.Label(new Rect(x, area.y + AgentCostRowY, width, AgentRowHeight),
-                      AgentCostLabel(), uiSmallWrap);
+                      AgentCostLabel(), uiSmall);
 
             string footer = AgentRecorderLabel();
             if (showAgentDetails) footer = "Observer detail (demo transparency)  ·  " + footer;
@@ -117,6 +117,11 @@ namespace LuanShi
 
         string AgentStateLine()
         {
+            LlmTurnRunner runner = agentRunner;
+            if (runner != null && runner.EndReason != EndReason.None
+                && (runner.State == RunnerState.Finished || runner.State == RunnerState.Failed
+                    || runner.State == RunnerState.Cancelled))
+                return runner.EndReasonText;
             string state = AgentStateDisplayName();
             string elapsed = AgentElapsedLabel();
             if (elapsed.Length > 0) state += "  " + elapsed;
@@ -139,7 +144,7 @@ namespace LuanShi
             int maxReq = agentConfig != null ? agentConfig.MaxRequestsPerTurn : 0;
             int maxAct = agentConfig != null ? agentConfig.MaxActionsPerTurn : 0;
             int maxTotal = agentConfig != null ? agentConfig.MaxTotalRequests : 0;
-            return $"Requests {req}/{maxReq} | session {total}/{maxTotal} | actions {act}/{maxAct}";
+            return $"Req {req}/{maxReq} | actions {act}/{maxAct} | session {total}/{maxTotal}";
         }
 
         string AgentTokensLabel()
@@ -148,10 +153,8 @@ namespace LuanShi
             bool known = runner != null && runner.TotalInputTokens.HasValue
                          && runner.TotalOutputTokens.HasValue;
             string tokens = known
-                ? runner.TotalInputTokens.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
-                  + " in / "
-                  + runner.TotalOutputTokens.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
-                  + " out"
+                ? CompactCount(runner.TotalInputTokens.Value) + " in / "
+                  + CompactCount(runner.TotalOutputTokens.Value) + " out"
                 : "unknown";
             return "tokens: " + tokens;
         }
@@ -162,7 +165,7 @@ namespace LuanShi
             if (runner != null && runner.CostUsd.HasValue)
                 return "cost: $" + runner.CostUsd.Value.ToString("0.######",
                     System.Globalization.CultureInfo.InvariantCulture);
-            return "cost: unknown (not reported by provider)";
+            return "cost: unknown (provider)";
         }
     }
 }

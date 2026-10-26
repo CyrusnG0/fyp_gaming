@@ -42,7 +42,8 @@ appended and the final summary line reports the new total.
 | — domestic economy smoke | 33 | `Harness.EconomySmoke.cs` |
 | — diplomacy smoke | 41 | `Harness.DiplomacySmoke.cs` |
 | LS-002 new assertions (event privacy) | 141 | section header starts `[new] LS-002`, every test name starts `[LS-002]` |
-| **Total** | **539** | printed as `539 passed, 0 failed` |
+| Later demo / LLM / chat suites | 525 | sections tagged `[DEMO-*]`, `[LLM*]` and `[CHAT]` |
+| **Total** | **1064** | printed as `1064 passed, 0 failed` |
 
 The LS-001 files close gaps the historical suite left; they are smoke tests, not second full
 suites. LS-002 adds the privacy/history regression suite in three focused modules
@@ -125,6 +126,7 @@ finding):
 | `audits/namespace_guard.py` | every attribute and fully-qualified type resolves through a namespace the file imports (e.g. `[FormerlySerializedAs]` needs `UnityEngine.Serialization`) |
 | `audits/canonical_log_audit.py` | no `engine.Log`, `.Log.Records`, `EventLog`, `EventRecord`, `ToJsonLines` or `luanshi_log` anywhere in `Assets/GameUI/Scripts` (LS-014); comments are stripped and spacing around dots is normalised |
 | `audits/canonical_log_audit_selftest.py` | the audit rejects spaced, `?.`, aliased and declaration forms, while accepting `Debug.Log` and comment-only mentions |
+| `audits/report_state_audit.py` | `KingdomDemo.Report.cs` builds the court report from the seat's observation, never from canonical city/army state (LS-003 privacy) |
 
 ```bash
 bash fyp_gaming/Tests/run-audits.sh              # defaults to Assets/GameUI/Scripts/*.cs

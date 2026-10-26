@@ -4,6 +4,7 @@
 // itself). Gameplay, provider/controller contracts and observation permissions are untouched.
 
 using UnityEngine;
+using LuanShi.Engine;
 
 namespace LuanShi
 {
@@ -38,7 +39,9 @@ namespace LuanShi
         private const float AgentPanelWidth = SidePanelWidth;
         private const float AgentPanelIdleHeight = 124f;
         private const float AgentPanelDetailHeight = 260f;
-        private const float SpectatorPanelHeight = 400f;
+        // Tall enough for the two-line totals block plus the button and run-record rows; the chat dock
+        // starts at this rect's yMax (KingdomDemo.AgentChat.cs), so increasing it shortens the chat.
+        private const float SpectatorPanelHeight = SpectatorPanelLayout.PanelHeight;
         private const float TabPanelX = 400f;
         private const float TabPanelDockedX = 148f;   // 800-wide body left of the 420 side dock
         private const float TabPanelY = 190f;
@@ -160,22 +163,40 @@ namespace LuanShi
         private const float SpectatorRowHeight = 16f;
         private const float SpectatorLastRowY = 156f;
         private const float SpectatorResultRowY = 174f;
-        private const float SpectatorDecisionRowY = 192f;
-        private const float SpectatorRecentHeaderRowY = 230f;
-        private const float SpectatorRecentFirstRowY = 244f;
-        private const int SpectatorRecentLines = 5;
+        private const int SpectatorResultLines = 2;
+        private const float SpectatorDecisionRowY = 206f;
+        private const float SpectatorRecentHeaderRowY = 242f;
+        private const float SpectatorRecentFirstRowY = 256f;
+        private const int SpectatorRecentLines = 4;
         private const float SpectatorRecentLineHeight = 14f;
-        private const float SpectatorRequestsRowY = 316f;
-        private const float SpectatorCostRowY = 332f;
-        private const float SpectatorControlsRowY = 348f;
-        private const float SpectatorSummaryRowY = 380f;
-        private const float SpectatorButtonHeight = 28f;
+        // The bottom block is shared with SpectatorPanelLayout so the harness can prove it never
+        // overlaps: totals (two rows), then controls, then the run-record line, all inside the panel.
+        private const float SpectatorRequestsRowY = SpectatorPanelLayout.RequestsRowY;
+        private const float SpectatorCostRowY = SpectatorPanelLayout.CostRowY;
+        private const float SpectatorTotalsRowHeight = SpectatorPanelLayout.TotalsRowHeight;
+        private const float SpectatorControlsRowY = SpectatorPanelLayout.ControlsRowY;
+        private const float SpectatorSummaryRowY = SpectatorPanelLayout.SummaryRowY;
+        private const float SpectatorButtonHeight = SpectatorPanelLayout.ButtonHeight;
+        private const float SpectatorSummaryHeight = SpectatorPanelLayout.SummaryRowHeight;
         private const float SpectatorButtonGap = 8f;
         private const float SpectatorColumnGap = 10f;
         private const int SpectatorDecisionLines = 2;
         private const float SpectatorDecisionLineHeight = 16f;
         private const float SpectatorPipWidth = 22f;
         private const float SpectatorPipHeight = 6f;
+
+        // ---------------------------------------------------------------- live session chat
+        // The chat fills the right dock below the agent/spectator panel and stops above the status
+        // strip. At 16:9 (900 design height) it never overlaps the tabs, dock or status strip.
+        private const float ChatGap = 8f;
+        private const float ChatHeaderHeight = 30f;
+        private const float ChatFilterHeight = 24f;
+        private const float ChatFooterHeight = 36f;   // two short footer lines, checkbox on the left
+        private const float ChatMinBodyHeight = 110f;
+        private const float ChatBottomY = StatusBarY - ChatGap;
+        private const float ChatPadX = 10f;
+        private const float ChatTextPad = 4f;
+        private const float ChatEntryGap = 6f;
 
         // ---------------------------------------------------------------- tooltip/truncation
         private const float TooltipMaxWidth = 440f;

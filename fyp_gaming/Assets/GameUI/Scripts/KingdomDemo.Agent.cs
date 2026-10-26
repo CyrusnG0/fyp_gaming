@@ -38,6 +38,8 @@ namespace LuanShi
         private bool agentFakeMode;
         private bool agentTurnActive;
         private bool agentResumePending;
+        private bool agentResumeAfterInterrupt;   // disabled mid-turn; first tick after enable resumes once
+        private string agentInterruptedSeat;
         private bool agentTickFaultLogged;
         private string agentLastActionType;
         private int agentSeatToken;
@@ -146,7 +148,9 @@ namespace LuanShi
         }
         void StartAgentTicker()
         {
-            bool tick = spectatorMode ? spectatorSession != null : agentHasSeat;
+            bool tick = spectatorMode
+                ? spectatorSession != null
+                : agentHasSeat || agentResumeAfterInterrupt;
             if (tick && agentTickLoop == null) agentTickLoop = StartCoroutine(AgentTickLoop());
         }
         IEnumerator AgentTickLoop()
@@ -269,6 +273,19 @@ namespace LuanShi
         }
         void TickAgent()
         {
+            if (agentResumeAfterInterrupt)
+            {
+                // OnDisable closed the interrupted seat's gate; finish that one rotation walk now,
+                // from the ticker rather than from the Unity lifecycle callback. Clear first so a
+                // throwing continuation cannot be retried forever.
+                agentResumeAfterInterrupt = false;
+                string interruptedSeat = agentInterruptedSeat;
+                agentInterruptedSeat = null;
+                if (!string.IsNullOrEmpty(interruptedSeat) && engine != null)
+                    ContinueAfterSeat(interruptedSeat);
+                return;
+            }
+
             if (!ready || !agentHasSeat || !agentTurnActive) return;
             if (engine != null && engine.State.WinnerSeatId != null)
             {

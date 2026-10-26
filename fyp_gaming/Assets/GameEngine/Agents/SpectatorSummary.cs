@@ -78,7 +78,7 @@ namespace LuanShi.Engine
             Field(sb, "state", session.State.ToString(), config, true);
             Field(sb, "provider", provider, config, true);
             Field(sb, "model", model, config, true);
-            Field(sb, "prompt_version", PromptBuilder.PromptVersion, config, true);
+            Field(sb, "prompt_version", PromptBuilder.ActivePromptVersion, config, true);
             Field(sb, "schema_hash", PromptBuilder.SchemaHash(), config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);
@@ -93,6 +93,18 @@ namespace LuanShi.Engine
             sb.Append(",\"actions\":").Append(session.TotalActions.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"accepted\":").Append(session.TotalAccepted.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"rejected\":").Append(session.TotalRejected.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"rejected_actions\":")
+              .Append(session.TotalRejected.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"invalid_responses\":")
+              .Append(session.TotalInvalidResponses.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"voluntary_end_turns\":")
+              .Append(session.VoluntaryEndTurns.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"limit_endings\":")
+              .Append(session.LimitEndings.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"failed_endings\":")
+              .Append(session.FailedEndings.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"cancelled_endings\":")
+              .Append(session.CancelledEndings.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"input_tokens\":").Append(NullableLong(input));
             sb.Append(",\"output_tokens\":").Append(NullableLong(output));
             sb.Append(",\"cost_usd\":").Append(Cost(cost));
@@ -128,7 +140,9 @@ namespace LuanShi.Engine
                     if (t > 0) sb.Append(',');
                     AppendSeat(sb, session, season, seats[t], config);
                 }
-                sb.Append("]}");
+                sb.Append(']');
+                AppendScoreboard(sb, session, season, config);
+                sb.Append('}');
             }
             sb.Append(']');
         }
@@ -169,6 +183,35 @@ namespace LuanShi.Engine
             sb.Append('}');
         }
 
+        private static void AppendScoreboard(StringBuilder sb, SpectatorSession session, int season,
+            LlmConfig config)
+        {
+            sb.Append(",\"scoreboard\":[");
+            SpectatorSeasonScore captured = null;
+            foreach (SpectatorSeasonScore score in session.SeasonScores)
+                if (score.Season == season) { captured = score; break; }
+            if (captured != null && captured.Scores != null)
+            {
+                for (int i = 0; i < captured.Scores.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    SpectatorScore score = captured.Scores[i];
+                    sb.Append('{');
+                    Field(sb, "seat_id", score.SeatId, config, false);
+                    Field(sb, "faction", score.FactionName, config, true);
+                    sb.Append(",\"gold\":").Append(score.Gold.ToString(CultureInfo.InvariantCulture));
+                    sb.Append(",\"food\":").Append(score.Food.ToString(CultureInfo.InvariantCulture));
+                    sb.Append(",\"population\":")
+                      .Append(score.Population.ToString(CultureInfo.InvariantCulture));
+                    sb.Append(",\"garrison\":")
+                      .Append(score.Garrison.ToString(CultureInfo.InvariantCulture));
+                    sb.Append(",\"cities\":").Append(score.Cities.ToString(CultureInfo.InvariantCulture));
+                    sb.Append('}');
+                }
+            }
+            sb.Append(']');
+        }
+
         private static void AppendTurns(StringBuilder sb, SpectatorSession session, LlmConfig config)
         {
             sb.Append(",\"turns\":[");
@@ -184,10 +227,13 @@ namespace LuanShi.Engine
                 sb.Append(",\"actions\":").Append(record.Actions.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"accepted\":").Append(record.Accepted.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"rejected\":").Append(record.Rejected.ToString(CultureInfo.InvariantCulture));
+                sb.Append(",\"invalid\":").Append(record.Invalid.ToString(CultureInfo.InvariantCulture));
                 Field(sb, "last_summary", record.LastSummary, config, true);
                 Field(sb, "last_command_json", record.LastCommandJson, config, true);
                 Field(sb, "last_result", record.LastResult, config, true);
                 Field(sb, "ended_by", record.EndedBy, config, true);
+                Field(sb, "end_reason", record.EndReason.ToString(), config, true);
+                Field(sb, "end_reason_text", record.EndReasonText, config, true);
                 sb.Append('}');
             }
             sb.Append(']');

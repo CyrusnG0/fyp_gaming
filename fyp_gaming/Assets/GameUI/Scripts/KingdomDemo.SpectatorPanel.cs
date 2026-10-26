@@ -102,15 +102,17 @@ namespace LuanShi
                               EllipsizeToWidth(uiSmall, lines[row], columnWidth), uiSmall);
                 uiSmall.normal.textColor = previousSmall;
 
-                LlmTurnRunner runner = string.Equals(session.ActiveSeatId, faction.SeatId, StringComparison.Ordinal)
-                    ? session.Runner : null;
+                bool active = string.Equals(session.ActiveSeatId, faction.SeatId, StringComparison.Ordinal);
+                LlmTurnRunner runner = active ? session.Runner : null;
                 SpectatorTurnRecord record = LastRecordFor(session, faction.SeatId);
-                string commandJson = runner != null && !string.IsNullOrEmpty(runner.LastCommandJson)
-                    ? runner.LastCommandJson : record?.LastCommandJson;
-                string result = runner != null && !string.IsNullOrEmpty(runner.LastResult)
-                    ? runner.LastResult : record?.LastResult;
-                string summary = runner != null && !string.IsNullOrEmpty(runner.LastSummary)
-                    ? runner.LastSummary : record?.LastSummary;
+                // An active seat uses only the current runner turn. Falling back to its previous
+                // record here would show stale decision/command/result rows at the start of a turn.
+                string commandJson = active ? runner?.LastCommandJson : record?.LastCommandJson;
+                string result = active ? runner?.LastResult : record?.LastResult;
+                string summary = active ? runner?.LastSummary : record?.LastSummary;
+                string endReason = active
+                    ? (runner != null && runner.EndReason != EndReason.None ? runner.EndReasonText : null)
+                    : record?.EndReasonText;
 
                 string type = SpectatorCommandField(commandJson, "type");
                 string target = SpectatorCommandField(commandJson, "target_id");
@@ -118,8 +120,13 @@ namespace LuanShi
                     + (string.IsNullOrEmpty(target) ? "" : " " + target);
                 GUI.Label(new Rect(columnX, area.y + SpectatorLastRowY, columnWidth, SpectatorRowHeight),
                           EllipsizeToWidth(uiSmall, "Last: " + action, columnWidth), uiSmall);
-                GUI.Label(new Rect(columnX, area.y + SpectatorResultRowY, columnWidth, SpectatorRowHeight),
-                          EllipsizeToWidth(uiSmall, "Result: " + SpectatorResultLabel(result), columnWidth), uiSmall);
+                string resultLine = "Result: " + SpectatorResultLabel(result)
+                    + (string.IsNullOrEmpty(endReason) ? "" : " | " + endReason);
+                float resultHeight = Mathf.Max(SpectatorDecisionLineHeight, TextLineHeight(uiSmallWrap))
+                                     * SpectatorResultLines;
+                DrawWrappedClampedLabel(
+                    new Rect(columnX, area.y + SpectatorResultRowY, columnWidth, resultHeight),
+                    resultLine, uiSmallWrap, SpectatorResultLines, endReason);
                 float decisionHeight = Mathf.Max(SpectatorDecisionLineHeight, TextLineHeight(uiSmallWrap))
                                        * SpectatorDecisionLines;
                 DrawWrappedClampedLabel(
@@ -146,17 +153,18 @@ namespace LuanShi
             int cap = agentConfig != null ? agentConfig.MaxTotalRequests : 0;
             bool tokensKnown = session.TotalInputTokens.HasValue && session.TotalOutputTokens.HasValue;
             string tokens = tokensKnown
-                ? session.TotalInputTokens.Value.ToString("N0", CultureInfo.InvariantCulture) + " in / "
-                  + session.TotalOutputTokens.Value.ToString("N0", CultureInfo.InvariantCulture) + " out"
+                ? CompactCount(session.TotalInputTokens.Value) + " in / "
+                  + CompactCount(session.TotalOutputTokens.Value) + " out"
                 : "unknown";
-            string totals = $"Requests {session.TotalRequests}/{cap} | tokens {tokens}";
-            GUI.Label(new Rect(x, area.y + SpectatorRequestsRowY, width, SpectatorRowHeight),
+            string totals = $"Req {session.TotalRequests}/{cap} | tokens {tokens}";
+            GUI.Label(new Rect(x, area.y + SpectatorRequestsRowY, width, SpectatorTotalsRowHeight),
                       totals, uiSmall);
 
             string cost = session.CostUsd.HasValue
                 ? "cost: $" + session.CostUsd.Value.ToString("0.######", CultureInfo.InvariantCulture)
-                : "cost: unknown (not reported by provider)";
-            GUI.Label(new Rect(x, area.y + SpectatorCostRowY, width, SpectatorRowHeight), cost, uiSmallWrap);
+                : "cost: unknown (provider)";
+            GUI.Label(new Rect(x, area.y + SpectatorCostRowY, width, SpectatorTotalsRowHeight),
+                      cost, uiSmall);
         }
 
         void DrawSpectatorControls(Rect area, SpectatorSession session)
@@ -182,7 +190,7 @@ namespace LuanShi
                 ? "Run record: not saved"
                 : spectatorSummaryPath.StartsWith("runs/", StringComparison.Ordinal)
                     ? "Run record saved" : "Run record could not be saved";
-            DrawFittedLabel(new Rect(x, area.y + SpectatorSummaryRowY, width, 14f),
+            DrawFittedLabel(new Rect(x, area.y + SpectatorSummaryRowY, width, SpectatorSummaryHeight),
                             EllipsizeToWidth(uiMono, saved, width), uiMono, spectatorSummaryPath);
         }
 
@@ -300,6 +308,15 @@ namespace LuanShi
                 || result.StartsWith("failed", StringComparison.Ordinal))
                 return AgentShort(result, 46);
             return "rejected: " + AgentShort(result, 40);
+        }
+
+        /// <summary>Short, non-clipped token totals that fit the dock at every demo resolution.</summary>
+        static string CompactCount(long value)
+        {
+            if (value < 1000) return value.ToString(CultureInfo.InvariantCulture);
+            if (value < 1000000)
+                return (value / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) + "k";
+            return (value / 1000000.0).ToString("0.#", CultureInfo.InvariantCulture) + "M";
         }
     }
 }

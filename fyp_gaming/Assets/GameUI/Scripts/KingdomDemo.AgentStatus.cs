@@ -120,11 +120,22 @@ namespace LuanShi
         void OnDisable()
         {
             if (spectatorMode) StopSpectatorSession();
+            bool interrupted = !spectatorMode && (agentTurnActive || agentSeatToken != 0);
+            string interruptedSeat = agentSeatId;
+
             if (agentTickLoop != null) { StopCoroutine(agentTickLoop); agentTickLoop = null; }
             if (agentRunner != null && IsAgentRunning()) agentRunner.Cancel("play mode ended");
             int token = agentSeatToken; agentSeatToken = 0;
             if (token != 0 && engine != null) engine.EndSeatTurn(token);
             agentTurnActive = false; agentResumePending = false; ReleaseControlLock();
+
+            // The gate is closed, but the rotation still owes the next seat a step. OnEnable starts
+            // the ticker; its first tick resumes this exact seat once.
+            if (interrupted && engine != null && !string.IsNullOrEmpty(interruptedSeat))
+            {
+                agentResumeAfterInterrupt = true;
+                agentInterruptedSeat = interruptedSeat;
+            }
         }
     }
 }

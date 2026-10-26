@@ -272,7 +272,7 @@ internal static partial class Harness
         var history = new List<string> { "levy_tax city-a -> ok", "recruit city-a -> rejected" };
 
         string system = PromptBuilder.SystemPrompt();
-        Check(PromptBuilder.PromptVersion == "demo-slice-1", "prompt version is demo-slice-1");
+        Check(PromptBuilder.PromptVersion == "demo-slice-3", "prompt version tracks seasonal-food guidance");
         Check(system.Contains("one JSON object") && system.Contains("\"target_id\"")
               && system.Contains("end_turn"),
             "system prompt contains the output schema and vocabulary");

@@ -521,6 +521,12 @@ internal static partial class Harness
             Check(text.Contains("S1 Wei: levy_tax city-a -> ok")
                   && text.Contains("S3 Shu: levy_tax city-b -> ok"),
                 "[DEMO-E1] live pilot prints the per-season action -> result transcript");
+            Check(text.Contains("LIVE-PILOT season S1 Wei gold=")
+                  && text.Contains("food=") && text.Contains("pop=")
+                  && text.Contains("garrison=")
+                  && text.Contains("LIVE-PILOT endings=voluntary=6 limit=0")
+                  && text.Contains("invalid=0"),
+                "[DEMO-E1] live pilot prints per-season scores and ending/rejection counts");
             Check(!text.Contains(LlmFakeKey) && !text.Contains("Bearer ")
                   && text.Contains("api_key=<set>"),
                 "[DEMO-E1] live pilot prints redacted config only");

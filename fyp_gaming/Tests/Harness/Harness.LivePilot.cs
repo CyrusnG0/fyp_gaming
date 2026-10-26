@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -88,7 +89,8 @@ internal static partial class Harness
 
         output.WriteLine("LIVE-PILOT config: " + config.Redacted());
         output.WriteLine("LIVE-PILOT provider=" + transport.Provider
-                         + " model=" + transport.Model);
+                         + " model=" + transport.Model
+                         + " prompt=" + PromptBuilder.ActivePromptVersion);
         output.WriteLine("LIVE-PILOT fixture: seats=2 cities=2 armies=0 seasons="
                          + seasons.ToString(CultureInfo.InvariantCulture));
 
@@ -117,9 +119,14 @@ internal static partial class Harness
                 + " actions=" + record.Actions.ToString(CultureInfo.InvariantCulture)
                 + " accepted=" + record.Accepted.ToString(CultureInfo.InvariantCulture)
                 + " rejected=" + record.Rejected.ToString(CultureInfo.InvariantCulture)
+                + " invalid=" + record.Invalid.ToString(CultureInfo.InvariantCulture)
                 + " last=" + SafeLine(record.LastResult)
-                + " ended=" + SafeLine(record.EndedBy));
+                + " end=" + SafeLine(record.EndReasonText));
         }
+        foreach (SpectatorSeasonScore score in session.SeasonScores)
+            output.WriteLine("LIVE-PILOT season S"
+                + score.Season.ToString(CultureInfo.InvariantCulture) + " "
+                + ScoreboardLine(score));
         foreach (string action in session.RecentActions)
             output.WriteLine("LIVE-PILOT action " + SafeLine(action));
 
@@ -144,6 +151,12 @@ internal static partial class Harness
         output.WriteLine("LIVE-PILOT actions=" + session.TotalActions.ToString(CultureInfo.InvariantCulture)
                          + " accepted=" + session.TotalAccepted.ToString(CultureInfo.InvariantCulture)
                          + " rejected=" + session.TotalRejected.ToString(CultureInfo.InvariantCulture));
+        output.WriteLine("LIVE-PILOT endings=voluntary="
+                         + session.VoluntaryEndTurns.ToString(CultureInfo.InvariantCulture)
+                         + " limit=" + session.LimitEndings.ToString(CultureInfo.InvariantCulture)
+                         + " failed=" + session.FailedEndings.ToString(CultureInfo.InvariantCulture)
+                         + " cancelled=" + session.CancelledEndings.ToString(CultureInfo.InvariantCulture)
+                         + " invalid=" + session.TotalInvalidResponses.ToString(CultureInfo.InvariantCulture));
         output.WriteLine("LIVE-PILOT summary=" + (summaryPath ?? "(not written)"));
         output.WriteLine("LIVE-PILOT started="
                          + started.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)
@@ -198,6 +211,17 @@ internal static partial class Harness
     private static string TokenText(long? value)
         => value.HasValue && value.Value != 0
             ? value.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
+
+    private static string ScoreboardLine(SpectatorSeasonScore seasonScore)
+    {
+        var parts = new List<string>();
+        if (seasonScore != null && seasonScore.Scores != null)
+            foreach (SpectatorScore score in seasonScore.Scores)
+                parts.Add(SafeLine(score.FactionName) + " gold=" + score.Gold
+                    + " food=" + score.Food + " pop=" + score.Population
+                    + " garrison=" + score.Garrison);
+        return parts.Count == 0 ? "(no scoreboard captured)" : string.Join(" | ", parts);
+    }
 
     private static bool TryParseLiveSeasons(string text, out int seasons)
     {

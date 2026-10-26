@@ -100,6 +100,8 @@ namespace LuanShi
             if (!spectatorMode && !reportShowing && agentHasSeat)
                 DrawAgentPanel(AgentPanelArea());
 
+            if (!reportShowing) DrawAgentChat();
+
             HandleClicks();
 
             // Tooltips are drawn last, above every panel, and never influence the click test above.

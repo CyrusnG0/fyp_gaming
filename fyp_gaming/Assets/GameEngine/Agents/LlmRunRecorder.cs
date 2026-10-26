@@ -209,7 +209,7 @@ namespace LuanShi.Engine
                 parts.Add(Num("seed", _seed));
                 parts.Add(Str("provider", _transport.Provider));
                 parts.Add(Str("model", _transport.Model));
-                parts.Add(Str("prompt_version", PromptBuilder.PromptVersion));
+                parts.Add(Str("prompt_version", PromptBuilder.ActivePromptVersion));
                 parts.Add(Str("schema_hash", _schemaHash));
                 parts.Add(Str("seat_id", _seatId));
                 parts.Add(Num("turn_token", _turnToken));

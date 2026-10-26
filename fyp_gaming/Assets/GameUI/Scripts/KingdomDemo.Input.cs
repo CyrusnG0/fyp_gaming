@@ -191,11 +191,31 @@ namespace LuanShi
             TBTK.GridIndicator.HideAll();
         }
 
-        bool PointerOverUI(Vector2 m)
+        /// <summary>
+        /// IMGUI event coordinates are top-left screen pixels; uiRects are top-left design pixels.
+        /// Scale the point with the same uniform GUI.matrix factor OnGUI uses before hit testing.
+        /// </summary>
+        bool PointerOverUI(Vector2 screenTopLeft)
         {
-            float s = Screen.width / 1600f;
+            UiPointerMapping.ToDesignSpaceFromTopLeft(screenTopLeft.x, screenTopLeft.y, Screen.width,
+                out float designX, out float designY);
+            return PointerOverDesignSpace(designX, designY);
+        }
+
+        /// <summary>Input.mousePosition is bottom-left screen pixels, so flip Y before mapping.</summary>
+        bool PointerOverUIFromInput()
+        {
+            if (Screen.width <= 0 || Screen.height <= 0) return false;
+            UiPointerMapping.ToDesignSpace(Input.mousePosition.x, Input.mousePosition.y,
+                Screen.width, Screen.height, out float designX, out float designY);
+            return PointerOverDesignSpace(designX, designY);
+        }
+
+        bool PointerOverDesignSpace(float designX, float designY)
+        {
             foreach (var r in uiRects)
-                if (new Rect(r.x * s, r.y * s, r.width * s, r.height * s).Contains(m)) return true;
+                if (UiPointerMapping.Contains(designX, designY,
+                        new DesignRect(r.x, r.y, r.width, r.height))) return true;
             return false;
         }
 
@@ -209,7 +229,7 @@ namespace LuanShi
         {
             bool blocked = handoverShowing || reportShowing || activeTab != "map"
                 || (engine != null && engine.State.WinnerSeatId != null);
-            if (!blocked && PointerOverUI(Input.mousePosition)) blocked = true;
+            if (!blocked && PointerOverUIFromInput()) blocked = true;
 
             if (cameraControl == null) cameraControl = FindAnyObjectByType<TBTK.CameraControl>();
             if (cameraControl != null) cameraControl.enableZoom = !blocked;

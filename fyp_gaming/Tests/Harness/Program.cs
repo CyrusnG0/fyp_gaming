@@ -21,8 +21,43 @@ internal static partial class Harness
 
     private static void Section(string title) => Console.WriteLine("\n== " + title + " ==");
 
+    /// <summary>
+    /// Harness-only A/B switch: --prompt-version demo-slice-1 or LUANSHI_PROMPT_VERSION.
+    /// The normal suite always starts from the current default unless the caller opts in.
+    /// </summary>
+    private static bool TryApplyPromptVersionSwitch(string[] args, out int exitCode)
+    {
+        exitCode = 0;
+        string version = null;
+        for (int i = 0; args != null && i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], "--prompt-version", StringComparison.Ordinal)) continue;
+            if (i + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("usage: --prompt-version <demo-slice-3|demo-slice-1>");
+                exitCode = 2;
+                return false;
+            }
+            version = args[i + 1];
+        }
+        if (string.IsNullOrEmpty(version))
+            version = Environment.GetEnvironmentVariable("LUANSHI_PROMPT_VERSION");
+        if (string.IsNullOrEmpty(version)) return true;
+
+        if (PromptBuilder.TryUsePromptVersion(version, out string error))
+        {
+            Console.WriteLine("PROMPT version=" + PromptBuilder.ActivePromptVersion);
+            return true;
+        }
+        Console.Error.WriteLine("PROMPT error: " + error + " ('" + version + "')");
+        exitCode = 2;
+        return false;
+    }
+
     private static int Main(string[] args)
     {
+        if (!TryApplyPromptVersionSwitch(args, out int promptExit)) return promptExit;
+
         // The live smoke is opt-in and must never run as part of the normal suite.
         if (args != null)
         {
@@ -62,6 +97,9 @@ internal static partial class Harness
         RunTurnFlowPlanner();
         RunLlmParse();
         RunLlmRunner();
+        RunLlmActivity();
+        RunLlmSessionChat();
+        RunDemoS4();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;

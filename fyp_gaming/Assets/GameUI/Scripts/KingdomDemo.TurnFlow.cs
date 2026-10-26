@@ -68,6 +68,19 @@ namespace LuanShi
         // ------------------------------------------------------------- hotseat seat flow
 
         private int activeTurnToken;   // engine turn token held by the human seat currently in the chair
+        private const string NoPlayableSeatStatus = "No human or LLM seat - nothing to play";
+
+        /// <summary>
+        /// A live model can only take a seat when its runner and transport are ready. Kept independent
+        /// of agentHasSeat so an invalid llmSeats roster is still recognised as scripted-only.
+        /// </summary>
+        bool CanRunLlmSeat(string seatId)
+            => !spectatorMode && agentRunner != null
+               && (useFakeLlm || string.IsNullOrEmpty(agentUnavailableReason));
+
+        bool RosterHasPlayableSeat()
+            => engine != null
+               && TurnFlowPlanner.HasHumanOrRunnableLlm(engine.State, CanRunLlmSeat);
 
         /// <summary>
         /// Ends the human seat's turn: closes its engine gate, plays any scripted seats, starts an LLM
@@ -304,6 +317,17 @@ namespace LuanShi
         /// <summary>Season rollover: resolve the world, then open the next seat's court report (design §2 ①).</summary>
         void ResolveSeason()
         {
+            if (engine == null) return;
+
+            // A scripted-only roster has nobody to open the next chair. Its one scripted pass is the
+            // whole demo; stop at this boundary rather than resolving seasons recursively forever.
+            if (!RosterHasPlayableSeat())
+            {
+                statusMsg = NoPlayableSeatStatus;
+                ReleaseControlLock();
+                return;
+            }
+
             var report = engine.EndSeason();
             engine.BeginSeason();
             currentSeat = SeatRotation.FirstSeat(engine.State);
@@ -314,16 +338,6 @@ namespace LuanShi
             handoverShowing = false;
             if (spectatorMode) return;   // SpectatorSession owns the next season too
 
-            // No human and no runnable LLM seat means every planned LlmSeat would fall straight
-            // through to ResolveSeason again. Stop at the boundary instead of spinning seasons
-            // synchronously forever.
-            if (agentHasSeat && agentRunner == null
-                && SeatRotation.HumanSeats(engine.State).Count == 0)
-            {
-                statusMsg = "No human seat and no usable LLM runner: turn flow stopped";
-                ReleaseControlLock();
-                return;
-            }
             StartPlannedTurn(TurnFlowPlanner.First(engine.State));
         }
 
