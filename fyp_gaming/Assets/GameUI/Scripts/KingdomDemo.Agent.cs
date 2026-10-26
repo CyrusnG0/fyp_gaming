@@ -360,22 +360,18 @@ namespace LuanShi
             jsonFeed.Add(line);
             if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
         }
-        /// <summary>Offline rehearsal only: one affordable order then end_turn. Provider=fake.</summary>
+        /// <summary>
+        /// Offline rehearsal only (FAKE, provider=fake): a capture march when the seat's movement view
+        /// advertises one, else its first option; then one affordable order and end_turn. The plan is
+        /// built by the pure-C# FakeTurnPlan helper so the harness can assert its choices.
+        /// </summary>
         void EnqueueFakeTurn(string seatId, Observation seatObs)
         {
             if (agentFake == null) return;
             agentFake.Reset();
-            string cityId = null;
-            if (seatObs != null && seatObs.CommandPoints >= BalanceConfig.CommandPointCost(ActionType.LevyTax))
-            {
-                var cities = seatObs.CitiesOf(seatId); if (cities.Count > 0) cityId = cities[0].Id;
-            }
-            if (!string.IsNullOrEmpty(cityId))
-                agentFake.EnqueueSuccess(
-                    "{\"type\":\"levy_tax\",\"target_id\":\"" + JsonText(cityId) + "\"," +
-                    "\"summary\":\"FAKE rehearsal: levy tax\"}", 350, 120, 20);
-            agentFake.EnqueueSuccess(
-                "{\"type\":\"end_turn\",\"summary\":\"FAKE rehearsal: end turn\"}", 250, 80, 10);
+            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId);
+            foreach (string command in plan)
+                agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
         private sealed class AgentTurnHost : IPlanningHost
         {

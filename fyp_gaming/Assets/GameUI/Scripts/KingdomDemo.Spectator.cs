@@ -129,28 +129,16 @@ namespace LuanShi
         /// <summary>
         /// FAKE rehearsal script. Responses are queued for the whole run in turn order because the
         /// conductor opens the next seat inside Tick(); a per-frame queue would arrive too late.
-        /// Every turn is levy, reclaim, end_turn and every summary is labelled FAKE.
+        /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn)
+        /// and every summary is labelled FAKE.
         /// </summary>
         void EnqueueFakeSeatTurn(string seatId)
         {
             if (agentFake == null || engine == null || string.IsNullOrEmpty(seatId)) return;
             Observation seatObs = engine.Observe(seatId);
-            string cityId = null;
-            if (seatObs != null)
-            {
-                var cities = seatObs.CitiesOf(seatId);
-                if (cities.Count > 0) cityId = cities[0].Id;
-            }
-
-            if (!string.IsNullOrEmpty(cityId))
-            {
-                agentFake.EnqueueSuccess("{\"type\":\"levy_tax\",\"target_id\":\"" + JsonText(cityId)
-                    + "\",\"summary\":\"FAKE rehearsal: levy tax\"}", 200, 120, 20);
-                agentFake.EnqueueSuccess("{\"type\":\"reclaim\",\"target_id\":\"" + JsonText(cityId)
-                    + "\",\"summary\":\"FAKE rehearsal: reclaim\"}", 200, 120, 20);
-            }
-            agentFake.EnqueueSuccess("{\"type\":\"end_turn\",\"summary\":\"FAKE rehearsal: end turn\"}",
-                150, 60, 10);
+            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId);
+            foreach (string command in plan)
+                agentFake.EnqueueSuccess(command, 200, 120, 20);
         }
 
         void ResetFakeSpectatorQueue(string firstSeatId, int seasons)

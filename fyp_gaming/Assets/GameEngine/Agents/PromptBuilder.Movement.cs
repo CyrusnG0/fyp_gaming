@@ -15,6 +15,12 @@ namespace LuanShi.Engine
         public const string MovementHeader =
             "\nMOVEMENT OPTIONS (candidates, revalidated by the engine):\n";
 
+        /// <summary>
+        /// Hard cap on a rendered option note. Engine notes are already short and safe (terrain /
+        /// visibility words only); this keeps the bounded prompt bounded even for a hand-built view.
+        /// </summary>
+        public const int MaxOptionNoteChars = 64;
+
         /// <summary>Full section (every advertised option, including any engine-side cap).</summary>
         public static string MovementOptionsText(MovementView view)
             => MovementOptionsText(view, int.MaxValue);
@@ -75,6 +81,8 @@ namespace LuanShi.Engine
                         sb.Append(Int(option.X)).Append(',').Append(Int(option.Z))
                           .Append(" cost=").Append(Int(option.PathCost))
                           .Append(' ').Append(Safe(option.Kind));
+                        string note = NoteText(option.Note);
+                        if (note.Length > 0) sb.Append(" - ").Append(note);
                     }
                     sb.Append('\n');
                 }
@@ -98,6 +106,18 @@ namespace LuanShi.Engine
             foreach (char c in value)
                 sb.Append(char.IsControl(c) || c == '"' ? '_' : c);
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Compact, bounded one-line note. The engine's notes are short and contain no ids or hidden
+        /// facts; ';' is folded to ',' so it cannot be mistaken for an option separator.
+        /// </summary>
+        private static string NoteText(string value)
+        {
+            string safe = Safe(value).Replace(';', ',');
+            if (safe.Length > MaxOptionNoteChars)
+                safe = safe.Substring(0, MaxOptionNoteChars);
+            return safe.Trim();
         }
     }
 }

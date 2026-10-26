@@ -102,6 +102,8 @@ internal static partial class Harness
         RunMovementOptions();
         RunLlmMovement();
         RunLlmMovementPrompts();
+        RunLlmMovementStale();
+        RunFakeTurnPlan();
         RunFeedbackPolicy();
         RunLlmTerminal();
         RunDemoS4();

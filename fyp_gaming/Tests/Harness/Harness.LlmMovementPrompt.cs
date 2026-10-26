@@ -18,7 +18,16 @@ internal static partial class Harness
         MovementPromptTruncation();
         MovementPromptHiddenWorlds();
         PromptBuilder.ResetPromptVersion();
+
+        Section("[LS015-W3] movement prompt: rendered option notes");
+        MovementPromptNotesRendered();
+        MovementPromptNotesBounded();
+        MovementPromptNotesDomesticAbsent();
+        MovementPromptNotesNeverLeakHiddenIds();
+        PromptBuilder.ResetPromptVersion();
     }
+
+    private static void W3Check(bool ok, string name) => Check(ok, "[LS015-W3] " + name);
 
     private static void MovementPromptSection()
     {
@@ -122,5 +131,139 @@ internal static partial class Harness
         Observation obs = engine.Observe("seat-a");
         return PromptBuilder.UserPrompt(obs, ActionCatalogue.Build(obs), new List<string>(),
             4, 3, MovementPlanner.Build(engine, "seat-a"));
+    }
+
+    // ---- [LS015-W3] rendered option notes ----------------------------------
+
+    private static void MovementPromptNotesRendered()
+    {
+        var cityEngine = W2CaptureWorld(9401);
+        var cityObs = cityEngine.Observe("seat-a");
+        var cityView = MovementPlanner.Build(cityEngine, "seat-a");
+        string cityPrompt = PromptBuilder.UserPrompt(cityObs, ActionCatalogue.Build(cityObs),
+            new List<string>(), 4, 3, cityView);
+        W3Check(cityPrompt.Contains(
+                "2,0 cost=2 capture_neutral_city - neutral city in sight, march captures on arrival"),
+            "the neutral-city option renders its note after the kind");
+
+        var terrainEngine = MovementFixture(9402, 2, UnitTypes.Infantry);
+        ApplyMovementTerrain(terrainEngine);
+        var terrainObs = terrainEngine.Observe("seat-a");
+        var terrainView = MovementPlanner.Build(terrainEngine, "seat-a");
+        string first = PromptBuilder.UserPrompt(terrainObs, ActionCatalogue.Build(terrainObs),
+            new List<string>(), 4, 3, terrainView);
+        string second = PromptBuilder.UserPrompt(terrainObs, ActionCatalogue.Build(terrainObs),
+            new List<string>(), 4, 3, terrainView);
+        W3Check(first == second && first.Contains(" - terrain cost counted"),
+            "the terrain-cost note renders and the prompt is deterministic");
+
+        // MovementOptions.cs emits only these three note strings (plus null). Anything else in a
+        // test-built view was not produced by the engine.
+        bool onlyEngineNotes = true;
+        foreach (ArmyMovePlan plan in cityView.Armies)
+        {
+            if (plan.Options == null) continue;
+            foreach (MoveOption option in plan.Options)
+                if (option.Note != null
+                    && option.Note != "terrain cost counted"
+                    && option.Note != "neutral city in sight; march captures on arrival"
+                    && option.Note != "watch tower in sight; march captures on arrival")
+                    onlyEngineNotes = false;
+        }
+        W3Check(onlyEngineNotes,
+            "the rendered notes are exactly the three engine-produced safe strings");
+    }
+
+    private static void MovementPromptNotesBounded()
+    {
+        var engine = MovementFixture(9403, 2, UnitTypes.Infantry);
+        var obs = engine.Observe("seat-a");
+        var options = ActionCatalogue.Build(obs);
+
+        var oneArmies = new List<ArmyMovePlan>();
+        var oneView = new MovementView
+        {
+            SeatId = "seat-a", Season = 2, CommandPoints = 5, MarchOrderCost = 1,
+            Armies = oneArmies,
+        };
+        var oneOptions = new List<MoveOption>
+        {
+            new MoveOption
+            {
+                ArmyId = "army-a-1", X = 0, Z = 1, PathCost = 1, Kind = "move",
+                Note = new string('N', 500),
+            },
+        };
+        oneArmies.Add(new ArmyMovePlan
+        {
+            ArmyId = "army-a-1", UnitType = UnitTypes.Infantry, X = 1, Z = 1,
+            MarchesLeft = 1, Budget = 6, CanMarch = true, TotalReachable = 1, Options = oneOptions,
+        });
+        string notePrompt = PromptBuilder.UserPrompt(obs, options, new List<string>(), 4, 3, oneView);
+        string bounded = new string('N', PromptBuilder.MaxOptionNoteChars);
+        W3Check(notePrompt.Contains(" - " + bounded) && !notePrompt.Contains(bounded + "N"),
+            "a long note is cut deterministically at MaxOptionNoteChars");
+
+        // Notes still obey the shared prompt cap: the fallback drops options, deterministically.
+        var bigArmies = new List<ArmyMovePlan>();
+        var bigView = new MovementView
+        {
+            SeatId = "seat-a", Season = 2, CommandPoints = 5, MarchOrderCost = 1,
+            Armies = bigArmies,
+        };
+        for (int army = 0; army < 40; army++)
+        {
+            var planOptions = new List<MoveOption>();
+            for (int i = 0; i < 12; i++)
+                planOptions.Add(new MoveOption
+                {
+                    ArmyId = "army-" + army, X = i, Z = army % 7, PathCost = i,
+                    Kind = i == 0 ? "capture_neutral_city" : "move",
+                    Note = new string('N', 200),
+                });
+            bigArmies.Add(new ArmyMovePlan
+            {
+                ArmyId = "army-" + army, UnitType = UnitTypes.Infantry, X = army % 9, Z = army % 7,
+                MarchesLeft = 1, Budget = 6, CanMarch = true, TotalReachable = 12, Truncated = true,
+                Options = planOptions,
+            });
+        }
+        string bigFirst = PromptBuilder.UserPrompt(obs, options, new List<string>(), 4, 3, bigView);
+        string bigSecond = PromptBuilder.UserPrompt(obs, options, new List<string>(), 4, 3, bigView);
+        int total = PromptBuilder.SystemPromptFor(true).Length + bigFirst.Length;
+        W3Check(total <= PromptBuilder.MaxPromptChars && bigFirst == bigSecond
+           && bigFirst.Contains("[truncated:"),
+            $"notes stay inside the prompt cap and options drop deterministically ({total})");
+    }
+
+    private static void MovementPromptNotesDomesticAbsent()
+    {
+        var engine = W2CaptureWorld(9404);
+        var obs = engine.Observe("seat-a");
+        string domestic = PromptBuilder.UserPrompt(obs, ActionCatalogue.Build(obs),
+            new List<string>(), 4, 3);
+        W3Check(!domestic.Contains("MOVEMENT OPTIONS")
+           && !domestic.Contains("neutral city in sight")
+           && !domestic.Contains("terrain cost counted")
+           && !domestic.Contains("march captures on arrival"),
+            "a non-planning host's demo-slice-3 prompt renders no option notes");
+        W3Check(PromptBuilder.VersionFor(true) == "demo-slice-4"
+           && PromptBuilder.SystemPromptFor(false) == PromptBuilder.DomesticSystemPrompt(),
+            "the system text is unchanged, so the prompt version stays demo-slice-4");
+    }
+
+    private static void MovementPromptNotesNeverLeakHiddenIds()
+    {
+        string basePrompt = MovementPromptFor(HiddenWorld(9405, "baseline"));
+        W3Check(basePrompt.Contains("MOVEMENT OPTIONS")
+           && !basePrompt.Contains("city-hidden")
+           && !basePrompt.Contains("army-hidden")
+           && !basePrompt.Contains("tower-hidden"),
+            "notes never name city/army/tower ids outside the seat observation");
+
+        string[] variants = { "army", "adjacent", "city", "tower" };
+        foreach (string variant in variants)
+            W3Check(MovementPromptFor(HiddenWorld(9405, variant)) == basePrompt,
+                $"hidden {variant}: rendered notes keep the planning prompt byte-identical");
     }
 }
