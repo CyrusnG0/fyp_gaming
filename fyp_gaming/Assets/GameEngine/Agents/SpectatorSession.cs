@@ -258,9 +258,9 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Cancels the in-flight request, safely closes the active seat, and pauses. The late task is
-        /// dropped by the runner's generation counter, so its response can never execute. Resume
-        /// continues at the next seat boundary.
+        /// Cancels the in-flight request, safely closes the active seat, and pauses. Cancel detaches
+        /// and cancels the in-flight task (DropInflight), and Tick never reads a detached task, so
+        /// its late response can never execute. Resume continues at the next seat boundary.
         /// </summary>
         public void Stop()
         {

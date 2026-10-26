@@ -22,7 +22,10 @@ namespace LuanShi.Engine
     /// <summary>
     /// Main-thread, bounded one-seat LLM turn state machine. Provider I/O is the only background
     /// work. Every terminal path calls EndTurn once, except a host cancellation (the host then owns
-    /// the turn). A generation counter makes late or duplicate responses inert.
+    /// the turn). Terminal paths, Cancel and Begin detach the in-flight task (DropInflight) and Tick
+    /// reads an attached task only while Requesting, so a late response can never execute. A
+    /// duplicate delivery is refused by its completion source, and a repeated order is re-validated
+    /// by the engine. The generation checks are defense in depth, not independently tested.
     /// </summary>
     public sealed partial class LlmTurnRunner
     {
