@@ -1,5 +1,25 @@
 # Local agent/tooling config (per-machine, do not share)
+# Local project knowledge and reports (retained on disk, excluded from future commits)
+/AGENTS.md
+/README.md
+/doc/
+/docs/
+
 .kimi-code/
+.kimi/
+.kilo/
+.codex/
+.agents/
+
+# Local credentials and experiment output (share templates and curated evidence)
+.env
+.env.*
+!.env.example
+*.local.json
+/runs/
+
+# Unity creates this alongside the ignored crash-recovery directory
+/fyp_gaming/Assets/_Recovery.meta
 
 # Third-party asset packages (TBTK source is already imported under fyp_gaming/Assets/TBTK/)
 *.unitypackage
