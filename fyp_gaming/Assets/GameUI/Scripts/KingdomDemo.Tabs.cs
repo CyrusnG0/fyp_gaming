@@ -17,6 +17,13 @@ namespace LuanShi
         /// so scripted demos and screenshot passes can drive the UI without a mouse.</summary>
         public void ShowTab(string key)
         {
+            // Single-LLM mode freezes the whole tab layer during the agent's turn. Spectators may
+            // browse read-only; their tab buttons stay available.
+            if (uiInputLocked && !spectatorMode)
+            {
+                activeTab = "map";
+                return;
+            }
             activeTab = key;
         }
 
@@ -27,10 +34,11 @@ namespace LuanShi
 
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
+            if (uiInputLocked && !spectatorMode) return;   // single-LLM lock: no tab body at all
             float height = TabPanelHeight();
             var p = new Rect(400, 190, 800, height);
             uiRects.Add(p);
-            DrawBackdrop(p);
+            DrawBackdrop(p, CurrentSeatAccent());
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
 
             bool scrolls = activeTab == "domestic" || activeTab == "diplomacy"
@@ -175,426 +183,15 @@ namespace LuanShi
 
             y += 10;
             string footer =
-                $"Select one of our cities, then issue orders from the city panel on the left; unavailable buttons are grey.\n" +
+                $"Select one of our cities, then issue orders from its selection panel; unavailable buttons are grey and state their reason.\n" +
                 $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).";
             return y + WrappedLabel(wrap, footer, p.x + 20, y, 760, 44);
-        }
-
-        float DrawDiplomacyPanel(Rect p, GUIStyle body)
-        {
-            var wrap = new GUIStyle(body) { wordWrap = true };
-            var me = engine.State.FindFaction(currentSeat);
-            var btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
-            const int shownFactions = 3;      // placeholder layout: the rest are summarised
-
-            float y = p.y + 52;
-            y += WrappedLabel(wrap,
-                $"Diplomacy ({me.Name})  Orders {me.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}  Prestige {me.Prestige}" +
-                $"  Treaties {(obs != null ? obs.Treaties.Count : 0)}" +
-                $"  Pending proposals {(obs != null ? obs.Proposals.Count : 0)}", p.x + 20, y, 760, 22) + 4;
-
-            // Envoy message: type here, then press Send message on a faction row to submit it.
-            GUI.Label(new Rect(p.x + 36, y, 120, 22), "Envoy message", body);
-            envoyText = GUI.TextField(new Rect(p.x + 160, y, 604, 24), envoyText, 120);
-            if (envoyConfirmationUntil > Time.unscaledTime)
-                GUI.Box(new Rect(p.x + 270, y + 34, 300, 52), "Message sent successfully");
-            y += 34;
-
-            // Incoming offers first: they are the only diplomacy that demands an answer.
-            var incoming = new List<TreatyProposal>();
-            if (obs != null)
-                foreach (var proposal in obs.Proposals)
-                    if (proposal.ToSeatId == currentSeat) incoming.Add(proposal);
-
-            y += WrappedLabel(wrap, $"Pending proposals ({incoming.Count})", p.x + 20, y, 760, 22) + 2;
-
-            if (incoming.Count == 0)
-                y += WrappedLabel(wrap, "No incoming proposals.", p.x + 36, y, 744, 20) + 4;
-            foreach (var proposal in incoming)
-            {
-                y += WrappedLabel(wrap,
-                    $"{SeatShort(proposal.FromSeatId)} proposes {TreatyLabel(proposal.Type)} for {proposal.DurationSeasons} seasons" +
-                    (string.IsNullOrEmpty(proposal.Text) ? "" : $"  Note: {proposal.Text}"),
-                    p.x + 36, y, 744, 20) + 2;
-                OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Accept",
-                    null, 0, 0, btn, new Dictionary<string, string> { { "response", "accept" } });
-                OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.RespondTreaty, proposal.FromSeatId, "Reject",
-                    null, 0, 0, btn, new Dictionary<string, string> { { "response", "reject" } });
-                y += 36;
-            }
-
-            // Relations and the actions available against each other seat.
-            int drawn = 0;
-            foreach (var other in engine.State.Factions)
-            {
-                if (other.SeatId == currentSeat) continue;
-                if (drawn == shownFactions)
-                {
-                    WrappedLabel(wrap, "... (remaining factions omitted)", p.x + 36, y, 744, 20);
-                    break;
-                }
-
-                var relation = obs != null ? obs.Relation(other.SeatId) : null;
-                int myTrust = relation != null ? relation.MyTrust : 0;
-                int theirTrust = relation != null ? relation.TheirTrust : 0;
-                bool atWar = relation != null && relation.AtWar;
-
-                y += WrappedLabel(wrap,
-                    $"{other.Name}  Trust me→them {myTrust} / them→me {theirTrust}  {StatusLine(other.SeatId)}",
-                    p.x + 20, y, 760, 20) + 2;
-
-                string hint = null;
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 176, 30), ActionType.DeclareWar,
-                    other.SeatId, "Declare war", atWar ? "Already at war" : null, 0, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 218, y, 176, 30), ActionType.Gift,
-                    other.SeatId, $"Gift {BalanceConfig.GiftGoldPerTrustUnit}",
-                    Treasury() < BalanceConfig.GiftGoldPerTrustUnit ? "Not enough gold" : null,
-                    BalanceConfig.GiftGoldPerTrustUnit, 0, btn));
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 400, y, 176, 30), ActionType.SendMessage,
-                    other.SeatId, "Send message", string.IsNullOrEmpty(envoyText) ? "Enter a message first" : null,
-                    0, 0, btn, null, envoyText, () =>
-                    {
-                        envoyText = "";
-                        envoyConfirmationUntil = Time.unscaledTime + 2f;
-                    }));
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 582, y, 182, 30), ActionType.BreakTreaty,
-                    other.SeatId, "Break treaty", BreakBlocked(other.SeatId), 0, 0, btn,
-                    new Dictionary<string, string> { { "treaty_type", BreakableType(other.SeatId) } }));
-                y += 34;
-
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 36, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "Non-aggression pact", ProposalBlocked(other.SeatId, TreatyType.Nap), 0, 0, btn,
-                    new Dictionary<string, string> { { "treaty_type", TreatyType.Nap } }));
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 282, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "Alliance", ProposalBlocked(other.SeatId, TreatyType.Alliance), 0, 0, btn,
-                    new Dictionary<string, string> { { "treaty_type", TreatyType.Alliance } }));
-                hint = FirstReason(hint, OrderButton(new Rect(p.x + 528, y, 236, 30), ActionType.ProposeTreaty,
-                    other.SeatId, "Propose truce", ProposalBlocked(other.SeatId, TreatyType.Truce), 0, 0, btn,
-                    new Dictionary<string, string> { { "treaty_type", TreatyType.Truce } }));
-                y += 34;
-
-                if (hint != null)
-                    y += WrappedLabel(wrap, hint, p.x + 20, y, 760, 20) + 2;
-                y += 4;
-                drawn++;
-            }
-            return y;
-        }
-
-        /// <summary>Peace / war plus every treaty in force (with seasons left) and any pending offer,
-        /// read from this seat's observation only.</summary>
-        string StatusLine(string seatId)
-        {
-            var relation = obs != null ? obs.Relation(seatId) : null;
-            var sb = new StringBuilder(relation != null && relation.AtWar ? "At war" : "Peace");
-            foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
-            {
-                var treaty = MyTreaty(type, seatId);
-                if (treaty == null) continue;
-                int seasonsLeft = treaty.ExpirySeason - engine.State.Season + 1;
-                if (seasonsLeft < 1) seasonsLeft = 1;
-                sb.Append($"  [{TreatyLabel(type)} {seasonsLeft} seasons left]");
-            }
-            var proposal = MyProposal(seatId);
-            if (proposal != null)
-                                sb.Append(" [").Append(proposal.FromSeatId == currentSeat ? "Our proposal pending" : "Your response needed")
-                                    .Append(": ").Append(TreatyLabel(proposal.Type)).Append(']');
-            return sb.ToString();
-        }
-
-        /// <summary>This seat's own treaty of that type with another seat, from the observation.</summary>
-        TreatyRecord MyTreaty(string type, string otherSeatId)
-        {
-            if (obs == null) return null;
-            foreach (var treaty in obs.Treaties)
-                if (treaty.Type == type && treaty.Covers(currentSeat, otherSeatId)) return treaty;
-            return null;
-        }
-
-        /// <summary>The pending offer between this seat and another, in either direction.</summary>
-        TreatyProposal MyProposal(string otherSeatId)
-        {
-            if (obs == null) return null;
-            foreach (var proposal in obs.Proposals)
-                if ((proposal.FromSeatId == currentSeat && proposal.ToSeatId == otherSeatId)
-                    || (proposal.ToSeatId == currentSeat && proposal.FromSeatId == otherSeatId))
-                    return proposal;
-            return null;
-        }
-
-        /// <summary>Reason a treaty offer is obviously illegal, or null when it can be sent.</summary>
-        string ProposalBlocked(string seatId, string type)
-        {
-            if (MyTreaty(type, seatId) != null) return "Already active";
-            if (MyProposal(seatId) != null) return "Proposal already pending";
-            return null;
-        }
-
-        string BreakBlocked(string seatId)
-            => BreakableType(seatId) == null ? "No treaty to break" : null;
-
-        /// <summary>First treaty in force with that seat (nap → alliance → truce), or null.</summary>
-        string BreakableType(string seatId)
-        {
-            foreach (var type in new[] { TreatyType.Nap, TreatyType.Alliance, TreatyType.Truce })
-                if (MyTreaty(type, seatId) != null) return type;
-            return null;
-        }
-
-        int Treasury()
-        {
-            int gold = 0;
-            if (obs == null) return 0;
-            foreach (var city in obs.CitiesOf(currentSeat)) gold += city.Gold;
-            return gold;
-        }
-
-        /// <summary>
-        /// 諜報 (design §8.2, P8/ADR-015): three missions, each an instant action gated by 諜報 research and
-        /// paid from the treasury. Rows submit real commands through the shared OrderButton pipeline, so the
-        /// engine stays the only authority; the targets are the foreign cities this seat can actually name
-        /// (in sight, or already scouted) and the seat pairs for 挑撥離間.
-        /// </summary>
-        float DrawIntelPanel(Rect p, GUIStyle body, GUIStyle btn)
-        {
-            var wrap = new GUIStyle(body) { wordWrap = true };
-            int espionage = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
-            float y = p.y + 52;
-            y += WrappedLabel(wrap,
-                $"Intelligence ({engine.State.FindFaction(currentSeat)?.Name})  Espionage level {espionage}" +
-                $"  ·  success {BalanceConfig.SpySuccessChance(espionage) * 100f:F0}% per mission" +
-                $"  ·  gold {Treasury()}  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}",
-                p.x + 20, y, 760, 22) + 2;
-            y += WrappedLabel(wrap,
-                "Fog of war: 3 hexes around our cities, 2 around our armies. A failed mission exposes the agent publicly (prestige −8).",
-                p.x + 20, y, 760, 22) + 4;
-
-            y += WrappedLabel(wrap, "Missions", p.x + 20, y, 760, 20);
-            string[] missions =
-            {
-                $"Scout {BalanceConfig.ScoutGoldCost} gold · Espionage {BalanceConfig.ScoutResearchLevel} — target city's garrison and food (banded below Espionage {BalanceConfig.ScoutExactAccuracyLevel})",
-                $"Spread rumours {BalanceConfig.RumorGoldCost} gold · Espionage {BalanceConfig.RumorResearchLevel} — target city loses {BalanceConfig.RumorMoraleLoss} morale, deniably",
-                $"Sow distrust {BalanceConfig.SowDistrustGoldCost} gold · Espionage {BalanceConfig.SowDistrustResearchLevel} — two other seats lose {BalanceConfig.SowDistrustTrustPenalty} trust in each other",
-            };
-            foreach (string mission in missions)
-                y += WrappedLabel(wrap, mission, p.x + 36, y, 744, 20);
-            y += 8;
-
-            // targets: the foreign cities this seat can see right now
-            y += WrappedLabel(wrap, "Targets (foreign cities in sight)", p.x + 20, y, 760, 20) + 2;
-            var targets = new List<CityState>();
-            if (obs != null)
-                foreach (var city in obs.Cities)
-                    if (city.OwnerSeatId != currentSeat) targets.Add(city);
-            if (targets.Count == 0)
-                y += WrappedLabel(wrap,
-                    "No foreign city is in sight — march an army closer, then send an agent.",
-                    p.x + 36, y, 744, 20) + 2;
-            int shown = 0;
-            foreach (var city in targets)
-            {
-                if (shown == 2)
-                {
-                    y += WrappedLabel(wrap, "... (remaining cities omitted)", p.x + 36, y, 744, 20) + 2;
-                    break;
-                }
-                shown++;
-                var report = obs.FindScoutedCity(city.Id);
-                string cityLine =
-                    $"{city.Name} ({OwnerName(city)})  garrison {city.Garrison}, morale {city.Morale}" +
-                    (report != null ? $", report until season {report.UntilSeason}" : "");
-                float cityHeight = WrappedLabel(wrap, cityLine, p.x + 36, y, 384, 20);
-                OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, city.Id, "Scout",
-                    SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
-                OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, city.Id, "Rumours",
-                    city.IsNeutral ? "no faction to undermine"
-                                   : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
-                    0, 0, btn);
-                y += Mathf.Max(cityHeight, 24f) + 2;
-            }
-
-            // live reports on cities nothing of ours can see — and the way to extend them, since a report
-            // is the only handle a seat has on a city outside its fog (ADR-015)
-            if (obs != null && obs.ScoutedCities.Count > 0)
-            {
-                y += WrappedLabel(wrap, "Live reports", p.x + 20, y, 760, 20) + 2;
-                foreach (var report in obs.ScoutedCities)
-                {
-                    string detail = report.Accuracy == "exact"
-                        ? $"exact · garrison {report.Garrison}, food {report.Food}, morale {report.Morale}"
-                        : $"band · troops {report.GarrisonBand}, food {report.FoodBand}";
-                    string reportLine =
-                        $"{report.Name} ({SeatShort(report.OwnerSeatId)})  {detail}  ·  to season {report.UntilSeason}";
-                    float reportHeight = WrappedLabel(wrap, reportLine, p.x + 36, y, 384, 20);
-                    OrderButton(new Rect(p.x + 424, y, 158, 24), ActionType.Scout, report.CityId, "Scout",
-                        SpyBlocked(BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost), 0, 0, btn);
-                    OrderButton(new Rect(p.x + 590, y, 148, 24), ActionType.Rumor, report.CityId, "Rumours",
-                        string.IsNullOrEmpty(report.OwnerSeatId) ? "no faction to undermine"
-                            : SpyBlocked(BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost),
-                        0, 0, btn);
-                    y += Mathf.Max(reportHeight, 24f) + 2;
-                }
-                y += 4;
-            }
-
-            // 挑撥離間 needs two other seats: offer the first pairs and say so when there are more
-            y += WrappedLabel(wrap, "Sow distrust between", p.x + 20, y, 760, 20) + 2;
-            var others = new List<string>();
-            if (obs != null)
-                foreach (var view in obs.Factions)
-                    if (view.SeatId != currentSeat) others.Add(view.SeatId);
-            int pairs = 0;
-            for (int i = 0; i < others.Count; i++)
-            {
-                for (int j = i + 1; j < others.Count; j++)
-                {
-                    if (pairs == 2) break;
-                    pairs++;
-                    OrderButton(new Rect(p.x + 36, y, 300, 24), ActionType.SowDistrust, others[i],
-                        $"{SeatShort(others[i])} ↔ {SeatShort(others[j])}",
-                        SpyBlocked(BalanceConfig.SowDistrustResearchLevel, BalanceConfig.SowDistrustGoldCost),
-                        0, 0, btn, new Dictionary<string, string> { { "target_b", others[j] } });
-                    y += 28;
-                }
-                if (pairs == 2) break;
-            }
-            if (pairs == 0)
-                y += WrappedLabel(wrap, "No other seat is known yet.", p.x + 36, y, 744, 20);
-            else if (others.Count > 2)
-                WrappedLabel(wrap, "... (remaining pairs omitted)", p.x + 348, y - 26, 420, 20);
-            return y;
-        }
-
-        /// <summary>Why a mission cannot be ordered right now (mirrors the engine's SpyGate), or null.</summary>
-        string SpyBlocked(int requiredLevel, int goldCost)
-        {
-            int level = obs != null ? obs.ResearchLevel(ResearchLine.Espionage) : 0;
-            if (level < requiredLevel) return $"needs Espionage {requiredLevel}";
-            if (Treasury() < goldCost) return $"needs {goldCost} gold";
-            if (obs.CommandPoints < BalanceConfig.CommandPointsPerSpyMission) return "no orders left";
-            return null;
-        }
-
-        /// <summary>
-        /// 研究 (design §9, 四條線各 5 級): the four lines are live. Each row shows the seat's level, the
-        /// next level's price and what that level does; the button submits a real `research` command
-        /// (1 號令 + the level's points, TBD) through the same pipeline as every other order.
-        /// Every number on screen comes from BalanceConfig and the seat's own observation — research is
-        /// private (ADR-014), so another seat's tech tree is never rendered.
-        /// </summary>
-        float DrawResearchPanel(Rect p, GUIStyle body, GUIStyle btn)
-        {
-            var wrap = new GUIStyle(body) { wordWrap = true };
-            float y = p.y + 52;
-            y += WrappedLabel(wrap,
-                $"Research points {obs.ResearchPoints}  (+{BalanceConfig.ResearchIncome(obs.ResearchLevel(ResearchLine.Governance))}/season)" +
-                $"  Orders {obs.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
-                $"  ·  level costs {string.Join(" / ", System.Array.ConvertAll(BalanceConfig.ResearchLevelCosts, v => v.ToString()))}",
-                p.x + 20, y, 760, 22) + 8;
-
-            for (int i = 0; i < ResearchLine.All.Length; i++)
-            {
-                string line = ResearchLine.All[i];
-                int level = obs.ResearchLevel(line);
-                int cost = BalanceConfig.ResearchLevelCost(level + 1);
-                bool maxed = level >= BalanceConfig.ResearchMaxLevel;
-                string blocked = maxed ? "Line complete"
-                               : obs.ResearchPoints < cost ? $"Needs {cost} points"
-                               : obs.CommandPoints < BalanceConfig.CommandPointCost(ActionType.Research) ? "No orders left"
-                               : null;
-
-                WrappedLabel(wrap,
-                    $"{ResearchLine.Label(line)}  {ResearchPips(level)}  {level}/{BalanceConfig.ResearchMaxLevel}",
-                    p.x + 20, y, 560, 22);
-                OrderButton(new Rect(p.x + 596, y, 184, 30), ActionType.Research, null, "Research",
-                    blocked, 0, 0, btn, new Dictionary<string, string> { { "line", line } });
-
-                float nowHeight = WrappedLabel(wrap,
-                    "Now:  " + (level > 0 ? ResearchEffect(line, level) : "—"), p.x + 36, y + 26, 744, 20);
-                float nextHeight = WrappedLabel(wrap,
-                    maxed ? "All five levels researched."
-                          : $"Next: level {level + 1} for {cost} points — {ResearchEffect(line, level + 1)}",
-                    p.x + 36, y + 26 + nowHeight, 744, 20);
-                y += 26 + nowHeight + nextHeight + 4;   // 70 for two single-line effects
-            }
-
-            y += 6;
-            string footer =
-                "Points arrive at every season rollover. Harvest, tax, combat and training-cap effects apply as soon as they resolve;\n" +
-                "Law (level 3) and the income bonus settle at the next rollover. The Academy building (+3/season) and Intelligence 3-5 effects are deferred.";
-            return y + WrappedLabel(wrap, footer, p.x + 20, y, 760, 44);
-        }
-
-        /// <summary>
-        /// The current seat's 訓練 cap: 兵法 L1 練兵 raises it (design §9). Read from the seat's own
-        /// observation, like everything else the panel shows.
-        /// </summary>
-        int MyTrainingCap()
-            => BalanceConfig.TrainingCap(obs != null ? obs.ResearchLevel(ResearchLine.Military) : 0);
-
-        static string ResearchPips(int level)
-        {
-            var sb = new StringBuilder(BalanceConfig.ResearchMaxLevel);
-            for (int i = 1; i <= BalanceConfig.ResearchMaxLevel; i++) sb.Append(i <= level ? '\u25cf' : '\u25cb');
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Design §9's effect for one level, in one line. Levels whose systems do not exist yet say so
-        /// ("deferred") instead of promising an effect the engine does not implement (ADR-014).
-        /// </summary>
-        static string ResearchEffect(string line, int level)
-        {
-            switch (line)
-            {
-                case ResearchLine.Agri:
-                    switch (level)
-                    {
-                        case 1: return $"Reclaim — city harvest +{(int)(BalanceConfig.ResearchAgriFoodBonus * 100)}%";
-                        case 2: return "Water works — drought damage halved (deferred: no weather events)";
-                        case 3: return "Military farms — garrison self-supply 30% (deferred: the D9 farm-garrison action)";
-                        case 4: return "State granaries — food cap +50% (deferred: no food cap)";
-                        case 5: return $"Shennong — all harvests +{(int)(BalanceConfig.ResearchAgriL5FoodBonus * 100)}%";
-                    }
-                    break;
-                case ResearchLine.Military:
-                    switch (level)
-                    {
-                        case 1: return $"Drill — training cap +{BalanceConfig.ResearchMilTrainingCapBonus} (now {BalanceConfig.TrainingCap(1)})";
-                        case 2: return "Cavalry unlock — Cavalry units can be recruited (300 gold/1,000, 8 move, double upkeep)";
-                        case 3: return "Siege engines unlock — Siege units can be recruited (500 gold/1,000, waives the 3:1 assault)";
-                        case 4: return $"Art of war — combat power ×{1f + BalanceConfig.ResearchMilCombatBonus:F2}";
-                        case 5: return "Command — general coefficient +0.2 (deferred: no generals)";
-                    }
-                    break;
-                case ResearchLine.Espionage:
-                    switch (level)
-                    {
-                        case 1: return "Spies — unlocks Scout and Spread rumours missions (intel tab)";
-                        case 2: return "Counter-intelligence — unlocks Sow distrust missions (the +10% exposure bonus is deferred)";
-                        case 3: return "Forged reports (deferred: needs per-seat poisoned intel)";
-                        case 4: return "Spy network — +2 agent slots (deferred: no spy entities)";
-                        case 5: return "No shadows — capture chance +25% (deferred: no counter-intelligence)";
-                    }
-                    break;
-                default:
-                    switch (level)
-                    {
-                        case 1: return $"Taxation — city tax +{(int)(BalanceConfig.ResearchGovTaxBonus * 100)}%";
-                        case 2: return $"Recruitment — morale +{BalanceConfig.ResearchGovMoralePerSeason}/season in every city";
-                        case 3: return $"Law — revolt chance ×{BalanceConfig.ResearchGovRevoltMult} (from next season)";
-                        case 4: return $"Academy — research +{(int)(BalanceConfig.ResearchGovIncomeBonus * 100)}% ({BalanceConfig.ResearchIncome(4)} points/season)";
-                        case 5: return $"Nine ranks — prestige +{BalanceConfig.ResearchGovPrestigeL5} once";
-                    }
-                    break;
-            }
-            return "no effect yet";
         }
 
         void DrawHistorianPanel(Rect p, GUIStyle body, GUIStyle mono)
         {
             // the chronicle is the seat's filtered view of the log (CONTROLLER_PROTOCOL §5)
-            var records = obs != null ? obs.Events : new List<EventRecord>();
+            var records = obs != null ? obs.Events : new List<EventView>();
             GUI.Label(new Rect(p.x + 20, p.y + 52, 760, 22),
                 $"Campaign chronicle (visible to {engine.State.FindFaction(currentSeat)?.Name}) — {records.Count} entries" +
                 $" (season {engine.State.Season} · {PhaseLabel(engine.State.Phase)})", body);
@@ -616,7 +213,7 @@ namespace LuanShi
                 $"Historian: {CountSeasonEvents(engine.State.Season)} events recorded this season.", body);
         }
 
-        string HistorianLine(EventRecord rec)
+        string HistorianLine(EventView rec)
         {
             var sb = new StringBuilder();
             sb.Append(rec.Seq.ToString().PadLeft(2));

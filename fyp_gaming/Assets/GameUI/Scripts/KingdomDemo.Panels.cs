@@ -15,30 +15,29 @@ namespace LuanShi
             uiRects.Clear();
             float s = Screen.width / 1600f;
             GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
-
-            var title = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
-            var body = new GUIStyle(GUI.skin.label) { fontSize = 15 };
-            var mono = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Normal };
-            var btn = new GUIStyle(GUI.skin.button) { fontSize = 16 };
+            PrepareUiTheme();
 
             if (!ready)
             {
-                GUI.Label(new Rect(20, 20, 900, 40), "KingdomDemo init failed: " + initError, title);
+                GUI.Label(new Rect(20, 20, 900, 40), "KingdomDemo init failed: " + initError, uiTitle);
                 return;
             }
+
+            // The spectator loop must never be blocked by a court report or a hotseat handover.
+            if (spectatorMode) DismissSpectatorModals();
 
             // Between human seats the whole screen is replaced by the handover blocker: the previous
             // player must not see the next player's map, panels or report (hotseat rule).
             if (handoverShowing)
             {
-                DrawHandoverOverlay(title, body);
+                DrawHandoverOverlay(uiTitle, uiBody);
                 return;
             }
 
             if (engine == null || obs == null || string.IsNullOrEmpty(currentSeat))
             {
                 GUI.Label(new Rect(20, 20, 1100, 40),
-                    "KingdomDemo is waiting for game state to finish initializing.", title);
+                    "KingdomDemo is waiting for game state to finish initializing.", uiTitle);
                 return;
             }
 
@@ -46,148 +45,56 @@ namespace LuanShi
             if (fac == null)
             {
                 GUI.Label(new Rect(20, 20, 1100, 40),
-                    "KingdomDemo cannot find the current seat: " + currentSeat, title);
+                    "KingdomDemo cannot find the current seat: " + currentSeat, uiTitle);
                 return;
             }
-            int food = 0, gold = 0, pop = 0;
-            // render from the seat's observation, never from canonical state
-            foreach (var c in obs.CitiesOf(currentSeat)) { food += c.Food; gold += c.Gold; pop += c.Population; }
 
             // 一統天下 (design §13): the game is decided — the land is one, there is nothing left to order.
             if (engine.State.WinnerSeatId != null)
             {
-                DrawVictoryBanner(title, body);
+                DrawVictoryBanner(uiTitle, uiBody);
                 return;
             }
 
             bool hotseat = SeatRotation.HumanSeats(engine.State).Count > 1;
-            // Top bar: the header is data-driven (seat ids, larger populations), so it gets the full width
-            // left of the tab / End-turn column (x = 1400) instead of a fixed 1000 px. wordWrap is off — a
-            // long header must not wrap into a clipped second line — and the font steps down if that width
-            // is still not enough, so the trailing values (Food/Gold) always stay on screen.
-            string header =
-                $"Season {engine.State.Season} ({BalanceConfig.SeasonName(engine.State.Season)}) · {fac.Name} ({(hotseat ? currentSeat + " · Player" : "Player")})" +
-                $" · Orders {fac.CommandPoints}/{BalanceConfig.CommandPointsPerSeason}" +
-                $" · Prestige {fac.Prestige} · Population {pop} · Food {food} · Gold {gold}";
-            const float headerWidth = 1356f;
-            var headerStyle = new GUIStyle(title) { wordWrap = false };
-            foreach (int size in new[] { 20, 18, 16, 14 })
-            {
-                headerStyle.fontSize = size;
-                if (headerStyle.CalcSize(new GUIContent(header)).x <= headerWidth) break;
-            }
+            DrawTopBar(fac);
+            DrawTabColumn();
+            DrawEndTurnButton(fac, hotseat);
 
-            var top = new Rect(10, 8, 1380, 34);
-            uiRects.Add(top);
-            DrawBackdrop(top);
-            GUI.Label(new Rect(22, 12, headerWidth, 28), header, headerStyle);
-
-            // tab bar — Map is the live view; the others preview the full design concept
-            var tabBtn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
-            for (int i = 0; i < Tabs.GetLength(0); i++)
-            {
-                var r = new Rect(1400, 60 + i * 46, 190, 40);
-                uiRects.Add(r);
-                var prevBg = GUI.backgroundColor;
-                if (activeTab == Tabs[i, 0]) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
-                if (GUI.Button(r, Tabs[i, 1], tabBtn)) ShowTab(Tabs[i, 0]);
-                GUI.backgroundColor = prevBg;
-            }
-
-            // selection panel (map view only)
+            // selection + location popup (map view only; the court report is a modal over it)
             if (activeTab == "map")
             {
-                if (selCity != null) DrawCityPanel(selCity, body, btn);
-                else if (selArmy != null) DrawArmyPanel(selArmy, body, btn);
+                if (!reportShowing)
+                {
+                    if (spectatorMode)
+                    {
+                        // No order panels: the spectator cannot select or command a seat.
+                        DrawSpectatorPanel();
+                    }
+                    else
+                    {
+                        if (selCity != null) DrawCityPanel(selCity, uiBody, uiButton);
+                        else if (selArmy != null) DrawArmyPanel(selArmy, uiBody, uiButton);
+                        DrawLocationChoice(uiBody, uiButton);
+                    }
+                }
             }
-            DrawLocationChoice(body, btn);
 
-            // end this seat's turn (single-human mode ends the season, as before)
-            var end = new Rect(1400, 8, 190, 44);
-            uiRects.Add(end);
-            if (GUI.Button(end, hotseat ? $"End {fac.Name}'s turn" : "End season", btn))
-            {
-                locationChoiceOpen = false;
-                EndTurn();
-            }
-            if (hotseat)
-                GUI.Label(new Rect(1400, 56, 190, 22), $"Turn: {fac.Name}", mono);
+            DrawStatusBar();
 
-            // status + JSON command feed (the FYP artifact: UI clicks == LLM JSON)
-            var feed = new Rect(10, 800, 1100, 92);
-            uiRects.Add(feed);
-            DrawBackdrop(feed);
-            GUI.Label(new Rect(20, 804, 1080, 22), statusMsg, body);
-            for (int i = 0; i < jsonFeed.Count; i++)
-                GUI.Label(new Rect(20, 826 + i * 16, 1080, 16), jsonFeed[i], mono);
+            // A locked LLM turn may never expose a tab body. ShowTab also refuses to switch, but the
+            // draw path keeps the invariant even if some other code changes activeTab.
+            bool tabBodyAllowed = !(uiInputLocked && !spectatorMode);
+            if (activeTab != "map" && !reportShowing && tabBodyAllowed)
+                DrawTabPanel(uiBody, uiButton, uiTitle, uiMono);
+            if (reportShowing) DrawReport(uiBody, uiButton, uiTitle);
 
-            if (activeTab != "map" && !reportShowing) DrawTabPanel(body, btn, title, mono);
-            if (reportShowing) DrawReport(body, btn, title);
+            // HUD overlay, not the map-tab branch: the Cancel button must stay reachable even if a
+            // tab was open when the agent turn began. DrawAgentPanel adds/removes its uiRects entry.
+            if (!spectatorMode && !reportShowing && agentHasSeat)
+                DrawAgentPanel(new Rect(AgentPanelX, AgentPanelY, AgentPanelWidth, AgentPanelHeight));
 
             HandleClicks();
-        }
-
-        void DrawLocationChoice(GUIStyle body, GUIStyle btn)
-        {
-            if (!locationChoiceOpen || activeTab != "map") return;
-
-            var node = TBTK.GridManager.GetNode(locationChoiceX, locationChoiceZ);
-            // drawn from the observation, like everything else: a hex whose city or army this seat cannot
-            // see has nothing to offer (the click handler only opens this for a city it may inspect)
-            var city = obs != null ? obs.Cities.Find(c => c.X == locationChoiceX && c.Z == locationChoiceZ) : null;
-            var army = obs != null ? obs.ArmiesOf(currentSeat).Find(a => a.X == locationChoiceX && a.Z == locationChoiceZ) : null;
-            if (node == null || city == null || army == null)
-            {
-                locationChoiceOpen = false;
-                return;
-            }
-
-            float scale = Screen.width / 1600f;
-            Vector3 screenPoint = Camera.main != null
-                ? Camera.main.WorldToScreenPoint(node.GetPos())
-                : new Vector3(800f * scale, Screen.height * 0.5f, 1f);
-            float x = screenPoint.x / scale + 24f;
-            float y = (Screen.height - screenPoint.y) / scale - 42f;
-            const float width = 220f;
-            const float height = 112f;
-            x = Mathf.Clamp(x, 8f, 1600f - width - 8f);
-            y = Mathf.Clamp(y, 50f, 900f - height - 8f);
-
-            locationChoiceRect = new Rect(x, y, width, height);
-            uiRects.Add(locationChoiceRect);
-            DrawBackdrop(locationChoiceRect);
-            GUI.Label(new Rect(x + 12f, y + 8f, width - 24f, 22f), "Choose a target to inspect", body);
-
-            if (GUI.Button(new Rect(x + 12f, y + 42f, width - 24f, 28f), city.Name, btn))
-            {
-                locationChoiceOpen = false;
-                selCity = city;
-                selArmy = null;
-            }
-            if (GUI.Button(new Rect(x + 12f, y + 76f, width - 24f, 28f),
-                $"{army.Name} ({UnitTypeName(army.UnitType)})", btn))
-            {
-                locationChoiceOpen = false;
-                selArmy = army;
-                selCity = null;
-                TBTK.GridIndicator.SetSelect(node);
-                ShowArmyMoveTargets(army);
-                statusMsg = "Selected " + army.Name + " (" + UnitTypeName(army.UnitType) + ") — choose a destination";
-            }
-        }
-
-        /// <summary>
-        /// Opaque plate behind a panel or modal. This skin's GUI.Box renders see-through, so map sprites
-        /// bled through and collided with panel text (smoke-test finding): plate the rect in solid
-        /// charcoal first and keep the box for its border. Every modal and side panel goes through here.
-        /// </summary>
-        void DrawBackdrop(Rect r)
-        {
-            var prev = GUI.color;
-            GUI.color = PanelColor;
-            GUI.DrawTexture(r, Texture2D.whiteTexture);
-            GUI.color = prev;
-            GUI.Box(r, GUIContent.none);
         }
 
         /// <summary>
@@ -196,25 +103,26 @@ namespace LuanShi
         /// sight, otherwise a live 偵察 report (bands or exact numbers, P8), otherwise nothing at all. It
         /// never falls back to canonical state, so the panel cannot leak an unseen city's garrison.
         /// </summary>
-        void DrawCityPanel(CityState city, GUIStyle body, GUIStyle btn)
+        void DrawCityPanel(CityView city, GUIStyle body, GUIStyle btn)
         {
             bool mine = city.OwnerSeatId == currentSeat;
             bool conversionOpen = mine && garrisonConversionOpen && garrisonConversionCityId == city.Id && city.Garrison > 0;
             var inSight = obs != null ? obs.FindCity(city.Id) : null;
             var report = obs != null ? obs.FindScoutedCity(city.Id) : null;
-            var p = new Rect(10, 50, 420, mine ? (conversionOpen ? 520 : 480) : (inSight != null || report != null ? 230 : 120));
+            float height = mine ? (conversionOpen ? 520 : 480) : (inSight != null || report != null ? 230 : 120);
+            var p = PlaceSelectionPanel(CityPanelWidth, height);
             uiRects.Add(p);
-            DrawBackdrop(p);
+            DrawBackdrop(p, OwnerColor(city.OwnerSeatId));
             // the name and owner are themselves information: an unseen city with no report stays unnamed,
             // even if a debug hook selects it by id
             bool knowsCity = mine || inSight != null || report != null;
-            GUI.Label(new Rect(22, 58, 400, 24),
-                knowsCity ? $"{city.Name} ({OwnerName(city)})" : "Unknown city", body);
+            GUI.Label(new Rect(p.x + 12f, p.y + 8f, p.width - 20f, 24f),
+                knowsCity ? $"{city.Name} ({OwnerName(city)}) — City values" : "Unknown city", uiPanelTitle);
 
             if (mine)
             {
                 string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
-                GUI.Label(new Rect(22, 86, 400, 116),
+                GUI.Label(new Rect(p.x + 12f, p.y + 34f, p.width - 20f, 116f),
                     $"Population {city.Population}\nFood {city.Food}\nGold {city.Gold}\nGarrison {city.Garrison} {UnitTypeName(city.GarrisonType)}\n" +
                     $"Morale {city.Morale}{moraleWarning}\n" +
                     $"Reclaimed {city.ReclaimPct}%  Defense {city.Defense}/{BalanceConfig.DefenseMax}  Training {city.Training}/{MyTrainingCap()}",
@@ -251,11 +159,11 @@ namespace LuanShi
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 114f, buttonWidth, 34), ActionType.Relief, city.Id, "Relief",
                     city.Food < BalanceConfig.ReliefFoodCost ? "Not enough food" : null, 0, 0, btn));
                 var convertRect = new Rect(rightButtonLeft, buttonTop + 114f, buttonWidth, 34);
-                var armyOnCity = engine.State.ArmyAt(city.X, city.Z);
+                var armyOnCity = obs != null ? obs.Armies.Find(a => a.X == city.X && a.Z == city.Z) : null;
                 bool convertTypeMismatch = armyOnCity != null && armyOnCity.OwnerSeatId == currentSeat
                     && UnitTypes.Normalize(armyOnCity.UnitType) != UnitTypes.Normalize(city.GarrisonType);
                 var previousEnabled = GUI.enabled;
-                GUI.enabled = city.Garrison > 0 && !convertTypeMismatch;
+                GUI.enabled = !uiInputLocked && city.Garrison > 0 && !convertTypeMismatch;
                 if (GUI.Button(convertRect, "Convert garrison " + OrderCostSuffix(ActionType.ConvertGarrison), btn))
                 {
                     garrisonConversionOpen = true;
@@ -269,8 +177,8 @@ namespace LuanShi
                         $"Convert garrison: unit types differ (army is {UnitTypeName(armyOnCity.UnitType)})");
 
                 // 兵種 picker: four toggles, research-gated types greyed with their reason (ADR-019)
-                float typeLabelTop = 364f;
-                GUI.Label(new Rect(22, typeLabelTop, 400, 20),
+                float typeLabelTop = p.y + 314f;
+                GUI.Label(new Rect(p.x + 12f, typeLabelTop, p.width - 20f, 20f),
                     $"Recruit type: {UnitTypeName(recruitType)} · {recruitCost} gold, {BalanceConfig.RecruitPopCost} pop", body);
                 string gateHint = null;
                 int military = MilitaryLevel();
@@ -279,9 +187,9 @@ namespace LuanShi
                     string type = UnitTypes.All[i];
                     int required = UnitTypes.RequiredMilitaryLevel(type);
                     bool gated = military < required;
-                    var typeRect = new Rect(22 + i * 100f, typeLabelTop + 22f, 94f, 26f);
+                    var typeRect = new Rect(p.x + 12f + i * 100f, typeLabelTop + 22f, 94f, 26f);
                     var prevBg = GUI.backgroundColor;
-                    if (recruitType == type) GUI.backgroundColor = new Color(0.60f, 0.78f, 1f);
+                    if (recruitType == type) GUI.backgroundColor = TabSelected;
                     var prevEnabledFlag = GUI.enabled;
                     GUI.enabled = !gated;
                     if (GUI.Button(typeRect, UnitTypeName(type), btn)) recruitUnitType = type;
@@ -292,16 +200,20 @@ namespace LuanShi
                             ? $"{UnitTypeName(type)} needs Military {required}"
                             : gateHint + " · " + $"{UnitTypeName(type)} needs Military {required}";
                 }
-                if (gateHint != null) GUI.Label(new Rect(22, typeLabelTop + 50f, 400, 20), gateHint, body);
+                if (gateHint != null)
+                    GUI.Label(new Rect(p.x + 12f, typeLabelTop + 50f, p.width - 20f, 20f), gateHint, uiReason);
 
                 if (conversionOpen)
                 {
-                    GUI.Label(new Rect(22, 440, 400, 22),
+                    GUI.Label(new Rect(p.x + 12f, p.y + 390f, p.width - 20f, 22f),
                         $"Convert {garrisonConversionAmount} of {city.Garrison} {UnitTypeName(city.GarrisonType)} garrison to army", body);
                     garrisonConversionAmount = Mathf.Clamp(garrisonConversionAmount, 1, city.Garrison);
                     garrisonConversionAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
-                        new Rect(22, 466, 290, 24), garrisonConversionAmount, 1, city.Garrison));
-                    if (GUI.Button(new Rect(320, 460, 90, 34), "Confirm", btn))
+                        new Rect(p.x + 12f, p.y + 416f, 250f, 24f), garrisonConversionAmount, 1, city.Garrison));
+                    var confirmEnabled = GUI.enabled;
+                    GUI.enabled = !uiInputLocked;
+                    if (GUI.Button(new Rect(p.x + 272f, p.y + 410f, 136f, 34f),
+                                   "Confirm " + OrderCostSuffix(ActionType.ConvertGarrison), btn))
                         SubmitHuman(new ActionCommand
                         {
                             Type = ActionType.ConvertGarrison,
@@ -309,16 +221,19 @@ namespace LuanShi
                             ParamA = garrisonConversionAmount,
                             Reason = "UI: convert_garrison",
                         });
+                    GUI.enabled = confirmEnabled;
                 }
 
-                if (hint != null) GUI.Label(new Rect(22, conversionOpen ? 506 : 440, 400, 40), hint, body);
+                if (hint != null)
+                    GUI.Label(new Rect(p.x + 12f, p.y + (conversionOpen ? 456f : 390f), p.width - 20f, 40f),
+                              hint, uiReason);
             }
             else
             {
                 if (inSight != null)
                 {
                     string moraleWarning = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold ? " (yield halved)" : "";
-                    GUI.Label(new Rect(22, 84, 400, 126),
+                    GUI.Label(new Rect(p.x + 12f, p.y + 34f, p.width - 20f, 126f),
                         $"{city.Name} — in sight\n" +
                         $"Garrison {city.Garrison} {UnitTypeName(city.GarrisonType)}\nMorale {city.Morale}{moraleWarning}\n" +
                         $"Food {city.Food}  Gold {city.Gold}\n" +
@@ -331,79 +246,25 @@ namespace LuanShi
                     string detail = report.Accuracy == "exact"
                         ? $"Garrison {report.Garrison}  Food {report.Food}\nMorale {report.Morale}  Gold {report.Gold}\nPopulation {report.Population}"
                         : $"Troops: {report.GarrisonBand}\nFood: {report.FoodBand}";
-                    GUI.Label(new Rect(22, 84, 400, 126),
+                    GUI.Label(new Rect(p.x + 12f, p.y + 34f, p.width - 20f, 126f),
                         $"{(city.IsNeutral ? "Neutral city" : "Enemy city")} — scout report ({report.Accuracy})\n" +
                         $"{detail}\nReport valid to season {report.UntilSeason}",
                         body);
                 }
                 else
                 {
-                    GUI.Label(new Rect(22, 84, 400, 30), "Outside our sight — nothing is known", body);
+                    GUI.Label(new Rect(p.x + 12f, p.y + 34f, p.width - 20f, 30f), "Outside our sight — nothing is known", body);
                 }
             }
         }
 
-        /// <summary>
-        /// English display name for a 兵種. The engine's <see cref="UnitTypes.Label"/> keeps the Chinese
-        /// design names (engine-side vocabulary); the demo UI is English, so every screen-facing use goes
-        /// through this helper instead.
-        /// </summary>
-        static string UnitTypeName(string type)
-        {
-            switch (UnitTypes.Normalize(type))
-            {
-                case UnitTypes.Archer: return "Archer";
-                case UnitTypes.Cavalry: return "Cavalry";
-                case UnitTypes.Siege: return "Siege";
-                default: return "Infantry";
-            }
-        }
-
-        /// <summary>Cost label for one action: "1 order", "2 orders" (singular for 0 and 1).</summary>
-        static string OrderCost(string type)
-        {
-            int cost = BalanceConfig.CommandPointCost(type);
-            return cost + (cost >= 2 ? " orders" : " order");
-        }
-
-        /// <summary>Parenthesized cost suffix for an order button: "(1 order)", "(2 orders)", "(0 order)".</summary>
-        static string OrderCostSuffix(string type) => "(" + OrderCost(type) + ")";
-
-        /// <summary>
-        /// One order button. It always submits a real ActionCommand through SubmitHuman and shows the
-        /// action's order cost from BalanceConfig; the engine stays the only authority, so a stale hint
-        /// just means the click comes back rejected with a reason.
-        /// </summary>
-        string OrderButton(Rect r, string type, string targetId, string label, string blockedReason,
-            int paramA, int paramB, GUIStyle btn,
-            Dictionary<string, string> args = null, string text = null, System.Action onSubmitted = null)
-        {
-            bool available = blockedReason == null;
-            string buttonText = $"{label} {OrderCostSuffix(type)}";
-            r.width = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
-            var prev = GUI.enabled;
-            GUI.enabled = available;
-            if (GUI.Button(r, buttonText, btn) && SubmitHuman(new ActionCommand
-                {
-                    Type = type, TargetId = targetId, ParamA = paramA, ParamB = paramB,
-                    Args = args, Text = text, Reason = "UI: " + type,
-                }))
-                onSubmitted?.Invoke();
-            GUI.enabled = prev;
-            return available ? null : label + ": " + blockedReason;
-        }
-
-        static string FirstReason(string current, string candidate) => current ?? candidate;
-
-        int MilitaryLevel() => obs != null ? obs.ResearchLevel(ResearchLine.Military) : 0;
-
-        void DrawArmyPanel(ArmyState army, GUIStyle body, GUIStyle btn)
+        void DrawArmyPanel(ArmyView army, GUIStyle body, GUIStyle btn)
         {
             var enemyArmies = AttackableEnemyArmies(army);
             var enemyCities = AdjacentEnemyCities(army);
             int orders = enemyArmies.Count + enemyCities.Count;
             int attackRange = UnitTypes.AttackRange(army.UnitType);
-            var occupiedCity = engine.State.CityAt(army.X, army.Z);
+            var occupiedCity = obs != null ? obs.Cities.Find(c => c.X == army.X && c.Z == army.Z) : null;
             bool canGarrison = occupiedCity != null && occupiedCity.OwnerSeatId == army.OwnerSeatId;
             if (canGarrison && garrisonArmyId != army.Id)
             {
@@ -413,18 +274,41 @@ namespace LuanShi
             }
             if (canGarrison) garrisonArmyAmount = Mathf.Clamp(garrisonArmyAmount, 1, army.Troops);
 
-            const float panelWidth = 440f;
+            float panelWidth = ArmyPanelWidth;
             float garrisonControlsHeight = garrisonArmyConversionOpen ? 90f : 52f;
-            var p = new Rect(10, 50, panelWidth, (orders > 0 ? 236 + orders * 38 : 150) + (canGarrison ? garrisonControlsHeight : 0));
-            uiRects.Add(p);
-            DrawBackdrop(p);
-            GUI.Label(new Rect(22, 58, panelWidth - 32f, 24),
-                $"{army.Name} · {UnitTypeName(army.UnitType)} · Troops {army.Troops}", body);
+            float contentHeight = (orders > 0 ? 236 + orders * 38 : 150) + (canGarrison ? garrisonControlsHeight : 0);
+            var outer = PlaceSelectionPanel(panelWidth, contentHeight);
+            uiRects.Add(outer);
+            DrawBackdrop(outer, OwnerColor(army.OwnerSeatId));
+            GUI.Label(new Rect(outer.x + 12f, outer.y + 8f, outer.width - 20f, 24f),
+                $"{army.Name} · {UnitTypeName(army.UnitType)} · Troops {army.Troops}", uiPanelTitle);
+
+            // PlaceSelectionPanel caps a panel that shares the agent band. If that cap bites, keep the
+            // title fixed and scroll the body instead of drawing it under the agent panel/status bar.
+            Rect p = outer;
+            bool scrolls = contentHeight > outer.height + 0.5f;
+            if (scrolls)
+            {
+                var view = new Rect(outer.x + 2f, outer.y + 34f, outer.width - 4f,
+                                    Mathf.Max(24f, outer.height - 34f));
+                float bodyHeight = Mathf.Max(1f, contentHeight - 34f);
+                TryWheelScroll(outer, view, bodyHeight, ref selectionScroll);
+                selectionScroll.y = Mathf.Clamp(selectionScroll.y, 0f,
+                                                Mathf.Max(0f, bodyHeight - view.height));
+                selectionScroll = GUI.BeginScrollView(view, selectionScroll,
+                    new Rect(0f, 0f, outer.width - 18f, bodyHeight), false, false);
+                // Cancel the scroll view's offset so the body keeps the normal panel coordinates.
+                p = new Rect(outer.x - view.x, outer.y - view.y, outer.width, contentHeight);
+            }
+            else
+            {
+                selectionScroll = Vector2.zero;
+            }
             int foodPerSeason = (int)(army.Troops * UnitTypes.FoodPerTroop(army.UnitType));
             int factionFood = 0;
-            foreach (var city in engine.State.Cities)
-                if (city.OwnerSeatId == army.OwnerSeatId) factionFood += city.Food;
-            GUI.Label(new Rect(22, 86, panelWidth - 32f, 78),
+            if (obs != null)
+                foreach (var city in obs.CitiesOf(army.OwnerSeatId)) factionFood += city.Food;
+            GUI.Label(new Rect(p.x + 12f, p.y + 34f, p.width - 20f, 78f),
                 $"Position ({army.X}, {army.Z})\nMorale {army.Morale}\n" +
                 $"Faction food {factionFood} (army need {foodPerSeason} / season)\n" +
                 (army.MarchCountThisSeason >= UnitTypes.MarchesPerSeason(army.UnitType)
@@ -435,12 +319,15 @@ namespace LuanShi
             {
                 if (!garrisonArmyConversionOpen)
                 {
+                    var convertEnabled = GUI.enabled;
+                    GUI.enabled = !uiInputLocked;
                     if (GUI.Button(new Rect(p.x + 12f, p.y + 124f, p.width - 24f, 34), "Convert troops " + OrderCostSuffix(ActionType.GarrisonArmy), btn))
                         garrisonArmyConversionOpen = true;
+                    GUI.enabled = convertEnabled;
                 }
                 else
                 {
-                    GUI.Label(new Rect(p.x + 12f, p.y + 120f, p.width - 24f, 22),
+                    GUI.Label(new Rect(p.x + 12f, p.y + 120f, p.width - 24f, 22f),
                         $"Garrison troops: {garrisonArmyAmount}/{army.Troops}", body);
                     garrisonArmyAmount = Mathf.RoundToInt(GUI.HorizontalSlider(
                         new Rect(p.x + 12f, p.y + 142f, p.width - 24f, 20f),
@@ -462,7 +349,11 @@ namespace LuanShi
                 float noOrdersTop = canGarrison
                     ? p.y + (garrisonArmyConversionOpen ? 208f : 166f)
                     : p.y + 120f;
-                GUI.Label(new Rect(22, noOrdersTop, p.width - 32f, 22), "No enemy armies or cities nearby", body);
+                GUI.Label(new Rect(p.x + 12f, noOrdersTop, p.width - 20f, 22f), "No enemy armies or cities nearby", body);
+                if (uiInputLocked)
+                    GUI.Label(new Rect(p.x + 12f, noOrdersTop + 24f, p.width - 20f, 38f),
+                              "Orders locked: " + LockedReason(), uiReasonWrap);
+                if (scrolls) GUI.EndScrollView();
                 return;
             }
 
@@ -483,7 +374,7 @@ namespace LuanShi
             }
             foreach (var city in enemyCities)
             {
-                var defensiveArmy = engine.State.ArmyAt(city.X, city.Z);
+                var defensiveArmy = obs != null ? obs.Armies.Find(a => a.X == city.X && a.Z == city.Z) : null;
                 int defensiveArmyTroops = defensiveArmy != null && defensiveArmy.OwnerSeatId == city.OwnerSeatId
                     ? defensiveArmy.Troops : 0;
                 int effectiveGarrison = city.Garrison + defensiveArmyTroops;
@@ -497,7 +388,9 @@ namespace LuanShi
                 row++;
             }
 
-            if (hint != null) GUI.Label(new Rect(22, buttonTop + row * 38f + 38f, p.width - 32f, 22), hint, body);
+            if (hint != null)
+                GUI.Label(new Rect(p.x + 12f, buttonTop + row * 38f + 38f, p.width - 20f, 22f), hint, uiReason);
+            if (scrolls) GUI.EndScrollView();
         }
 
         /// <summary>
@@ -506,9 +399,9 @@ namespace LuanShi
         /// also let a player attack an army they could not see). P15: 弓兵 reaches 2 hexes, every other type
         /// 1 — the same <see cref="UnitTypes.AttackRange"/> the validator uses. The engine still has the last word.
         /// </summary>
-        List<ArmyState> AttackableEnemyArmies(ArmyState army)
+        List<ArmyView> AttackableEnemyArmies(ArmyView army)
         {
-            var list = new List<ArmyState>();
+            var list = new List<ArmyView>();
             if (obs == null) return list;
             int range = UnitTypes.AttackRange(army.UnitType);
             foreach (var other in obs.Armies)
@@ -518,9 +411,9 @@ namespace LuanShi
         }
 
         /// <summary>Enemy cities within reach, from this seat's observation only (see above).</summary>
-        List<CityState> AdjacentEnemyCities(ArmyState army)
+        List<CityView> AdjacentEnemyCities(ArmyView army)
         {
-            var list = new List<CityState>();
+            var list = new List<CityView>();
             if (obs == null) return list;
             foreach (var city in obs.Cities)
                 if (!city.IsNeutral && city.OwnerSeatId != army.OwnerSeatId
@@ -536,7 +429,7 @@ namespace LuanShi
             GUI.enabled = prev;
         }
 
-        string OwnerName(CityState city)
+        string OwnerName(CityView city)
         {
             if (city.IsNeutral) return "Neutral";
             var f = engine.State.FindFaction(city.OwnerSeatId);

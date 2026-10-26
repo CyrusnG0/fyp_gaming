@@ -1,0 +1,3 @@
+# The shell runners must keep LF so `bash Tests/run-tests.sh` works on Windows checkouts
+# (the Unity .gitattributes above normalises text, and core.autocrlf may rewrite it otherwise).
+*.sh text eol=lf

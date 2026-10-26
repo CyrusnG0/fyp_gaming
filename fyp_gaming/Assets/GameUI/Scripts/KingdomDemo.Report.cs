@@ -1,7 +1,6 @@
 // KingdomDemo (partial) — court report, handover and victory screens, and report text helpers.
 
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using UnityEngine;
 using LuanShi.Engine;
@@ -10,11 +9,17 @@ namespace LuanShi
 {
     public partial class KingdomDemo : MonoBehaviour
     {
-        // ---- Battle report: read the last battle back out of the log (design §6.4) ------
+        // ---- Battle report: read the last battle back out of the seat's filtered history (design §6.4) --
 
+        /// <summary>
+        /// The most recent battle this seat was told about, read from its filtered event projection —
+        /// never from the canonical log (LS-003). The seat that fought keeps the full report; a seat that
+        /// only witnessed the news sees the same public summary the court report shows.
+        /// </summary>
         string LastBattleSummary()
         {
-            var records = engine.Log.Records;
+            if (obs == null) return null;
+            var records = obs.Events;
             for (int i = records.Count - 1; i >= 0; i--)
             {
                 if (records[i].EventType == "battle_field") return FieldSummary(records[i]);
@@ -23,25 +28,21 @@ namespace LuanShi
             return null;
         }
 
-        string FieldSummary(EventRecord rec)
+        string FieldSummary(EventView rec)
                 => $"Field battle, {rec.Payload["rounds"]} rounds: {SeatShort(rec.Payload["attacker_seat_id"])}" +
                     $" ({UnitTypeIn(rec, "attacker_unit_type")}) {rec.Payload["attacker_troops_before"]}→{rec.Payload["attacker_troops_after"]} vs. " +
                $"{SeatShort(rec.Payload["defender_seat_id"])}" +
                     $" ({UnitTypeIn(rec, "defender_unit_type")}) {rec.Payload["defender_troops_before"]}→{rec.Payload["defender_troops_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
 
-        string SiegeSummary(EventRecord rec)
+        string SiegeSummary(EventView rec)
                 => $"Siege of {CityName(rec.Payload["city_id"])} for {rec.Payload["rounds"]} rounds: " +
                     $"attacker ({UnitTypeIn(rec, "attacker_unit_type")}) {rec.Payload["troops_before"]}→{rec.Payload["troops_after"]}, " +
                     $"garrison ({UnitTypeIn(rec, "garrison_unit_type")}) {rec.Payload["garrison_before"]}→{rec.Payload["garrison_after"]} {OutcomeLabel(rec.Payload["outcome"])}";
 
-        static string UnitTypeIn(EventRecord rec, string key)
+        static string UnitTypeIn(EventView rec, string key)
             => rec.Payload.TryGetValue(key, out string type) ? UnitTypeName(type) : "?";
 
-        string CityName(string cityId)
-        {
-            var city = engine.State.FindCity(cityId);
-            return city != null ? city.Name : cityId;
-        }
+        string CityName(string cityId) => ReportText.CityLabel(obs, cityId);
 
         static string OutcomeLabel(string outcome)
         {
@@ -76,9 +77,7 @@ namespace LuanShi
                 if (rec.Season != report.Season) continue;
                 if (rec.EventType == "city_captured")
                 {
-                    var city = engine.State.FindCity(rec.Payload["city_id"]);
-                    var fac = engine.State.FindFaction(city.OwnerSeatId);
-                    reportLines.Add($"* {fac.Name} army occupied {city.Name}, expanding its territory!");
+                    reportLines.Add(ReportText.CaptureLine(obs, rec));
                 }
                 else if (rec.EventType == "battle_field")
                     reportLines.Add("Battle report: " + FieldSummary(rec));
@@ -100,8 +99,15 @@ namespace LuanShi
             reportLines.Add("");
             reportLines.Add($"Historian: {CountSeasonEvents(report.Season)} events recorded this season.");
 
-            File.WriteAllText(Path.Combine(Application.persistentDataPath, "luanshi_log.jsonl"),
-                              engine.Log.ToJsonLines());
+            // Player-facing export only (LS-014): the seat's own filtered history, never the canonical log.
+            try
+            {
+                HistoryExport.Write(Application.persistentDataPath, obs);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"History export failed: {e.Message}");
+            }
         }
 
         int CountSeasonEvents(int season)
@@ -132,6 +138,8 @@ namespace LuanShi
             var e = Event.current;
             var centered = new GUIStyle(title) { fontSize = 28, alignment = TextAnchor.MiddleCenter };
             var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
+            centered.normal.textColor = ParchmentPanel;
+            centeredBody.normal.textColor = ParchmentPanel;
 
             if (e.type == EventType.KeyDown || e.type == EventType.MouseDown)
             {
@@ -142,7 +150,7 @@ namespace LuanShi
                 return;
             }
 
-            FillScreen(Color.black);
+            FillScreen(InkScreen);
 
             var fac = engine.State.FindFaction(currentSeat);
             GUI.Label(new Rect(0, 330, 1600, 50),
@@ -175,8 +183,10 @@ namespace LuanShi
         {
             var centered = new GUIStyle(title) { fontSize = 34, alignment = TextAnchor.MiddleCenter };
             var centeredBody = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter };
+            centered.normal.textColor = ParchmentPanel;
+            centeredBody.normal.textColor = ParchmentPanel;
 
-            FillScreen(Color.black);
+            FillScreen(InkScreen);
 
             var winner = engine.State.FindFaction(engine.State.WinnerSeatId);
             GUI.Label(new Rect(0, 380, 1600, 60), $"{winner?.Name} unifies the land — game over", centered);
@@ -191,7 +201,7 @@ namespace LuanShi
             float textHeight = System.Math.Min(ReportTextMaxHeight, lines * ReportLineHeight);
             var p = new Rect(400, 150, 800, 116f + textHeight);
             uiRects.Add(p);
-            DrawBackdrop(p);
+            DrawBackdrop(p, CurrentSeatAccent());
             GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), reportLines.Count > 0 ? reportLines[0] : "", title);
 
             var sb = new StringBuilder();
@@ -234,7 +244,7 @@ namespace LuanShi
             return f != null ? f.Name : seatId;
         }
 
-        string PayloadText(Dictionary<string, string> payload)
+        string PayloadText(IReadOnlyDictionary<string, string> payload)
         {
             if (payload == null || payload.Count == 0) return "";
             var sb = new StringBuilder();

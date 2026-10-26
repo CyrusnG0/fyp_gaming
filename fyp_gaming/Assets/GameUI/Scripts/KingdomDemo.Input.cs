@@ -21,6 +21,10 @@ namespace LuanShi
             if (!ready || reportShowing || handoverShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
+            // While a controller owns the turn, map input is inert as a whole. Selection is intentionally
+            // disabled too, so no stale march target can be clicked while the engine's turn gate is held.
+            if (uiInputLocked) { e.Use(); return; }
+
             if (e.button == 1) { ClearArmyMoveTargets(); selCity = null; selArmy = null; e.Use(); return; }
             if (e.button != 0) return;
 
@@ -39,9 +43,12 @@ namespace LuanShi
             }
 
             var city = engine.State.CityAt(node.idxX, node.idxZ);
-            var army = engine.State.ArmiesOf(currentSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ);
-            bool citySelectable = city != null && (city.OwnerSeatId == currentSeat
-                || (obs != null && obs.FindCity(city.Id) != null));
+            // Selections are views from the current seat's observation (LS-003), never canonical entities:
+            // a panel may only ever show what this seat can see. Canonical state answers the map question
+            // "is there a marker here", which the fog checks below then filter.
+            var cityView = city != null && obs != null ? obs.FindCity(city.Id) : null;
+            var army = obs != null ? obs.ArmiesOf(currentSeat).Find(a => a.X == node.idxX && a.Z == node.idxZ) : null;
+            bool citySelectable = city != null && (city.OwnerSeatId == currentSeat || cityView != null);
 
             if (locationChoiceOpen && node.idxX == locationChoiceX && node.idxZ == locationChoiceZ)
             {
@@ -112,20 +119,20 @@ namespace LuanShi
                     e.Use();
                     return;
                 }
-                selCity = city; selArmy = null; e.Use(); return;
+                selCity = cityView; selArmy = null; e.Use(); return;
             }
             // a foreign city can only be selected while the current seat can actually see it (fog)
-            if (city != null && obs != null && obs.FindCity(city.Id) != null)
+            if (cityView != null)
             {
                 ClearArmyMoveTargets();
-                if (selCity != null && selCity.Id == city.Id)
+                if (selCity != null && selCity.Id == cityView.Id)
                 {
                     selCity = null;
                     e.Use();
                     return;
                 }
-                selCity = city; selArmy = null;
-                statusMsg = city.IsNeutral ? "Neutral city — send an army to occupy it" : "Enemy city";
+                selCity = cityView; selArmy = null;
+                statusMsg = cityView.IsNeutral ? "Neutral city — send an army to occupy it" : "Enemy city";
                 e.Use();
                 return;
             }
@@ -145,7 +152,7 @@ namespace LuanShi
             return null;
         }
 
-        void ShowArmyMoveTargets(ArmyState army)
+        void ShowArmyMoveTargets(ArmyView army)
         {
             var targets = new List<TBTK.Node>();
             // the highlight and the validator must agree on the season's budget, or 冬 (floor(6 × 0.7) = 4)
@@ -207,16 +214,32 @@ namespace LuanShi
             if (cameraControl == null) cameraControl = FindAnyObjectByType<TBTK.CameraControl>();
             if (cameraControl != null) cameraControl.enableZoom = !blocked;
 
+            if (uiInputLocked && ready) ClearArmyMoveTargets();
+            RefreshSelectionRing();
             BobArmyBanners();   // the partial's one Update also drives the banner idle animation
         }
 
-        void TryMarch(ArmyState army, int x, int z)
-            => SubmitHuman(new ActionCommand { Type = ActionType.March, TargetId = army.Id, ParamA = x, ParamB = z });
+        void TryMarch(ArmyView army, int x, int z)
+        {
+            if (uiInputLocked) return;
+            SubmitHuman(new ActionCommand { Type = ActionType.March, TargetId = army.Id, ParamA = x, ParamB = z });
+        }
 
         // ---- test hooks -------------------------------------------------------
         // The smoke-test harness drives the running game through Unity's SendMessage, which can only
         // reach public methods with at most one argument. These two hooks exist only for that: they do
         // the same things a mouse would, nothing more.
+
+        /// <summary>
+        /// The same modal/lock/winner guards as DebugEndTurn, plus the human-chair check: a test hook
+        /// may never submit or select on behalf of an LLM/scripted seat or through a frozen screen.
+        /// </summary>
+        bool HumanDebugInputAllowed()
+        {
+            if (!ready || engine == null || uiInputLocked || reportShowing || handoverShowing) return false;
+            if (engine.State.WinnerSeatId != null) return false;
+            return SeatRotation.IsHuman(engine.State, currentSeat);
+        }
 
         /// <summary>
         /// Test hook. Selects <c>"city:&lt;id&gt;"</c> or <c>"army:&lt;id&gt;"</c> exactly as a map
@@ -225,7 +248,7 @@ namespace LuanShi
         /// </summary>
         public void DebugSelect(string kindAndId)
         {
-            if (!ready || string.IsNullOrEmpty(kindAndId)) return;
+            if (spectatorMode || string.IsNullOrEmpty(kindAndId) || !HumanDebugInputAllowed()) return;
 
             int split = kindAndId.IndexOf(':');
             if (split <= 0) return;
@@ -277,7 +300,7 @@ namespace LuanShi
         /// </summary>
         public void DebugOrder(string spec)
         {
-            if (!ready || string.IsNullOrEmpty(spec)) return;
+            if (string.IsNullOrEmpty(spec) || !HumanDebugInputAllowed()) return;
 
             string[] parts = spec.Split('|');
             if (parts.Length < 2 || string.IsNullOrEmpty(parts[0])) return;

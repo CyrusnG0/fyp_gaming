@@ -49,9 +49,18 @@ namespace LuanShi
         public float fogPhotoHeight = 0.08f;
 
         [Header("Seats (data-driven; the engine supports up to 8, AGENTS.md #6)")]
-        [Tooltip("Seat ids played by people at this keyboard. Every other seat is scripted. " +
+        [Tooltip("Seat ids played by people at this keyboard. Every seat not listed here or in llmSeats is scripted. " +
                  "Set two ids here for hotseat pass-and-play.")]
         public string[] humanSeats = { "seat-0" };
+        [Tooltip("Seat ids driven by the live LLM agent. The demo roster is Wei human, Shu LLM.")]
+        public string[] llmSeats = { "seat-1" };
+
+        [Header("LLM vs LLM spectator pilot (optional)")]
+        [Tooltip("Second demo mode: every seat is driven by the same shared LLM runner and a human only " +
+                 "watches. Overrides humanSeats/llmSeats. Off by default; the single-LLM demo is unchanged.")]
+        public bool spectatorMode;
+        [Tooltip("Seasons the spectator pilot plays before completing. The panel can extend it by 3.")]
+        public int spectatorSeasons = 3;
 
         private GameEngine engine;
         private bool ready;
@@ -89,9 +98,9 @@ namespace LuanShi
         private readonly List<SpriteRenderer> fogOverlays = new List<SpriteRenderer>();
         private Transform fogOverlayRoot;
 
-        // selection & UI state
-        private CityState selCity;
-        private ArmyState selArmy;
+        // selection & UI state — detached views from the current seat's observation (LS-003)
+        private CityView selCity;
+        private ArmyView selArmy;
         private string recruitUnitType = UnitTypes.Infantry;   // type picker in the city panel (ADR-019)
         private bool garrisonConversionOpen;
         private string garrisonConversionCityId;
@@ -142,6 +151,9 @@ namespace LuanShi
         /// </summary>
         void Start()
         {
+            // A provider request may outlive editor focus; keep the per-frame runner tick alive.
+            Application.runInBackground = true;
+
             var gc = FindAnyObjectByType<TBTK.GameControl>();
             if (gc != null) gc.enabled = false;
 
@@ -151,7 +163,15 @@ namespace LuanShi
                 if (mb.GetType().Namespace == "TBTK" && mb.GetType().Name.StartsWith("UI"))
                     mb.gameObject.SetActive(false);
 
-            try { InitGame(); ready = true; }
+            try
+            {
+                InitGame();
+                InitializeAgent();
+                InitializeSpectator();
+                ready = true;
+                StartAgentTicker();
+                StartFirstPlannedTurn();
+            }
             catch (System.Exception e)
             {
                 initError = e.Message;
@@ -237,17 +257,34 @@ namespace LuanShi
             }
 
             engine.BeginSeason();
-            currentSeat = SeatRotation.FirstSeat(engine.State);
+            TurnFlowStep firstStep = TurnFlowPlanner.First(engine.State);
+            currentSeat = firstStep.IsSeat ? firstStep.SeatId : SeatRotation.FirstSeat(engine.State);
             RefreshObservation();
             string humans = string.Join(",", SeatRotation.HumanSeats(engine.State).ToArray());
             statusMsg = $"Season 1 begins — {currentSeat} rules; select a city or army to issue orders";
+
+            // Do not open a gate here. Start() dispatches TurnFlowPlanner.First only after
+            // InitializeAgent/InitializeSpectator has built the controller for that first chair; this
+            // also keeps the old init-time GridIndicator access out of the startup path. In spectator
+            // mode there is no human chair; SpectatorSession opens every seat's gate itself.
+            activeTurnToken = 0;
+            ReleaseControlLock();
+
+            string roster = string.Join(", ", engine.State.Factions
+                .ConvertAll(f => $"{f.SeatId}={f.Controller}").ToArray());
+            Debug.Log($"[KingdomDemo] roster: {roster} (human seats: {humans})");
             Debug.Log($"[KingdomDemo] game started, season 1, human seats: {humans}");
         }
 
-        /// <summary>humanSeats decides who is a person; every other seat is scripted
-        /// (AGENTS.md #6: never hardcode the player count — up to 8 seats).</summary>
+        /// <summary>humanSeats and llmSeats decide the controllers; every other seat is scripted
+        /// (AGENTS.md #6: never hardcode the player count — up to 8 seats).
+        /// LLM membership wins over humanSeats so an old hotseat roster cannot claim the LLM seat.</summary>
         string ControlOf(string seatId)
         {
+            if (spectatorMode) return ControllerType.Llm;   // both seats are model-driven
+            if (llmSeats != null)
+                foreach (var id in llmSeats)
+                    if (id == seatId) return ControllerType.Llm;
             if (humanSeats != null)
                 foreach (var id in humanSeats)
                     if (id == seatId) return ControllerType.Human;

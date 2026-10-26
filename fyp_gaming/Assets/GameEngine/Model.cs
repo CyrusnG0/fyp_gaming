@@ -644,6 +644,12 @@ namespace LuanShi.Engine
     /// <summary>
     /// One seat's filtered world — the only thing a controller may decide on (AGENTS.md invariant #3).
     /// Cities and armies outside the fog ranges are simply absent, and the event log is pre-filtered.
+    ///
+    /// LS-003: everything here is a detached snapshot. Entities are views
+    /// (<see cref="CityView"/>, <see cref="ArmyView"/>, <see cref="WatchTowerView"/>, <see cref="TreatyView"/>,
+    /// <see cref="ProposalView"/>, <see cref="EventView"/>), never canonical objects, and the collections are
+    /// freshly built for every call. A controller may mutate what it received; the game, another seat's
+    /// observation and older snapshots are unaffected.
     /// </summary>
     public sealed class Observation
     {
@@ -660,23 +666,23 @@ namespace LuanShi.Engine
         public int ResearchLevel(string line)
             => Research.TryGetValue(line, out int level) ? level : 0;
 
-        public readonly List<CityState> Cities = new List<CityState>();
+        public readonly List<CityView> Cities = new List<CityView>();
         public readonly List<ScoutedCityView> ScoutedCities = new List<ScoutedCityView>();   // 偵察 reports (§8.2)
-        public readonly List<ArmyState> Armies = new List<ArmyState>();
-        public readonly List<WatchTowerState> WatchTowers = new List<WatchTowerState>();
+        public readonly List<ArmyView> Armies = new List<ArmyView>();
+        public readonly List<WatchTowerView> WatchTowers = new List<WatchTowerView>();
         public readonly List<FactionView> Factions = new List<FactionView>();
         public readonly List<RelationView> Relations = new List<RelationView>();
-        public readonly List<TreatyRecord> Treaties = new List<TreatyRecord>();
-        public readonly List<TreatyProposal> Proposals = new List<TreatyProposal>();
-        public readonly List<EventRecord> Events = new List<EventRecord>();
+        public readonly List<TreatyView> Treaties = new List<TreatyView>();
+        public readonly List<ProposalView> Proposals = new List<ProposalView>();
+        public readonly List<EventView> Events = new List<EventView>();
 
-        public CityState FindCity(string id) => Cities.Find(c => c.Id == id);
+        public CityView FindCity(string id) => Cities.Find(c => c.Id == id);
         public ScoutedCityView FindScoutedCity(string id) => ScoutedCities.Find(c => c.CityId == id);
-        public ArmyState FindArmy(string id) => Armies.Find(a => a.Id == id);
-        public WatchTowerState FindWatchTower(string id) => WatchTowers.Find(t => t.Id == id);
-        public List<WatchTowerState> WatchTowersOf(string seatId) => WatchTowers.FindAll(t => t.OwnerSeatId == seatId);
-        public List<CityState> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
-        public List<ArmyState> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
+        public ArmyView FindArmy(string id) => Armies.Find(a => a.Id == id);
+        public WatchTowerView FindWatchTower(string id) => WatchTowers.Find(t => t.Id == id);
+        public List<WatchTowerView> WatchTowersOf(string seatId) => WatchTowers.FindAll(t => t.OwnerSeatId == seatId);
+        public List<CityView> CitiesOf(string seatId) => Cities.FindAll(c => c.OwnerSeatId == seatId);
+        public List<ArmyView> ArmiesOf(string seatId) => Armies.FindAll(a => a.OwnerSeatId == seatId);
         public FactionView Faction(string seatId) => Factions.Find(f => f.SeatId == seatId);
         public RelationView Relation(string seatId) => Relations.Find(r => r.SeatId == seatId);
 

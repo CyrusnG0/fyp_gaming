@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Pure C# harness: compiles the engine sources directly, no UnityEngine and no NuGet package.
+         The target framework follows whatever runtime the installed SDK bundles, so no machine-specific
+         SDK version or targeting pack is required. Override for a specific runtime with
+         `-p:TargetFramework=net8.0` (that framework must then be restorable on the machine). -->
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.Engine.Tests</AssemblyName>
+    <RootNamespace>LuanShi.Engine.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+  </ItemGroup>
+
+</Project>

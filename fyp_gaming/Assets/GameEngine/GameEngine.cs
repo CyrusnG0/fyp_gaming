@@ -13,7 +13,7 @@ namespace LuanShi.Engine
     /// Season flow: BeginSeason() → seats submit orders → EndSeason() resolves the world.
     /// Pure C#, no UnityEngine dependencies, deterministic under a fixed seed.
     /// </summary>
-    public sealed class GameEngine
+    public sealed partial class GameEngine
     {
         public readonly GameState State = new GameState();
         public readonly EventLog Log = new EventLog();
@@ -21,6 +21,10 @@ namespace LuanShi.Engine
 
         private readonly Random rng;
         private int nextActionId = 1;
+
+        // One answer for an invalid target whose facts are not visible to the acting seat (unknown id,
+        // hidden own/neutral city). This keeps rejected espionage orders from becoming a free oracle.
+        private const string UnavailableSpyTarget = "target city is not available for this mission";
 
         public GameEngine(int seed, string gameId = "g-001")
         {
@@ -115,7 +119,7 @@ namespace LuanShi.Engine
                     city.Population -= lost;
                     city.Food = 0;
                     AddNote(ref note, $"Famine! Population reduced by {lost}");
-                    Emit(city.OwnerSeatId, fac?.Controller, "starvation", "public",
+                    Emit(city.OwnerSeatId, fac?.Controller, "starvation", "owner_and_observers",
                         P("city_id", city.Id, "pop_lost", lost.ToString()), null);
                 }
                 else
@@ -294,6 +298,7 @@ namespace LuanShi.Engine
         {
             if (cmd == null) return Reject(cmd, "null command");
             cmd.ActionId = "a-" + nextActionId++;
+            if (!TurnGateAccepts(cmd)) return Reject(cmd, "not this seat's turn");
             if (State.WinnerSeatId != null) return Reject(cmd, "game over");
 
             var fac = State.FindFaction(cmd.ActorSeatId);
@@ -639,10 +644,23 @@ namespace LuanShi.Engine
         private ValidationResult DoScout(FactionState fac, ActionCommand cmd)
         {
             var city = State.FindCity(cmd.TargetId);
-            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
-            if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
 
-            ValidationResult gate = SpyGate(fac, BalanceConfig.ScoutResearchLevel, BalanceConfig.ScoutGoldCost);
+            // Capability/affordability come first: an unaffordable or unqualified seat must not be able
+            // to probe hidden target facts with free rejections. Affordability is a read-only check; the
+            // gold is only spent once the target has been validated below.
+            ValidationResult gate = SpyLevelGate(fac, BalanceConfig.ScoutResearchLevel);
+            if (!gate.Ok) return gate;
+            gate = SpyAffordabilityGate(fac, BalanceConfig.ScoutGoldCost);
+            if (!gate.Ok) return gate;
+
+            // Once the seat can pay, invalid target facts share one generic answer unless the city is
+            // currently known: then ownership/neutrality is visible and a specific message is safe.
+            if (city == null) return ValidationResult.Fail(UnavailableSpyTarget);
+            bool known = IsCityKnown(fac.SeatId, city);
+            if (city.OwnerSeatId == fac.SeatId)
+                return ValidationResult.Fail(known ? "that is your own city" : UnavailableSpyTarget);
+
+            gate = SpyGoldGate(fac, BalanceConfig.ScoutGoldCost);
             if (!gate.Ok) return gate;
 
             if (!SpyRoll(fac, ActionType.Scout, city.OwnerSeatId, null, cmd))
@@ -664,11 +682,23 @@ namespace LuanShi.Engine
         private ValidationResult DoRumor(FactionState fac, ActionCommand cmd)
         {
             var city = State.FindCity(cmd.TargetId);
-            if (city == null) return ValidationResult.Fail($"unknown city '{cmd.TargetId}'");
-            if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
-            if (city.IsNeutral) return ValidationResult.Fail("a neutral city has no faction to undermine");
 
-            ValidationResult gate = SpyGate(fac, BalanceConfig.RumorResearchLevel, BalanceConfig.RumorGoldCost);
+            // Same order as 偵察: capability/affordability first, then the target. A hidden target's
+            // owner/neutrality never changes the rejection unless the city is currently known.
+            ValidationResult gate = SpyLevelGate(fac, BalanceConfig.RumorResearchLevel);
+            if (!gate.Ok) return gate;
+            gate = SpyAffordabilityGate(fac, BalanceConfig.RumorGoldCost);
+            if (!gate.Ok) return gate;
+
+            if (city == null) return ValidationResult.Fail(UnavailableSpyTarget);
+            bool known = IsCityKnown(fac.SeatId, city);
+            if (city.OwnerSeatId == fac.SeatId)
+                return ValidationResult.Fail(known ? "that is your own city" : UnavailableSpyTarget);
+            if (city.IsNeutral)
+                return ValidationResult.Fail(known
+                    ? "a neutral city has no faction to undermine" : UnavailableSpyTarget);
+
+            gate = SpyGoldGate(fac, BalanceConfig.RumorGoldCost);
             if (!gate.Ok) return gate;
 
             if (!SpyRoll(fac, ActionType.Rumor, city.OwnerSeatId, null, cmd))
@@ -718,13 +748,42 @@ namespace LuanShi.Engine
             return ValidationResult.Success;
         }
 
-        /// <summary>Shared mission preconditions: the 諜報 level, then the gold — which is spent either way.</summary>
+        /// <summary>
+        /// 挑撥離間's complete gate (research then gold). 偵察/散播謠言 use the two halves separately so
+        /// the target is validated before any gold is spent.
+        /// </summary>
         private ValidationResult SpyGate(FactionState fac, int requiredLevel, int goldCost)
+        {
+            ValidationResult level = SpyLevelGate(fac, requiredLevel);
+            if (!level.Ok) return level;
+            return SpyGoldGate(fac, goldCost);
+        }
+
+        /// <summary>The research half of a mission gate; it checks only the actor's own tech tree.</summary>
+        private ValidationResult SpyLevelGate(FactionState fac, int requiredLevel)
         {
             int level = fac.ResearchLevel(ResearchLine.Espionage);
             if (level < requiredLevel)
                 return ValidationResult.Fail($"needs Espionage {requiredLevel} research (have {level})");
+            return ValidationResult.Success;
+        }
+
+        /// <summary>The paid half of a mission gate. Callers validate the target first, so a refused
+        /// unknown/hidden target never spends gold.</summary>
+        private ValidationResult SpyGoldGate(FactionState fac, int goldCost)
+        {
             if (!PayFromTreasury(fac, goldCost))
+                return ValidationResult.Fail($"not enough gold (needs {goldCost})");
+            return ValidationResult.Success;
+        }
+
+        /// <summary>Read-only affordability check, run before any target-specific answer so a poor seat
+        /// cannot probe hidden facts with free rejections. Payment happens later, after validation.</summary>
+        private ValidationResult SpyAffordabilityGate(FactionState fac, int goldCost)
+        {
+            int total = 0;
+            foreach (var city in State.CitiesOf(fac.SeatId)) total += city.Gold;
+            if (total < goldCost)
                 return ValidationResult.Fail($"not enough gold (needs {goldCost})");
             return ValidationResult.Success;
         }
@@ -855,6 +914,10 @@ namespace LuanShi.Engine
         /// The filtered observation for one seat — the only world a controller may act on. Own cities and
         /// armies are complete; foreign ones appear only inside the §9 detection ranges and are absent
         /// (never redacted in place) outside them; the log is filtered by event visibility.
+        ///
+        /// Everything returned is detached (LS-003): entities are view copies, events are per-seat
+        /// projections, and every collection is built fresh. Mutating the result — including a snapshot
+        /// retained from an earlier call — can never reach canonical state, the log or another seat.
         /// </summary>
         public Observation Observe(string seatId)
         {
@@ -875,7 +938,7 @@ namespace LuanShi.Engine
             foreach (string line in ResearchLine.All) obs.Research[line] = fac.ResearchLevel(line);
 
             foreach (var city in State.Cities)
-                if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(city);
+                if (InSight(seatId, city.X, city.Z)) obs.Cities.Add(CityView.From(city));
 
             // 偵察 reports (design §8.2, ADR-015): a scouted city is in the observation even when nothing of
             // ours is near it — that is the whole point of paying for an agent. Cities already in sight stay
@@ -889,9 +952,9 @@ namespace LuanShi.Engine
                 obs.ScoutedCities.Add(ScoutedCityView.From(scouted, scoutAccuracy, report.UntilSeason));
             }
             foreach (var army in State.Armies)
-                if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(army);
+                if (InSight(seatId, army.X, army.Z)) obs.Armies.Add(ArmyView.From(army));
             foreach (var tower in State.WatchTowers)
-                if (InSight(seatId, tower.X, tower.Z)) obs.WatchTowers.Add(tower);
+                if (InSight(seatId, tower.X, tower.Z)) obs.WatchTowers.Add(WatchTowerView.From(tower));
 
             foreach (var other in State.Factions)
             {
@@ -913,11 +976,13 @@ namespace LuanShi.Engine
             }
 
             foreach (var treaty in State.Diplomacy.Treaties)
-                if (treaty.FactionA == seatId || treaty.FactionB == seatId) obs.Treaties.Add(treaty);
+                if (treaty.FactionA == seatId || treaty.FactionB == seatId) obs.Treaties.Add(TreatyView.From(treaty));
             foreach (var proposal in State.Diplomacy.Proposals)
-                if (proposal.FromSeatId == seatId || proposal.ToSeatId == seatId) obs.Proposals.Add(proposal);
+                if (proposal.FromSeatId == seatId || proposal.ToSeatId == seatId)
+                    obs.Proposals.Add(ProposalView.From(proposal));
+            // Events are detached per-seat projections (LS-003): the canonical records stay in the log.
             foreach (var rec in Log.Records)
-                if (SeesEvent(seatId, rec)) obs.Events.Add(rec);
+                if (SeesEvent(seatId, rec)) obs.Events.Add(rec.ForSeat(seatId));
 
             return obs;
         }
@@ -950,39 +1015,38 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Log filter (CONTROLLER_PROTOCOL §5): a seat sees public events, whatever it did itself, whatever
-        /// names it as a party, and `owner_and_observers` events whose subject it can currently see. An
-        /// `owner_and_observers` event with no in-sight subject reaches only its actor and its named parties.
+        /// A city is "known" to a seat when it is currently in sight or a live 偵察 report covers it
+        /// (ADR-015/ADR-011's no-known-city-memory rule, made seat-safe). Espionage target validation
+        /// uses this before target-specific answers, so a hidden city's ownership/neutrality cannot be
+        /// probed with a free rejected mission. The UI already offers exactly this set.
+        /// </summary>
+        public bool IsCityKnown(string seatId, CityState city) => IsCityKnown(State, seatId, city);
+
+        /// <summary>State-only form of <see cref="IsCityKnown(string,CityState)"/> for the scripted baseline.</summary>
+        public static bool IsCityKnown(GameState state, string seatId, CityState city)
+        {
+            if (state == null || city == null) return false;
+            if (InSight(state, seatId, city.X, city.Z)) return true;
+            var fac = state.FindFaction(seatId);
+            if (fac == null) return false;
+            foreach (var report in fac.ScoutedCities)
+                if (report.CityId == city.Id && report.UntilSeason >= state.Season) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Log filter (CONTROLLER_PROTOCOL §5, LS-002): a record is readable only by the audience frozen
+        /// when it was emitted — public seats, the actor, named parties, and (for owner_and_observers)
+        /// seats that could see the subject at that moment. Later sight never reveals an old event, and
+        /// later movement or destruction never removes one already delivered. A record without a frozen
+        /// audience fails closed (no seat may read it), so a future emitter cannot accidentally bypass
+        /// the projection by calling EventLog.Emit directly.
         /// </summary>
         public bool SeesEvent(string seatId, EventRecord rec)
         {
             if (rec == null) return false;
-            if (rec.Visibility == "public") return true;
-            if (rec.ActorSeatId == seatId) return true;
-            if (EventField(rec, "to_seat_id") == seatId) return true;
-            if (EventField(rec, "from_seat_id") == seatId) return true;
-            if (EventField(rec, "attacker_seat_id") == seatId) return true;
-            if (EventField(rec, "defender_seat_id") == seatId) return true;
-            if (rec.Visibility != "owner_and_observers") return false;
-
-            string cityId = EventField(rec, "city_id");
-            if (cityId != null)
-            {
-                var city = State.FindCity(cityId);
-                if (city != null && InSight(seatId, city.X, city.Z)) return true;
-            }
-            string armyId = EventField(rec, "army_id") ?? EventField(rec, "attacker_army_id")
-                         ?? EventField(rec, "defender_army_id");
-            if (armyId != null)
-            {
-                var army = State.FindArmy(armyId);
-                if (army != null && InSight(seatId, army.X, army.Z)) return true;
-            }
-            return false;
+            return rec.Recipients != null && rec.Recipients.Contains(seatId);
         }
-
-        private static string EventField(EventRecord rec, string key)
-            => rec.Payload != null && rec.Payload.TryGetValue(key, out string value) ? value : null;
 
         // ---- 外交 P1-P6 (ACTIONS.md §5) ----------------------------------------
         // Command shapes (the UI and the LLM adapter must both produce exactly these):
@@ -1266,15 +1330,16 @@ namespace LuanShi.Engine
             if (army.Morale <= BalanceConfig.CombatRoutMoraleThreshold)
                 return ValidationResult.Fail("army morale is broken — it cannot attack");
 
+            // Check range against the target hex before looking the defender up. Otherwise an out-of-range
+            // hidden army would answer "out of range" while an empty hex answers "no army", letting a seat
+            // probe the fog with free rejected orders (LS-002 / OPEN_QUESTIONS 18).
+            int attackRange = UnitTypes.AttackRange(army.UnitType);
+            if (State.Map.HexDistance(army.X, army.Z, cmd.ParamA, cmd.ParamB, attackRange) < 0)
+                return ValidationResult.Fail($"target army is out of range (max {attackRange})");
+
             var defender = State.ArmyAt(cmd.ParamA, cmd.ParamB);
             if (defender == null) return ValidationResult.Fail($"no army at [{cmd.ParamA},{cmd.ParamB}]");
             if (defender.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own army");
-
-            // P15 弓兵 ranged attack: archers reach 2 hexes, every other type 1. Resolution is unchanged —
-            // a ranged attack is a normal field battle, only the range gate differs.
-            int attackRange = UnitTypes.AttackRange(army.UnitType);
-            if (State.Map.HexDistance(army.X, army.Z, defender.X, defender.Z, attackRange) < 0)
-                return ValidationResult.Fail($"target army is out of range (max {attackRange})");
 
             int attackerTraining = TrainingOf(fac.SeatId), defenderTraining = TrainingOf(defender.OwnerSeatId);
             float attackerResearch = CombatResearchMult(fac.SeatId);
@@ -1397,12 +1462,15 @@ namespace LuanShi.Engine
             if (army.Morale <= BalanceConfig.CombatRoutMoraleThreshold)
                 return ValidationResult.Fail("army morale is broken — it cannot attack");
 
+            // Adjacency is checked against the target hex before the city is looked up: a hidden city at a
+            // non-adjacent hex must give the same answer as an empty hex (LS-002 / OPEN_QUESTIONS 18).
+            if (!State.Map.AreAdjacent(army.X, army.Z, cmd.ParamA, cmd.ParamB))
+                return ValidationResult.Fail("target city is not adjacent");
+
             var city = State.CityAt(cmd.ParamA, cmd.ParamB);
             if (city == null) return ValidationResult.Fail($"no city at [{cmd.ParamA},{cmd.ParamB}]");
             if (city.IsNeutral) return ValidationResult.Fail("neutral cities are taken by marching into them");
             if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
-            if (!State.Map.AreAdjacent(army.X, army.Z, city.X, city.Z))
-                return ValidationResult.Fail("target city is not adjacent");
 
             string attackerType = UnitTypes.Normalize(army.UnitType);
             bool siegeWaiver = UnitTypes.WaivesAssaultRatio(attackerType);
@@ -1746,9 +1814,13 @@ namespace LuanShi.Engine
 
         private void DestroyArmy(ArmyState army, string cause, ActionCommand cmd)
         {
+            // Capture the hex before the army leaves canonical state: the frozen audience for the event
+            // is the seats that could see the destruction at that moment (LS-002).
+            int x = army.X, z = army.Z;
             State.Armies.Remove(army);
-            Emit(army.OwnerSeatId, State.FindFaction(army.OwnerSeatId)?.Controller, "army_destroyed", "public",
-                P("army_id", army.Id, "cause", cause), cmd.ActionId);
+            Emit(army.OwnerSeatId, State.FindFaction(army.OwnerSeatId)?.Controller, "army_destroyed",
+                "public",
+                P("army_id", army.Id, "cause", cause), cmd.ActionId, subjectX: x, subjectZ: z);
         }
 
         private ValidationResult Reject(ActionCommand cmd, string why)
@@ -1760,9 +1832,16 @@ namespace LuanShi.Engine
 
         private EventRecord Emit(string seatId, string controller, string type,
             string visibility, Dictionary<string, string> payload, string sourceActionId,
-            Dictionary<string, string> args = null, string text = null)
-            => Log.Emit(State.GameId, State.Season, State.Phase, seatId, controller, type,
-                        visibility, payload, sourceActionId, args, text);
+            Dictionary<string, string> args = null, string text = null,
+            int? subjectX = null, int? subjectZ = null)
+        {
+            var rec = Log.Emit(State.GameId, State.Season, State.Phase, seatId, controller, type,
+                               visibility, payload, sourceActionId, args, text);
+            // Freeze the audience at event time (LS-002, ADR-025). Later sight never adds a recipient and
+            // later movement/destruction never removes one; the canonical payload stays in the log.
+            EventPrivacy.Freeze(rec, State, (seat, x, z) => InSight(State, seat, x, z), subjectX, subjectZ);
+            return rec;
+        }
 
         private static Dictionary<string, string> P(params string[] kv)
         {

@@ -38,7 +38,7 @@ namespace LuanShi.Engine
 
         public static string Num(int v) => v.ToString(CultureInfo.InvariantCulture);
 
-        public static string Dict(Dictionary<string, string> d)
+        public static string Dict(IEnumerable<KeyValuePair<string, string>> d)
         {
             var sb = new StringBuilder("{");
             bool first = true;

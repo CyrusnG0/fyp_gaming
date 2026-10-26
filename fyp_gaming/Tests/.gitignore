@@ -1,0 +1,7 @@
+bin/
+obj/
+__pycache__/
+
+# The Unity .gitignore ignores *.csproj/*.sln (Unity regenerates them). These two projects are
+# hand-written test tooling, so track them: local negation wins over the parent rule.
+!*.csproj

@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Standalone compile check for the Unity scripts: compiles Assets/GameEngine + Assets/GameUI/Scripts
+    against the UnityEngine modules of an installed editor. It is NOT a Unity test run and does not
+    replace opening the project in the editor — it only proves the C# type-checks, which catches
+    signature and namespace mistakes without a domain reload.
+
+    Two inputs cannot be derived portably, so both are properties with defaults:
+      UnityManagedDir  folder of UnityEngine*.dll from the installed editor, e.g.
+                       "<editor>/Editor/Data/Managed/UnityEngine". Override with
+                       -p:UnityManagedDir=... or the UNITY_MANAGED_DIR environment variable.
+      TbtkAssembly     a Unity-compiled assembly that provides the TBTK types the UI scripts call.
+                       Defaults to <Unity project>/Library/ScriptAssemblies/Assembly-CSharp.dll,
+                       which exists once the project has been opened in the editor. Override with
+                       -p:TbtkAssembly=... when the editor put TBTK somewhere else.
+
+    Example:
+      dotnet build Tests/UiCompileCheck/UiCompileCheck.csproj \
+        -p:UnityManagedDir="/path/to/Unity/Hub/Editor/<version>/Editor/Data/Managed/UnityEngine"
+
+    See ../README.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.UiCompileCheck</AssemblyName>
+    <UnityProjectDir Condition="'$(UnityProjectDir)' == ''">$(MSBuildProjectDirectory)/../..</UnityProjectDir>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">$(UNITY_MANAGED_DIR)</UnityManagedDir>
+    <TbtkAssembly Condition="'$(TbtkAssembly)' == ''">$(UnityProjectDir)/Library/ScriptAssemblies/Assembly-CSharp.dll</TbtkAssembly>
+    <!-- Unity serialized fields and the duplicated TBTK types cannot be seen by this compile. -->
+    <NoWarn>CS0433;CS0618;CS0108;CS0114;CS0169;CS0649;CS0067;CS0436</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="ValidateUnityInputs" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(UnityManagedDir)' == ''"
+           Text="UnityManagedDir is not set. Pass -p:UnityManagedDir=&quot;&lt;editor&gt;/Editor/Data/Managed/UnityEngine&quot; or set the UNITY_MANAGED_DIR environment variable (see Tests/README.md)." />
+    <Error Condition="'$(UnityManagedDir)' != '' And !Exists('$(UnityManagedDir)')"
+           Text="UnityManagedDir '$(UnityManagedDir)' does not exist." />
+    <Error Condition="!Exists('$(TbtkAssembly)')"
+           Text="TbtkAssembly '$(TbtkAssembly)' does not exist. The UI scripts call TBTK types, which only exist in a Unity-compiled assembly: open the project in the editor once (this creates Library/ScriptAssemblies/Assembly-CSharp.dll) or pass -p:TbtkAssembly=&lt;path&gt;." />
+  </Target>
+
+  <ItemGroup>
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+    <Compile Include="../../Assets/GameUI/Scripts/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UnityManagedDir)' != '' And Exists('$(UnityManagedDir)')">
+    <Reference Include="$(UnityManagedDir)/UnityEngine*.dll" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(TbtkAssembly)')">
+    <Reference Include="Assembly-CSharp-TBTK">
+      <HintPath>$(TbtkAssembly)</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
