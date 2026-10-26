@@ -9,8 +9,9 @@ namespace LuanShi
     {
         /// <summary>
         /// Top bar: faction / controller / season / remaining orders, then the faction totals on a second
-        /// line. The controller word is derived from the engine's ControllerType, so the handover to an
-        /// LLM or scripted seat is visible without exposing any extra state.
+        /// line. The controller word is derived from the observation's FactionView, so the handover to an
+        /// LLM or scripted seat is visible without exposing any extra state. In spectator mode the same
+        /// two lines carry the pilot context instead of a single seat's totals.
         /// </summary>
         void DrawTopBar(FactionState fac)
         {
@@ -35,17 +36,12 @@ namespace LuanShi
             }
 
             string header;
+            string detail;
             if (spectatorMode)
             {
-                int season = spectatorSession != null ? spectatorSession.CurrentSeason : engine.State.Season;
-                int planned = spectatorSession != null ? spectatorSession.SeasonsPlanned
-                    : Mathf.Max(0, spectatorSeasons);
-                string active = spectatorSession != null && !string.IsNullOrEmpty(spectatorSession.ActiveFactionName)
-                    ? spectatorSession.ActiveFactionName : "-";
-                header = "LLM vs LLM pilot (domestic)  |  " +
-                         $"Season {season}/{planned}  |  Active: {active} (LLM)  |  " +
-                         $"Orders {orders}/{BalanceConfig.CommandPointsPerSeason}";
-                if (agentFakeMode) header += "  |  FAKE";
+                header = SpectatorHeaderLine();
+                detail = $"Domestic management only  |  Orders {orders}/{BalanceConfig.CommandPointsPerSeason}";
+                if (agentFakeMode) detail += "  |  FAKE";
             }
             else
             {
@@ -53,9 +49,9 @@ namespace LuanShi
                     $"{fac.Name} - {ControllerLabel(controller)}  |  " +
                     $"Season {engine.State.Season} ({BalanceConfig.SeasonName(engine.State.Season)})  |  " +
                     $"Orders {orders}/{BalanceConfig.CommandPointsPerSeason}";
+                detail =
+                    $"Food {food}  |  Gold {gold}  |  Population {population}  |  Prestige {prestige}";
             }
-            string totals =
-                $"Faction totals: Food {food} | Gold {gold} | Population {population} | Prestige {prestige}";
 
             var top = new Rect(TopBarX, TopBarY, TopBarWidth, TopBarHeight);
             uiRects.Add(top);
@@ -67,8 +63,40 @@ namespace LuanShi
                 headerStyle.fontSize = size;
                 if (headerStyle.CalcSize(new GUIContent(header)).x <= TopBarWidth - 26f) break;
             }
-            GUI.Label(new Rect(top.x + 12f, top.y + 4f, top.width - 24f, 28f), header, headerStyle);
-            GUI.Label(new Rect(top.x + 12f, top.y + 32f, top.width - 24f, 20f), totals, uiSmall);
+            GUI.Label(new Rect(top.x + 12f, top.y + TopBarTitleRowY, top.width - 24f, TopBarTitleRowHeight),
+                      EllipsizeToWidth(headerStyle, header, top.width - 24f), headerStyle);
+            GUI.Label(new Rect(top.x + 12f, top.y + TopBarTotalsRowY, top.width - 24f, TopBarTotalsRowHeight),
+                      EllipsizeToWidth(uiSmall, detail, top.width - 24f), uiSmall);
+        }
+
+        /// <summary>
+        /// Spectator context line. Completed/Paused never say "Active: -": they name the season count and
+        /// the faction whose filtered view the map is showing.
+        /// </summary>
+        string SpectatorHeaderLine()
+        {
+            SpectatorSession session = spectatorSession;
+            string viewed = ViewedFactionNameFromObservation();
+            if (session == null)
+                return "LLM vs LLM pilot - unavailable  |  viewing " + viewed;
+
+            int played = session.SeasonsPlayed;
+            switch (session.State)
+            {
+                case SpectatorState.Running:
+                    return "LLM vs LLM pilot  |  " +
+                           $"Season {session.CurrentSeason}/{session.SeasonsPlanned}  |  Active: {viewed} (LLM)";
+                case SpectatorState.Paused:
+                    string reason = string.IsNullOrEmpty(session.PauseReason)
+                        ? "no reason given" : session.PauseReason;
+                    return $"Pilot paused - {reason} - viewing {viewed}";
+                case SpectatorState.Completed:
+                    return $"Pilot completed - {played} seasons - viewing {viewed}";
+                case SpectatorState.Failed:
+                    return $"Pilot failed - {played} seasons - viewing {viewed}";
+                default:
+                    return "LLM vs LLM pilot - starting  |  viewing " + viewed;
+            }
         }
 
         /// <summary>The concept tabs. They are view switches, but order buttons live inside them, so the
@@ -79,16 +107,17 @@ namespace LuanShi
             // A spectator may browse every tab (read-only); order buttons inside stay locked by uiInputLocked.
             bool interactive = spectatorMode ? !reportShowing : (!uiInputLocked && !reportShowing);
 
-            var previous = GUI.enabled;
-            GUI.enabled = interactive;
             for (int i = 0; i < Tabs.GetLength(0); i++)
             {
                 var rect = new Rect(TabColumnX, TabTop + i * TabStep, TabColumnWidth, TabHeight);
                 uiRects.Add(rect);
-                var style = activeTab == Tabs[i, 0] ? uiTabActive : uiTab;
-                if (GUI.Button(rect, Tabs[i, 1], style)) ShowTab(Tabs[i, 0]);
+                bool active = activeTab == Tabs[i, 0];
+                // A locked tab is an opaque disabled plate, never a translucent button showing the map.
+                var style = !interactive
+                    ? (active ? uiTabActiveLocked : uiTabLocked)
+                    : (active ? uiTabActive : uiTab);
+                if (GUI.Button(rect, Tabs[i, 1], style) && interactive) ShowTab(Tabs[i, 0]);
             }
-            GUI.enabled = previous;
         }
 
         /// <summary>Prominent human turn control on the right; disabled and relabelled while locked.</summary>
@@ -101,25 +130,21 @@ namespace LuanShi
 
             bool interactive = !uiInputLocked && !reportShowing;
             string label = uiInputLocked ? "Waiting..." : hotseat ? $"End {fac.Name}'s turn" : "End turn";
-
-            var previous = GUI.enabled;
-            GUI.enabled = interactive;
-            if (GUI.Button(rect, label, uiButton))
+            if (GUI.Button(rect, label, interactive ? uiButton : uiButtonDisabled) && interactive)
             {
                 locationChoiceOpen = false;
                 EndTurn();
             }
-            GUI.enabled = previous;
 
             if (hotseat)
-                GUI.Label(new Rect(EndTurnX, EndTurnY + 46f, EndTurnWidth, 18f),
-                          $"Turn: {fac.Name}", uiSmall);
+                GUI.Label(new Rect(EndTurnX, EndTurnY + EndTurnHeight + 2f, EndTurnWidth, 14f),
+                          EllipsizeToWidth(uiSmall, $"Turn: {fac.Name}", EndTurnWidth), uiSmall);
         }
 
         /// <summary>
-        /// Bottom status strip: the existing one-line status message, a permanent controls legend and the
-        /// recent command JSON. Keeping the legend here makes the map's interaction model discoverable
-        /// without opening a separate help screen.
+        /// Bottom status strip (46 design px): one row with the status message on the left and the lock
+        /// reason/controls hint on the right. The recent command feed is a slim second row, drawn only
+        /// when there is a feed; it no longer reserves empty height over the map.
         /// </summary>
         void DrawStatusBar()
         {
@@ -128,21 +153,28 @@ namespace LuanShi
             uiRects.Add(bar);
             DrawBackdrop(bar);
 
-            GUI.Label(new Rect(bar.x + 12f, bar.y + 6f, bar.width - 24f, 22f), statusMsg, uiBody);
-            GUI.Label(new Rect(bar.x + 12f, bar.y + 29f, 850f, 20f),
-                spectatorMode
-                    ? "Spectator mode - orders locked - stop/resume/extend in the pilot panel"
-                    : ControlsHint, uiHint);
+            float hintLeft = Mathf.Max(bar.x + 12f, bar.x + bar.width - 12f - StatusHintWidth);
+            GUI.Label(new Rect(bar.x + 12f, bar.y + StatusMessageRowY,
+                               Mathf.Max(200f, hintLeft - bar.x - 24f), StatusMessageRowHeight),
+                      EllipsizeToWidth(uiBody, statusMsg, Mathf.Max(200f, hintLeft - bar.x - 24f)), uiBody);
             if (uiInputLocked)
-                GUI.Label(new Rect(bar.x + 872f, bar.y + 28f, bar.width - 884f, 36f),
-                          "Orders locked: " + LockedReason(), uiReasonWrap);
+                GUI.Label(new Rect(hintLeft, bar.y + StatusMessageRowY,
+                                   StatusHintWidth, StatusMessageRowHeight),
+                          EllipsizeToWidth(uiReasonRight, "Orders locked: " + LockedReason(), StatusHintWidth),
+                          uiReasonRight);
+            else
+                GUI.Label(new Rect(hintLeft, bar.y + StatusMessageRowY,
+                                   StatusHintWidth, StatusMessageRowHeight),
+                          EllipsizeToWidth(uiHint, ControlsHint, StatusHintWidth), uiHint);
 
-            int shown = uiInputLocked ? 2 : 3;
-            int first = Mathf.Max(0, jsonFeed.Count - shown);
-            float feedTop = bar.y + (uiInputLocked ? 64f : 50f);
+            if (jsonFeed.Count == 0) return;
+            int first = Mathf.Max(0, jsonFeed.Count - StatusFeedLines);
             for (int i = first; i < jsonFeed.Count; i++)
-                GUI.Label(new Rect(bar.x + 12f, feedTop + (i - first) * 15f, bar.width - 24f, 15f),
-                          jsonFeed[i], uiMono);
+            {
+                float y = bar.y + StatusFeedRowY + (i - first) * StatusFeedLineHeight;
+                GUI.Label(new Rect(bar.x + 12f, y, bar.width - 24f, StatusFeedLineHeight),
+                          EllipsizeToWidth(uiMonoTiny, jsonFeed[i], bar.width - 24f), uiMonoTiny);
+            }
         }
     }
 }

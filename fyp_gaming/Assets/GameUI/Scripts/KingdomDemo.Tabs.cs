@@ -36,10 +36,12 @@ namespace LuanShi
         {
             if (uiInputLocked && !spectatorMode) return;   // single-LLM lock: no tab body at all
             float height = TabPanelHeight();
-            var p = new Rect(400, 190, 800, height);
+            // The side dock (agent/spectator) owns 960..1380, so a docked tab body stays left of it.
+            float x = SideDockVisible() ? TabPanelDockedX : TabPanelX;
+            var p = new Rect(x, TabPanelY, TabPanelWidth, height);
             uiRects.Add(p);
             DrawBackdrop(p, CurrentSeatAccent());
-            GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), TabTitle(), title);
+            GUI.Label(new Rect(p.x + 20, p.y + 12, TabPanelWidth - 40f, 30), TabTitle(), title);
 
             bool scrolls = activeTab == "domestic" || activeTab == "diplomacy"
                         || activeTab == "intel" || activeTab == "research";
@@ -48,7 +50,7 @@ namespace LuanShi
                 // A concept panel can outgrow the shell (diplomacy rows, intel missions, research lines):
                 // it gets a scroll view, and Input.cs switches TBTK's camera zoom off while the pointer
                 // is over a panel, so the wheel scrolls here instead of zooming the map underneath.
-                var view = new Rect(p.x + 4, p.y + 52, 792, height - 52f - 56f);
+                var view = new Rect(p.x + 4, p.y + 52, TabPanelWidth - 8f, height - 52f - 56f);
                 float contentHeight = tabContentHeights.TryGetValue(activeTab, out var measured)
                     ? measured : view.height;
                 // Never below the view height: content that fits yields a zero scroll range (no phantom
@@ -58,12 +60,12 @@ namespace LuanShi
                 TryWheelScroll(p, view, contentHeight, ref scroll);
 
                 // 776 leaves room for the vertical bar (16px) without ever triggering a horizontal one
-                scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, 776f, contentHeight), false, false);
+                scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, TabPanelWidth - 24f, contentHeight), false, false);
                 tabScrolls[activeTab] = scroll;
 
                 // x - 4 and y - 52 cancel the view's own offsets, so a panel keeps the exact layout it
                 // had outside the scroll view (its drawers still work in the old panel coordinates).
-                var inner = new Rect(-4f, -52f, 800f, contentHeight);
+                var inner = new Rect(-4f, -52f, TabPanelWidth, contentHeight);
                 float endY;
                 switch (activeTab)
                 {
@@ -125,7 +127,7 @@ namespace LuanShi
         /// contents (capped) so a two-record log does not open an 80%-empty box.
         /// </summary>
         float TabPanelHeight()
-            => activeTab == "history" ? 178f + HistorianViewHeight() : 480f;
+            => activeTab == "history" ? 178f + HistorianViewHeight() : TabPanelDefaultHeight;
 
         /// <summary>Height of the historian scroll view for the current seat: content-sized, capped.</summary>
         float HistorianViewHeight()
@@ -192,9 +194,13 @@ namespace LuanShi
         {
             // the chronicle is the seat's filtered view of the log (CONTROLLER_PROTOCOL §5)
             var records = obs != null ? obs.Events : new List<EventView>();
-            GUI.Label(new Rect(p.x + 20, p.y + 52, 760, 22),
-                $"Campaign chronicle (visible to {engine.State.FindFaction(currentSeat)?.Name}) — {records.Count} entries" +
-                $" (season {engine.State.Season} · {PhaseLabel(engine.State.Phase)})", body);
+            string seatName = obs != null ? obs.Faction(currentSeat)?.Name : null;
+            if (string.IsNullOrEmpty(seatName)) seatName = currentSeat;
+            string chronicleTitle =
+                $"Campaign chronicle (visible to {seatName}) — {records.Count} entries" +
+                (obs != null ? $" (season {obs.Season} · {PhaseLabel(obs.Phase)})" : "");
+            GUI.Label(new Rect(p.x + 20, p.y + 52, TabPanelWidth - 40f, 22),
+                EllipsizeToWidth(body, chronicleTitle, TabPanelWidth - 40f), body);
 
             // hug the chronicle: the scroll view is as tall as its content (capped), and the
             // scrollbar only appears when the cap actually bites
@@ -205,12 +211,16 @@ namespace LuanShi
             historianScroll = GUI.BeginScrollView(view, historianScroll,
                                                   new Rect(0, 0, 744, contentHeight), false, false);
             for (int i = 0; i < records.Count; i++)
-                GUI.Label(new Rect(4, 4 + i * HistorianLineHeight, 736, HistorianLineHeight),
-                          HistorianLine(records[i]), mono);
+            {
+                string line = HistorianLine(records[i]);
+                GUI.Label(new Rect(4, 4 + i * HistorianLineHeight, TabPanelWidth - 64f, HistorianLineHeight),
+                          EllipsizeToWidth(mono, line, TabPanelWidth - 64f), mono);
+            }
             GUI.EndScrollView();
 
-            GUI.Label(new Rect(p.x + 20, p.y + 80 + viewHeight + 12, 760, 22),
-                $"Historian: {CountSeasonEvents(engine.State.Season)} events recorded this season.", body);
+            int season = obs != null ? obs.Season : engine.State.Season;
+            GUI.Label(new Rect(p.x + 20, p.y + 80 + viewHeight + 12, TabPanelWidth - 40f, 22),
+                $"Historian: {CountSeasonEvents(season)} events recorded this season.", body);
         }
 
         string HistorianLine(EventView rec)

@@ -25,52 +25,45 @@ namespace LuanShi
         private static readonly Color TabSelected = new Color(0.82f, 0.69f, 0.43f, 1f);
         private static readonly Color InkScreen = new Color(0.10f, 0.08f, 0.06f, 1f);
 
-        // Fog overlays are dimmed at runtime; the scene/serialized values stay untouched.
-        private static readonly Color FogOverlayGrey = new Color(0.46f, 0.50f, 0.54f, 1f);
-        private const float FogOverlayAlpha = 0.50f;
-        private const float FogOverlayGreyMix = 0.60f;
-
         // ---------------------------------------------------------------- layout (1600x900 design space)
         private const float DesignWidth = 1600f;
         private const float TopBarX = 10f;
         private const float TopBarY = 8f;
         private const float TopBarWidth = 1380f;
-        private const float TopBarHeight = 56f;
+        private const float TopBarHeight = 52f;
         private const float EndTurnX = 1400f;
         private const float EndTurnY = 8f;
         private const float EndTurnWidth = 190f;
         private const float EndTurnHeight = 44f;
         private const float TabColumnX = 1400f;
         private const float TabColumnWidth = 190f;
-        private const float TabTop = 70f;
+        private const float TabTop = 68f;
         private const float TabStep = 46f;
         private const float TabHeight = 40f;
-        private const float PanelTop = 70f;
+        private const float PanelTop = 68f;
         private const float LeftPanelX = 10f;
         private const float ContentRight = 1390f;
-        private const float CityPanelWidth = 420f;
-        private const float ArmyPanelWidth = 430f;
-        private const float PanelBelowAgentY = 268f;
+        private const float CityPanelWidth = SelectionPanelMaxWidth;
+        private const float ArmyPanelWidth = SelectionPanelMaxWidth;
         private const float StatusBarX = 10f;
-        private const float StatusBarY = 792f;
+        private const float StatusBarY = 846f;
         private const float StatusBarWidth = 1380f;
-        private const float StatusBarHeight = 100f;
-
-        // Worker D's controller/agent panel. It sits below the top bar, centred between the selection
-        // panels and the tab column; D owns the contents.
-        private const float AgentPanelX = 655f;
-        private const float AgentPanelY = 70f;
-        private const float AgentPanelWidth = 520f;
-        private const float AgentPanelHeight = 190f;
+        private const float StatusBarHeight = 46f;
 
         private const float PanelAccentWidth = 5f;
         private const float PanelBorderWidth = 1.5f;
+        private const float PanelGutter = 12f;
 
-        // Selected-marker ring.
-        private const float SelectionRingHeight = 0.03f;
-        private const float SelectionRingScale = 1.45f;
+        // Selected-marker ring: a double, high-contrast ring that survives the fog wash.
+        private const float SelectionRingHeight = 0.04f;
+        private const float SelectionRingScale = 1.52f;
         private const int SelectionRingSortingOrder = 150;
         private const int SelectionRingTextureSize = 128;
+        private const float SelectionRingInkRadius = 64f;
+        private const float SelectionRingBandOuter = 61f;
+        private const float SelectionRingBandInner = 55f;
+        private const float SelectionRingEchoRadius = 48f;
+        private const float SelectionRingWhiteMix = 0.30f;
 
         // ---------------------------------------------------------------- input lock (worker D)
         // D sets these while a model or scripted seat is taking its turn. When true every order path,
@@ -84,7 +77,7 @@ namespace LuanShi
         private Vector2 selectionScroll;   // only used when a tall selection panel must scroll
 
         private const string ControlsHint =
-            "Click a city/army to select - Wheel over panels scrolls - End turn on the right";
+            "Click city/army - wheel over panels - End turn right";
 
         // ---------------------------------------------------------------- theme resources
         private Texture2D buttonFaceTexture;
@@ -95,17 +88,27 @@ namespace LuanShi
         private GUIStyle uiTitle;
         private GUIStyle uiPanelTitle;
         private GUIStyle uiBody;
+        private GUIStyle uiBodyWrap;
         private GUIStyle uiSmall;
+        private GUIStyle uiSmallWrap;
         private GUIStyle uiMono;
+        private GUIStyle uiMonoWrap;
+        private GUIStyle uiMonoTiny;
         private GUIStyle uiButton;
         private GUIStyle uiTab;
         private GUIStyle uiTabActive;
+        private GUIStyle uiTabLocked;
+        private GUIStyle uiTabActiveLocked;
         private GUIStyle uiReason;
         private GUIStyle uiReasonWrap;
+        private GUIStyle uiReasonRight;
         private GUIStyle uiHint;
         private GUIStyle uiField;
         private GUIStyle uiButtonDisabled;
         private GUIStyle uiButtonDisabledSmall;
+        private GUIStyle uiCityTag;
+        private GUIStyle uiCityTagSmall;
+        private GUIStyle uiViewedTag;
         private bool uiThemeReady;
 
         void PrepareUiTheme()
@@ -121,15 +124,34 @@ namespace LuanShi
             uiTitle = LabelStyle(21, Ink, FontStyle.Bold);
             uiPanelTitle = LabelStyle(18, Ink, FontStyle.Bold);
             uiBody = LabelStyle(16, Ink);
+            uiBodyWrap = new GUIStyle(uiBody) { wordWrap = true };
             uiSmall = LabelStyle(14, MutedInk);
+            uiSmallWrap = new GUIStyle(uiSmall) { wordWrap = true };
             uiMono = LabelStyle(12, MutedInk);
+            uiMonoWrap = new GUIStyle(uiMono) { wordWrap = true };
+            uiMonoTiny = LabelStyle(10, MutedInk);
             uiReason = LabelStyle(14, MutedRed);
             uiReasonWrap = new GUIStyle(uiReason) { wordWrap = true };
-            uiHint = LabelStyle(14, MutedInk);
+            uiReasonRight = LabelStyle(14, MutedRed);
+            uiReasonRight.alignment = TextAnchor.MiddleRight;
+            uiHint = LabelStyle(11, MutedInk);
+            uiHint.alignment = TextAnchor.MiddleRight;
             uiField = FieldStyle(14, buttonFaceTexture);
             uiButton = ButtonStyle(16, buttonFaceTexture, buttonHoverTexture, buttonPressedTexture, Ink);
             uiTab = ButtonStyle(14, buttonFaceTexture, buttonHoverTexture, buttonPressedTexture, Ink);
             uiTabActive = ButtonStyle(14, tabSelectedTexture, buttonHoverTexture, buttonPressedTexture, Ink);
+            // Locked tabs stay fully opaque: a disabled plate, not a see-through button showing the map.
+            uiTabLocked = ButtonStyle(14, buttonDisabledTexture, buttonDisabledTexture,
+                                      buttonDisabledTexture, MutedInk);
+            uiTabActiveLocked = ButtonStyle(14, buttonDisabledTexture, buttonDisabledTexture,
+                                            buttonDisabledTexture, Ink);
+            uiTabActiveLocked.fontStyle = FontStyle.Bold;
+            uiCityTag = LabelStyle(CityLabelFontSize, Ink, FontStyle.Bold);
+            uiCityTag.alignment = TextAnchor.MiddleCenter;
+            uiCityTagSmall = LabelStyle(CityLabelSmallFontSize, CityLabelScoutedText);
+            uiCityTagSmall.alignment = TextAnchor.MiddleCenter;
+            uiViewedTag = LabelStyle(ViewedMarkerFontSize, Ink, FontStyle.Bold);
+            uiViewedTag.alignment = TextAnchor.MiddleCenter;
 
             // GUIStyle no longer exposes a disabled state, so the inert look is baked into 'normal'
             // on dedicated styles used while a control is not interactive.
@@ -257,105 +279,6 @@ namespace LuanShi
         string LockedReason()
             => string.IsNullOrEmpty(uiLockReason) ? "Waiting for the current controller" : uiLockReason;
 
-        // ---------------------------------------------------------------- panel placement
-        /// <summary>The opaque top-centre panel this layout must never slide under.</summary>
-        Rect ActiveOverlayPanel()
-        {
-            if (spectatorMode) return SpectatorPanelArea();
-            if (agentHasSeat) return new Rect(AgentPanelX, AgentPanelY, AgentPanelWidth, AgentPanelHeight);
-            return new Rect(0f, 0f, 0f, 0f);
-        }
-
-        /// <summary>
-        /// Moves a small popup out of the agent/spectator rect: below first, then above, then to the
-        /// side. Popups are small enough that one of those always fits.
-        /// </summary>
-        Rect KeepClearOfOverlay(Rect rect)
-        {
-            Rect overlay = ActiveOverlayPanel();
-            if (overlay.width <= 0f || !rect.Overlaps(overlay)) return rect;
-
-            float top = TopBarY + TopBarHeight + 8f;
-            float bottom = StatusBarY - 8f;
-
-            if (overlay.yMax + 8f + rect.height <= bottom)
-            {
-                rect.y = overlay.yMax + 8f;
-                return rect;
-            }
-            if (overlay.y - 8f - rect.height >= top)
-            {
-                rect.y = overlay.y - 8f - rect.height;
-                return rect;
-            }
-            if (overlay.x - 8f - rect.width >= LeftPanelX)
-            {
-                rect.x = overlay.x - 8f - rect.width;
-                return rect;
-            }
-            if (overlay.xMax + 8f + rect.width <= ContentRight)
-            {
-                rect.x = overlay.xMax + 8f;
-                return rect;
-            }
-
-            // Last resort: keep the popup inside the safe band, accepting a clipped height.
-            rect.height = Mathf.Min(rect.height, bottom - top);
-            rect.y = Mathf.Clamp(rect.y, top, Mathf.Max(top, bottom - rect.height));
-            rect.x = Mathf.Clamp(rect.x, LeftPanelX, Mathf.Max(LeftPanelX, ContentRight - rect.width));
-            return rect;
-        }
-
-        /// <summary>
-        /// The selected city/army panel goes on the half of the screen away from its marker, so the
-        /// order controls never sit on top of the thing being ordered. If the marker cannot be resolved
-        /// (no camera / off-screen behind it), the safe fallback is the left column. Panels that share
-        /// the agent's horizontal band start below it and are height-capped; callers that still need
-        /// their full content use a scroll view. A tall panel must never slide back up under the panel.
-        /// </summary>
-        Rect PlaceSelectionPanel(float width, float height)
-        {
-            float x = SelectedMarkerOnLeftHalf() ? ContentRight - width : LeftPanelX;
-            float bottom = StatusBarY - 8f;
-            float y = PanelTop;
-            Rect overlay = ActiveOverlayPanel();
-
-            bool sharesOverlayBand = overlay.width > 0f
-                && x < overlay.xMax && x + width > overlay.x;
-            if (sharesOverlayBand)
-            {
-                y = overlay.yMax + 8f;
-                height = Mathf.Min(height, Mathf.Max(80f, bottom - y));
-            }
-            else if (y + height > bottom)
-            {
-                if (height <= bottom - PanelTop)
-                    y = bottom - height;
-                else
-                    height = bottom - PanelTop;
-            }
-            return new Rect(x, y, width, height);
-        }
-
-        bool SelectedMarkerOnLeftHalf()
-        {
-            var marker = SelectedMarkerObject();
-            var cam = Camera.main;
-            if (marker == null || cam == null) return false;
-
-            Vector3 screenPoint = cam.WorldToScreenPoint(marker.transform.position);
-            if (screenPoint.z <= 0f) return false;
-            float scale = Screen.width / DesignWidth;
-            return screenPoint.x / scale < DesignWidth * 0.5f;
-        }
-
-        GameObject SelectedMarkerObject()
-        {
-            if (selCity != null && cityObjs.TryGetValue(selCity.Id, out var cityMarker)) return cityMarker;
-            if (selArmy != null && armyObjs.TryGetValue(selArmy.Id, out var armyMarker)) return armyMarker;
-            return null;
-        }
-
         // ---------------------------------------------------------------- order labels
         /// <summary>English display name for a unit type. The engine keeps the Chinese design names.</summary>
         static string UnitTypeName(string type)
@@ -395,13 +318,14 @@ namespace LuanShi
         {
             string reason = uiInputLocked ? LockedReason() : blockedReason;
             bool available = reason == null;
-            string buttonText = $"{label} {OrderCostSuffix(type)}";
-            float wantedWidth = Mathf.Max(r.width, btn.CalcSize(new GUIContent(buttonText)).x + 16f);
-            r.width = Mathf.Min(wantedWidth, Mathf.Max(80f, ContentRight - r.x - 2f));
-
             GUIStyle style = available
                 ? btn
                 : (btn.fontSize <= 14 ? uiButtonDisabledSmall : uiButtonDisabled);
+            string buttonText = $"{label} {OrderCostSuffix(type)}";
+            float wantedWidth = Mathf.Max(r.width, style.CalcSize(new GUIContent(buttonText)).x + 16f);
+            r.width = Mathf.Min(wantedWidth, Mathf.Max(80f, ContentRight - r.x - 2f));
+            buttonText = EllipsizeToWidth(style, buttonText, r.width - 12f);
+
             var previous = GUI.enabled;
             GUI.enabled = available;
             if (GUI.Button(r, buttonText, style) && SubmitHuman(new ActionCommand

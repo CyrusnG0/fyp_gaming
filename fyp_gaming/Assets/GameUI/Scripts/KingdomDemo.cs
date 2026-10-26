@@ -1,10 +1,16 @@
 // KingdomDemo — the Unity adapter for the LuanShi strategic layer.
 // This file holds the class contract, serialized scene wiring and the shared UI state; the rest of
 // the class is split by responsibility into the partial files below (all compiled together):
-//   .Visuals.cs   scene markers, tinting, army banners, fog overlays
+//   .Visuals.cs   scene markers, tinting, fog overlays
+//   .Visuals.Banners.cs  army banner spawn, scale, stagger and idle bob
 //   .Input.cs     map clicks, selection, march targeting, debug hooks
 //   .TurnFlow.cs  SubmitHuman pipeline, seat rotation, season rollover
-//   .Panels.cs    OnGUI shell, map panels, order buttons
+//   .Panels.cs    OnGUI shell and shared helpers
+//   .PanelLayout.cs     side-dock and selection-panel placement
+//   .SelectionPanels.cs city/army order panels
+//   .Presentation.cs    observation-authorized labels, seams, framing, text fitting
+//   .AgentPanel.cs      docked LLM agent details
+//   .AgentStatus.cs     agent status helpers and play-mode lifecycle
 //   .Report.cs    court report, handover/victory screens, formatting helpers
 //   .Tabs.cs      Domestic / Diplomacy / Intel / Research / History tab panels
 
@@ -43,9 +49,7 @@ namespace LuanShi
         public int randomSeed = 12345;
 
         [Header("Fog of war")]
-        [Tooltip("Photo used to cover grid cells outside the current seat's vision. Defaults to Assets/GameUI/Art/fog.png.")]
-        public Texture2D fogPhoto;
-        public Color fogPhotoTint = Color.white;
+        [Tooltip("Height of the procedural, non-repeating fog shroud above each hex node.")]
         public float fogPhotoHeight = 0.08f;
 
         [Header("Seats (data-driven; the engine supports up to 8, AGENTS.md #6)")]
@@ -74,8 +78,6 @@ namespace LuanShi
         private static readonly Color PanelColor = new Color(0.12f, 0.12f, 0.14f, 1f);
         private static readonly Color NeutralColor = new Color(0.85f, 0.82f, 0.75f);
         private static readonly Vector3 FallbackMarkerScale = new Vector3(0.7f, 0.28f, 0.7f);
-        private const float ReportLineHeight = 20f;
-        private const float ReportTextMaxHeight = 300f;
         private const float HistorianLineHeight = 18f;
         private const float HistorianViewMaxHeight = 300f;
 
@@ -230,6 +232,7 @@ namespace LuanShi
             engine.CombatDebugLogger = message => Debug.Log(message);
             engine.State.Map = map;
             InitializeFogOverlays(nodes, w, h);
+            BuildGridSeamUnderlay();
 
             factionColors[SeatB] = new Color(0.8509804f, 0.3490196f, 0.1843137f, 1f); // Shu #D95947
             factionColors[SeatA] = new Color(0.3490196f, 0.5019608f, 0.8509804f, 1f); // Wei #5980D9
@@ -269,6 +272,7 @@ namespace LuanShi
             // mode there is no human chair; SpectatorSession opens every seat's gate itself.
             activeTurnToken = 0;
             ReleaseControlLock();
+            ApplyInitialCameraFraming();
 
             string roster = string.Join(", ", engine.State.Factions
                 .ConvertAll(f => $"{f.SeatId}={f.Controller}").ToArray());

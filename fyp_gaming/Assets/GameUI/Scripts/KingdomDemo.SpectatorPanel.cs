@@ -1,8 +1,9 @@
 // KingdomDemo (partial) — the researcher panel for the optional LLM-vs-LLM spectator pilot.
 //
-// It replaces the single-agent panel while spectatorMode is on. Everything here is display only:
-// the scoreboard reads canonical state for the human researcher and is NEVER handed to the runner,
-// a prompt or a model. The map above/below shows only the active seat's filtered observation.
+// It replaces the single-agent panel while spectatorMode is on and is docked on the right as a compact
+// side panel, leaving the centre of the map clear. Everything here is display only: the scoreboard
+// reads canonical state for the human researcher and is NEVER handed to the runner, a prompt or a
+// model. The map shows only the active seat's filtered observation (see KingdomDemo.Spectator.cs).
 
 using System;
 using System.Globalization;
@@ -13,7 +14,8 @@ namespace LuanShi
 {
     public partial class KingdomDemo : MonoBehaviour
     {
-        static Rect SpectatorPanelArea() => new Rect(460f, 70f, 700f, 430f);
+        static Rect SpectatorPanelArea()
+            => new Rect(SidePanelX, SidePanelY, SidePanelWidth, SpectatorPanelHeight);
 
         void DrawSpectatorPanel()
         {
@@ -22,63 +24,87 @@ namespace LuanShi
             DrawBackdrop(area, CurrentSeatAccent());
 
             SpectatorSession session = spectatorSession;
-            float x = area.x + 12f;
-            float width = area.width - 24f;
+            float x = area.x + PanelPadX;
+            float width = area.width - PanelPadX * 2f;
 
-            GUI.Label(new Rect(x, area.y + 4f, width, 24f),
-                "LLM vs LLM pilot - domestic management", uiPanelTitle);
+            GUI.Label(new Rect(area.x + PanelHeaderPadX, area.y + SpectatorTitleRowY,
+                               area.width - PanelHeaderPadX * 2f, 20f),
+                EllipsizeToWidth(uiPanelTitle, "LLM vs LLM pilot - domestic management",
+                                 area.width - PanelHeaderPadX * 2f), uiPanelTitle);
 
             string provider = agentTransport != null
                 ? agentTransport.Provider + "/" + agentTransport.Model
                 : agentConfig != null ? agentConfig.Provider + "/" + agentConfig.Model
                 : "not configured";
-            GUI.Label(new Rect(x, area.y + 27f, width, 16f),
-                (agentFakeMode ? "FAKE  " : "LIVE  ") + AgentShort(provider, 64), uiSmall);
+            provider = (agentFakeMode ? "FAKE  " : "LIVE  ") + provider;
+            GUI.Label(new Rect(x, area.y + SpectatorProviderRowY, width, 14f),
+                EllipsizeToWidth(uiSmall, provider, width), uiSmall);
 
             if (session == null)
             {
-                GUI.Label(new Rect(x, area.y + 44f, width, 18f),
-                    "Unavailable: " + (spectatorSetupError ?? "spectator has not started"), uiReason);
-                GUI.Label(new Rect(x, area.y + 66f, width, 18f),
-                    "Viewing " + ViewedFactionName() + "'s filtered observation", uiSmall);
+                GUI.Label(new Rect(x, area.y + SpectatorStateRowY, width, 16f),
+                    EllipsizeToWidth(uiReason, "Unavailable: " + (spectatorSetupError ?? "spectator has not started"), width),
+                    uiReason);
+                GUI.Label(new Rect(x, area.y + SpectatorContextRowY, width, 16f),
+                    "Viewing " + ViewedFactionNameFromObservation() + "'s filtered observation", uiSmall);
                 DrawSpectatorControls(area, null);
                 return;
             }
 
             string state = SpectatorStateName(session.State);
-            if (session.State == SpectatorState.Running) state += " " + AgentSpinner();
-            else if ((session.State == SpectatorState.Paused || session.State == SpectatorState.Failed)
-                     && !string.IsNullOrEmpty(session.PauseReason))
-                state += ": " + AgentShort(session.PauseReason, 72);
-            state += "  (" + SpectatorElapsed(session) + ")";
-            GUI.Label(new Rect(x, area.y + 44f, width, 18f), state, uiBody);
-
-            string active = string.IsNullOrEmpty(session.ActiveFactionName)
-                ? "-" : session.ActiveFactionName;
-            string activeSeat = session.ActiveSeatId;
-            string activeLabel = string.IsNullOrEmpty(activeSeat)
-                ? "" : " (" + SpectatorControllerLabel(activeSeat) + ")";
-            GUI.Label(new Rect(x, area.y + 62f, width, 18f),
-                "Season " + session.CurrentSeason + " of " + session.SeasonsPlanned
-                + "  -  Active: " + active + activeLabel, uiBody);
-            GUI.Label(new Rect(x, area.y + 80f, width, 16f),
-                "Viewing " + ViewedFactionName() + "'s filtered observation", uiSmall);
+            state += "  " + SpectatorElapsed(session);
+            GUI.Label(new Rect(x, area.y + SpectatorStateRowY, width, 16f),
+                EllipsizeToWidth(uiBody, state, width), uiBody);
 
             DrawSeasonPips(area, session);
+            DrawFactionColumns(area, x, width, session);
+            DrawSpectatorRecent(area, x, width, session);
+            DrawSpectatorControls(area, session);
+        }
 
+        /// <summary>
+        /// Two named, faction-coloured columns. The scoreboard comes from SpectatorSession, the
+        /// researcher-only aggregate; it is never given to a model. Each faction's last action and
+        /// decision wrap inside its own column.
+        /// </summary>
+        void DrawFactionColumns(Rect area, float x, float width, SpectatorSession session)
+        {
             int factions = Mathf.Min(2, engine.State.Factions.Count);
-            float columnWidth = (width - 12f) * 0.5f;
+            float columnWidth = (width - SpectatorColumnGap) * 0.5f;
+            var scores = session.Scoreboard();
+
             for (int i = 0; i < factions; i++)
             {
                 FactionState faction = engine.State.Factions[i];
-                float columnX = x + i * (columnWidth + 12f);
-                bool isActive = string.Equals(session.ActiveSeatId, faction.SeatId, StringComparison.Ordinal);
-                LlmTurnRunner runner = isActive ? session.Runner : null;
+                SpectatorScore score = scores.Find(s => s.SeatId == faction.SeatId);
+                float columnX = x + i * (columnWidth + SpectatorColumnGap);
+                Color color = factionColors.TryGetValue(faction.SeatId, out var factionColor)
+                    ? factionColor : Ink;
+
+                var previous = uiPanelTitle.normal.textColor;
+                uiPanelTitle.normal.textColor = color;
+                string name = faction.Name + " (" + SpectatorControllerLabel(faction.SeatId) + ")";
+                GUI.Label(new Rect(columnX, area.y + SpectatorColumnsRowY, columnWidth, 20f),
+                          EllipsizeToWidth(uiPanelTitle, name, columnWidth), uiPanelTitle);
+                uiPanelTitle.normal.textColor = previous;
+
+                var previousSmall = uiSmall.normal.textColor;
+                uiSmall.normal.textColor = color;
+                string[] lines =
+                {
+                    $"Gold {score?.Gold ?? 0}  -  Food {score?.Food ?? 0}",
+                    $"Population {score?.Population ?? 0}",
+                    $"Garrison {score?.Garrison ?? 0}",
+                };
+                for (int row = 0; row < lines.Length; row++)
+                    GUI.Label(new Rect(columnX, area.y + SpectatorScoreRowY + row * SpectatorScoreRowGap,
+                                       columnWidth, SpectatorRowHeight),
+                              EllipsizeToWidth(uiSmall, lines[row], columnWidth), uiSmall);
+                uiSmall.normal.textColor = previousSmall;
+
+                LlmTurnRunner runner = string.Equals(session.ActiveSeatId, faction.SeatId, StringComparison.Ordinal)
+                    ? session.Runner : null;
                 SpectatorTurnRecord record = LastRecordFor(session, faction.SeatId);
-
-                GUI.Label(new Rect(columnX, area.y + 104f, columnWidth, 20f),
-                    faction.Name + " (" + SpectatorControllerLabel(faction.SeatId) + ")", uiPanelTitle);
-
                 string commandJson = runner != null && !string.IsNullOrEmpty(runner.LastCommandJson)
                     ? runner.LastCommandJson : record?.LastCommandJson;
                 string result = runner != null && !string.IsNullOrEmpty(runner.LastResult)
@@ -90,30 +116,31 @@ namespace LuanShi
                 string target = SpectatorCommandField(commandJson, "target_id");
                 string action = string.IsNullOrEmpty(type) ? "-" : type
                     + (string.IsNullOrEmpty(target) ? "" : " " + target);
-                GUI.Label(new Rect(columnX, area.y + 128f, columnWidth, 15f),
-                    "Last: " + AgentShort(action, 46), uiSmall);
-                GUI.Label(new Rect(columnX, area.y + 144f, columnWidth, 15f),
-                    "Result: " + SpectatorResultLabel(result), uiSmall);
-                GUI.Label(new Rect(columnX, area.y + 160f, columnWidth, 15f),
-                    "Decision: " + AgentShort(summary, 70), uiSmall);
+                GUI.Label(new Rect(columnX, area.y + SpectatorLastRowY, columnWidth, SpectatorRowHeight),
+                          EllipsizeToWidth(uiSmall, "Last: " + action, columnWidth), uiSmall);
+                GUI.Label(new Rect(columnX, area.y + SpectatorResultRowY, columnWidth, SpectatorRowHeight),
+                          EllipsizeToWidth(uiSmall, "Result: " + SpectatorResultLabel(result), columnWidth), uiSmall);
+                float decisionHeight = Mathf.Max(SpectatorDecisionLineHeight, TextLineHeight(uiSmallWrap))
+                                       * SpectatorDecisionLines;
+                DrawWrappedClampedLabel(
+                    new Rect(columnX, area.y + SpectatorDecisionRowY, columnWidth, decisionHeight),
+                    "Decision: " + (string.IsNullOrEmpty(summary) ? "-" : summary),
+                    uiSmallWrap, SpectatorDecisionLines, summary);
             }
+        }
 
-            GUI.Label(new Rect(x, area.y + 182f, width, 15f), "Recent actions", uiSmall);
+        void DrawSpectatorRecent(Rect area, float x, float width, SpectatorSession session)
+        {
+            GUI.Label(new Rect(x, area.y + SpectatorRecentHeaderRowY, width, 14f), "Recent actions", uiSmall);
             var recent = session.RecentActions;
-            int firstRecent = Mathf.Max(0, recent.Count - 8);
+            int firstRecent = Mathf.Max(0, recent.Count - SpectatorRecentLines);
             for (int i = firstRecent; i < recent.Count; i++)
-                GUI.Label(new Rect(x, area.y + 198f + (i - firstRecent) * 13f, width, 13f),
-                    (agentFakeMode ? "FAKE  " : "") + AgentShort(recent[i], 104), uiMono);
-
-            GUI.Label(new Rect(x, area.y + 304f, width, 15f),
-                "Spectator scoreboard (researcher view, not shown to the models)", uiSmall);
-            var scores = session.Scoreboard();
-            for (int i = 0; i < scores.Count && i < 2; i++)
             {
-                SpectatorScore score = scores[i];
-                GUI.Label(new Rect(x, area.y + 320f + i * 15f, width, 15f),
-                    score.FactionName + ": Gold " + score.Gold + " | Food " + score.Food
-                    + " | Population " + score.Population + " | Garrison " + score.Garrison, uiSmall);
+                float rowY = area.y + SpectatorRecentFirstRowY
+                             + (i - firstRecent) * SpectatorRecentLineHeight;
+                string line = (agentFakeMode ? "FAKE  " : "") + recent[i];
+                GUI.Label(new Rect(x, rowY, width, SpectatorRecentLineHeight),
+                          EllipsizeToWidth(uiMono, line, width), uiMono);
             }
 
             int cap = agentConfig != null ? agentConfig.MaxTotalRequests : 0;
@@ -122,20 +149,21 @@ namespace LuanShi
                 ? session.TotalInputTokens.Value.ToString("N0", CultureInfo.InvariantCulture) + " in / "
                   + session.TotalOutputTokens.Value.ToString("N0", CultureInfo.InvariantCulture) + " out"
                 : "unknown";
-            string cost = session.CostUsd.HasValue
-                ? "$" + session.CostUsd.Value.ToString("0.######", CultureInfo.InvariantCulture)
-                : "unknown";
-            GUI.Label(new Rect(x, area.y + 354f, width, 16f),
-                "Requests " + session.TotalRequests + "/" + cap + "  -  tokens " + tokens
-                + "  -  cost " + cost, uiSmall);
+            string totals = $"Requests {session.TotalRequests}/{cap} | tokens {tokens}";
+            GUI.Label(new Rect(x, area.y + SpectatorRequestsRowY, width, SpectatorRowHeight),
+                      totals, uiSmall);
 
-            DrawSpectatorControls(area, session);
+            string cost = session.CostUsd.HasValue
+                ? "cost: $" + session.CostUsd.Value.ToString("0.######", CultureInfo.InvariantCulture)
+                : "cost: unknown (not reported by provider)";
+            GUI.Label(new Rect(x, area.y + SpectatorCostRowY, width, SpectatorRowHeight), cost, uiSmallWrap);
         }
 
         void DrawSpectatorControls(Rect area, SpectatorSession session)
         {
-            float x = area.x + 12f;
-            float y = area.y + 374f;
+            float x = area.x + PanelPadX;
+            float width = area.width - PanelPadX * 2f;
+            float y = area.y + SpectatorControlsRowY;
             int cap = agentConfig != null ? agentConfig.MaxTotalRequests : 0;
             int requests = session != null ? session.TotalRequests : 0;
             bool running = session != null && session.State == SpectatorState.Running;
@@ -143,13 +171,19 @@ namespace LuanShi
             bool canExtend = session != null && session.State != SpectatorState.Failed
                 && cap - requests >= 12 && engine.State.WinnerSeatId == null;
 
-            SpectatorButton(new Rect(x, y, 150f, 28f), "Stop", running, StopSpectator);
-            SpectatorButton(new Rect(x + 162f, y, 150f, 28f), "Resume", paused, ResumeSpectator);
-            SpectatorButton(new Rect(x + 324f, y, 150f, 28f), "+3 seasons", canExtend,
-                () => ExtendSpectator(3));
+            float buttonWidth = (width - SpectatorButtonGap * 2f) / 3f;
+            SpectatorButton(new Rect(x, y, buttonWidth, SpectatorButtonHeight), "Stop", running, StopSpectator);
+            SpectatorButton(new Rect(x + buttonWidth + SpectatorButtonGap, y, buttonWidth, SpectatorButtonHeight),
+                            "Resume", paused, ResumeSpectator);
+            SpectatorButton(new Rect(x + (buttonWidth + SpectatorButtonGap) * 2f, y, buttonWidth, SpectatorButtonHeight),
+                            "+3 seasons", canExtend, () => ExtendSpectator(3));
 
-            GUI.Label(new Rect(x, y + 30f, area.width - 24f, 14f),
-                "summary: " + (string.IsNullOrEmpty(spectatorSummaryPath) ? "-" : spectatorSummaryPath), uiMono);
+            string saved = string.IsNullOrEmpty(spectatorSummaryPath)
+                ? "Run record: not saved"
+                : spectatorSummaryPath.StartsWith("runs/", StringComparison.Ordinal)
+                    ? "Run record saved" : "Run record could not be saved";
+            DrawFittedLabel(new Rect(x, area.y + SpectatorSummaryRowY, width, 14f),
+                            EllipsizeToWidth(uiMono, saved, width), uiMono, spectatorSummaryPath);
         }
 
         void DrawSpectatorTurnControl()
@@ -163,13 +197,17 @@ namespace LuanShi
             }
             else if (session != null && session.State == SpectatorState.Paused)
             {
-                if (GUI.Button(rect, "Resume pilot", uiButton)) ResumeSpectator();
+                if (GUI.Button(rect, "Resume", uiButton)) ResumeSpectator();
             }
             else
             {
                 var previous = GUI.enabled;
                 GUI.enabled = false;
-                GUI.Button(rect, session == null ? "Spectator" : "Pilot " + session.State, uiButtonDisabled);
+                string label = session == null ? "Spectator"
+                    : session.State == SpectatorState.Completed ? "Pilot completed"
+                    : session.State == SpectatorState.Failed ? "Pilot failed"
+                    : "Pilot starting";
+                GUI.Button(rect, label, uiButtonDisabled);
                 GUI.enabled = previous;
             }
         }
@@ -179,30 +217,32 @@ namespace LuanShi
             int planned = Mathf.Min(session.SeasonsPlanned, 12);
             for (int i = 0; i < planned; i++)
             {
-                var pip = new Rect(area.x + 12f + i * 22f, area.y + 99f, 18f, 6f);
+                var pip = new Rect(area.x + PanelPadX + i * SpectatorPipWidth,
+                                   area.y + SpectatorPipsRowY, 18f, SpectatorPipHeight);
                 bool played = i < session.SeasonsPlayed;
                 bool current = !played && i == session.SeasonsPlayed
                     && session.State != SpectatorState.Completed;
                 FillRect(pip, played ? AccentGold : current ? TabSelected : ButtonDisabled);
             }
+
+            float pipsEnd = area.x + PanelPadX + planned * SpectatorPipWidth;
             if (session.SeasonsPlanned > 12)
-                GUI.Label(new Rect(area.x + 12f + 12 * 22f, area.y + 94f, 80f, 14f),
+            {
+                GUI.Label(new Rect(pipsEnd, area.y + SpectatorPipsRowY - 5f, 30f, 14f),
                     "+" + (session.SeasonsPlanned - 12), uiSmall);
+                pipsEnd += 30f;
+            }
+
+            string caption = $"Season {session.CurrentSeason} of {session.SeasonsPlanned}";
+            float captionX = pipsEnd + 6f;
+            float captionWidth = Mathf.Max(0f, area.x + area.width - PanelPadX - captionX);
+            GUI.Label(new Rect(captionX, area.y + SpectatorPipsRowY - 5f, captionWidth, 14f),
+                EllipsizeToWidth(uiSmall, caption, captionWidth), uiSmall);
         }
 
         void SpectatorButton(Rect rect, string label, bool enabled, Action action)
         {
-            var previous = GUI.enabled;
-            GUI.enabled = enabled;
-            if (GUI.Button(rect, label, enabled ? uiButton : uiButtonDisabledSmall)) action?.Invoke();
-            GUI.enabled = previous;
-        }
-
-        string ViewedFactionName()
-        {
-            if (engine == null || string.IsNullOrEmpty(currentSeat)) return "-";
-            FactionState faction = engine.State.FindFaction(currentSeat);
-            return faction != null && !string.IsNullOrEmpty(faction.Name) ? faction.Name : currentSeat;
+            if (GUI.Button(rect, label, enabled ? uiButton : uiButtonDisabledSmall) && enabled) action?.Invoke();
         }
 
         string SpectatorControllerLabel(string seatId)
@@ -229,7 +269,7 @@ namespace LuanShi
             DateTime end = session.EndedUtc ?? DateTime.UtcNow;
             double seconds = (end - session.StartedUtc).TotalSeconds;
             if (seconds < 0) seconds = 0;
-            return seconds.ToString("0.0", CultureInfo.InvariantCulture) + "s";
+            return Math.Round(seconds).ToString("0", CultureInfo.InvariantCulture) + "s";
         }
 
         static SpectatorTurnRecord LastRecordFor(SpectatorSession session, string seatId)

@@ -1,48 +1,40 @@
-// KingdomDemo (partial) — world-space fog overlays and the selection/fog consistency pass.
+// KingdomDemo (partial) — world-space fog shroud and the selection/fog consistency pass.
 //
-// The overlay colour is calculated at runtime. The serialized fogPhotoTint is still the scene's
-// starting point, but a white/opaque photo is dimmed and greyed here so unseen terrain stays legible
-// while still reading as "outside our sight".
+// V1 presentation change: the per-cell cloud photo was replaced by one cached, procedurally generated
+// flat-hex sprite. The visible/hidden cell set is still exactly engine.InSight(currentSeat, x, z), so
+// nothing about what the fog conceals changes. Only the drawing changed: a cool grey-blue uniform
+// wash, with cells on the sight boundary a touch darker, and soft edges instead of a repeated pattern.
 
-using System.IO;
 using UnityEngine;
 
 namespace LuanShi
 {
     public partial class KingdomDemo : MonoBehaviour
     {
+        private Sprite fogShroudSprite;
+        private Texture2D fogShroudTexture;
+
         void InitializeFogOverlays(TBTK.Node[,] nodes, int width, int height)
         {
-#if UNITY_EDITOR
-            if (fogPhoto == null)
-                fogPhoto = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/GameUI/Art/fog.png");
-            if (fogPhoto == null)
+            if (fogShroudSprite == null) fogShroudSprite = CreateFogShroudSprite();
+            if (fogShroudSprite == null)
             {
-                string fogPath = Path.Combine(Application.dataPath, "GameUI/Art/fog.png");
-                if (File.Exists(fogPath))
-                {
-                    fogPhoto = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                    fogPhoto.name = "fog_runtime";
-                    if (!fogPhoto.LoadImage(File.ReadAllBytes(fogPath), false))
-                        fogPhoto = null;
-                }
-            }
-#endif
-            if (fogPhoto == null)
-            {
-                Debug.LogWarning("[KingdomDemo] Fog photo is not assigned; grid fog overlays are disabled.");
+                Debug.LogWarning("[KingdomDemo] Fog shroud sprite could not be created; fog overlays are disabled.");
                 return;
             }
 
             var root = new GameObject("FogOfWarOverlays");
             fogOverlayRoot = root.transform;
-            var fogSprite = Sprite.Create(fogPhoto, new Rect(0f, 0f, fogPhoto.width, fogPhoto.height),
-                                          new Vector2(0.5f, 0.5f), 100f);
 
+            // TBTK hexes are flat-top and arranged in columns: a cell is GetNodeSize() wide and
+            // spaceZHex * GetNodeSize() deep, with even columns offset by half a cell in Z. Matching
+            // that footprint (plus a small overlap) tiles the shroud without a repeat pattern.
             float nodeSize = TBTK.GridManager.GetNodeSize();
-            float spriteSize = Mathf.Max(fogSprite.bounds.size.x, fogSprite.bounds.size.y);
-            float overlayScale = spriteSize > 0f ? nodeSize * 1.08f / spriteSize : 1f;
-            Color overlayColor = RuntimeFogColor();
+            float cellWidth = nodeSize * FogShroudOverlap;
+            float cellDepth = TBTK.GridGenerator.spaceZHex * nodeSize * FogShroudOverlap;
+            Vector3 spriteSize = fogShroudSprite.bounds.size;
+            float scaleX = spriteSize.x > 0f ? cellWidth / spriteSize.x : 1f;
+            float scaleY = spriteSize.y > 0f ? cellDepth / spriteSize.y : 1f;
 
             for (int x = 0; x < width; x++)
                 for (int z = 0; z < height; z++)
@@ -54,28 +46,79 @@ namespace LuanShi
                     overlay.transform.SetParent(fogOverlayRoot, true);
                     overlay.transform.position = node.GetPos() + Vector3.up * fogPhotoHeight;
                     overlay.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-                    overlay.transform.localScale = Vector3.one * overlayScale;
+                    overlay.transform.localScale = new Vector3(scaleX, scaleY, 1f);
 
                     var renderer = overlay.AddComponent<SpriteRenderer>();
-                    renderer.sprite = fogSprite;
-                    renderer.color = overlayColor;
-                    renderer.sortingOrder = 100;
+                    renderer.sprite = fogShroudSprite;
+                    renderer.color = RuntimeFogColor();
+                    renderer.sortingOrder = FogShroudSortingOrder;
                     renderer.enabled = false;
                     fogOverlays.Add(renderer);
                 }
 
-            Debug.Log("[KingdomDemo] Created " + fogOverlays.Count + " dimmed fog overlays from " + fogPhoto.name + ".");
+            Debug.Log("[KingdomDemo] Created " + fogOverlays.Count + " flat procedural fog cells.");
         }
 
         /// <summary>
-        /// White clouds used to cover whole provinces. Keep the photo's alpha and hue intent, but mix in
-        /// a cool grey and halve opacity so terrain, city silhouettes and destination highlights remain
-        /// readable through the fog.
+        /// A flat, white alpha mask for one flat-top hex (pointy left/right, flat top/bottom). The
+        /// interior is fully opaque (the renderer tint supplies the cool grey-blue and the requested
+        /// ~0.50 alpha); only a few rim pixels fade. There is deliberately no noise or cloud pattern.
         /// </summary>
+        Sprite CreateFogShroudSprite()
+        {
+            if (fogShroudTexture != null) return fogShroudSprite;
+
+            int width = FogShroudTextureWidth;
+            int height = FogShroudTextureHeight;
+            float halfW = width * 0.5f;
+            float halfH = height * 0.5f;
+            float slant = Mathf.Sqrt(3f);                 // slope of the left/right hex edges
+            float slantTerm = slant * halfW * 0.5f;       // == halfH for an exact hex
+            var pixels = new Color32[width * height];
+            var clear = new Color32(255, 255, 255, 0);
+            var solid = new Color32(255, 255, 255, 255);
+
+            for (int y = 0; y < height; y++)
+            {
+                float py = Mathf.Abs(y + 0.5f - halfH);
+                for (int x = 0; x < width; x++)
+                {
+                    float px = Mathf.Abs(x + 0.5f - halfW);
+                    // Distance (in pixels) to the nearest edge. The flat top/bottom edge applies in
+                    // the central half of the texture; the slanted edges close the side points.
+                    float margin = px <= halfW * 0.5f
+                        ? Mathf.Min(halfH - py, (halfH + slantTerm - slant * px - py) * 0.5f)
+                        : (halfH + slantTerm - slant * px - py) * 0.5f;
+                    float alpha = Mathf.Clamp01(margin / FogShroudSoftEdgePixels);
+                    pixels[y * width + x] = alpha >= 0.999f ? solid
+                        : new Color32(255, 255, 255, (byte)Mathf.RoundToInt(alpha * 255f));
+                }
+            }
+
+            fogShroudTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
+            {
+                name = "KingdomDemo_FogShroud",
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            fogShroudTexture.SetPixels32(pixels);
+            fogShroudTexture.Apply();
+            return Sprite.Create(fogShroudTexture, new Rect(0f, 0f, width, height),
+                                 new Vector2(0.5f, 0.5f), 100f);
+        }
+
         Color RuntimeFogColor()
         {
-            Color color = Color.Lerp(fogPhotoTint, FogOverlayGrey, FogOverlayGreyMix);
-            color.a = fogPhotoTint.a * FogOverlayAlpha;
+            var color = FogShroudBaseColor;
+            color.a = FogShroudBaseAlpha;
+            return color;
+        }
+
+        Color RuntimeFogBoundaryColor()
+        {
+            var color = FogShroudBoundaryColor;
+            color.a = FogShroudBoundaryAlpha;
             return color;
         }
 
@@ -91,9 +134,29 @@ namespace LuanShi
                 {
                     var node = TBTK.GridManager.GetNode(x, z);
                     if (node == null) continue;
+                    if (index >= fogOverlays.Count) return;
 
-                    fogOverlays[index].enabled = !engine.InSight(currentSeat, x, z);
-                    index++;
+                    bool hidden = !engine.InSight(currentSeat, x, z);
+                    var overlay = fogOverlays[index++];
+                    overlay.enabled = hidden;
+                    if (!hidden) continue;
+
+                    // Boundary presentation only: the same InSight rule decides every neighbour.
+                    bool onSightEdge = false;
+                    var neighbors = engine.State.Map.Neighbors;
+                    int mapIndex = engine.State.Map.Index(x, z);
+                    if (neighbors != null && mapIndex >= 0 && mapIndex < neighbors.Length)
+                    {
+                        var adjacent = neighbors[mapIndex];
+                        if (adjacent != null)
+                            foreach (int n in adjacent)
+                            {
+                                int nx = n % width;
+                                int nz = n / width;
+                                if (engine.InSight(currentSeat, nx, nz)) { onSightEdge = true; break; }
+                            }
+                    }
+                    overlay.color = onSightEdge ? RuntimeFogBoundaryColor() : RuntimeFogColor();
                 }
         }
 

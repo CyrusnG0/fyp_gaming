@@ -195,35 +195,42 @@ namespace LuanShi
 
         void DrawReport(GUIStyle body, GUIStyle btn, GUIStyle title)
         {
-            // the panel hugs its lines (capped at the old 420-tall size) instead of a fixed 800×420,
-            // and scrolls when a season was busier than the cap
-            int lines = System.Math.Max(1, reportLines.Count - 1);
-            float textHeight = System.Math.Min(ReportTextMaxHeight, lines * ReportLineHeight);
-            var p = new Rect(400, 150, 800, 116f + textHeight);
-            uiRects.Add(p);
-            DrawBackdrop(p, CurrentSeatAccent());
-            GUI.Label(new Rect(p.x + 20, p.y + 12, 760, 30), reportLines.Count > 0 ? reportLines[0] : "", title);
-
+            // The panel hugs its wrapped text (capped) instead of a fixed 800x420 box, and scrolls when
+            // a busy season exceeds the cap. Every line wraps inside ReportBodyWidth.
             var sb = new StringBuilder();
             for (int i = 1; i < reportLines.Count; i++) sb.AppendLine(reportLines[i]);
+            string reportBody = sb.ToString();
+            float contentHeight = uiBodyWrap.CalcHeight(new GUIContent(reportBody), ReportBodyWidth) + 4f;
+            float textHeight = Mathf.Min(ReportTextMaxHeight, Mathf.Max(20f, contentHeight));
 
-            var view = new Rect(p.x + 20, p.y + 50, 760, textHeight);
+            var p = new Rect(ReportPanelX, ReportPanelY, ReportPanelWidth,
+                             ReportPanelBaseHeight + textHeight);
+            uiRects.Add(p);
+            DrawBackdrop(p, CurrentSeatAccent());
+            string reportTitle = reportLines.Count > 0 ? reportLines[0] : "";
+            GUI.Label(new Rect(p.x + 20, p.y + 12, ReportTitleWidth, 30),
+                      EllipsizeToWidth(title, reportTitle, ReportTitleWidth), title);
+
+            var view = new Rect(p.x + 20, p.y + 50, ReportTitleWidth, textHeight);
             // scroll only when the cap actually bites, and without a permanently visible scrollbar
-            if (lines * ReportLineHeight > textHeight)
+            if (contentHeight > textHeight + 0.5f)
             {
-                float contentHeight = lines * ReportLineHeight + 4f;
                 TryWheelScroll(p, view, contentHeight, ref reportScroll);
                 reportScroll = GUI.BeginScrollView(view, reportScroll,
-                                                   new Rect(0, 0, 744, contentHeight), false, false);
-                GUI.Label(new Rect(0, 0, 736, contentHeight), sb.ToString(), body);
+                                                   new Rect(0, 0, ReportBodyWidth, contentHeight), false, false);
+                GUI.Label(new Rect(0, 0, ReportBodyWidth, contentHeight), reportBody, uiBodyWrap);
                 GUI.EndScrollView();
             }
             else
             {
-                GUI.Label(new Rect(view.x, view.y, 760, textHeight + 8f), sb.ToString(), body);
+                GUI.Label(new Rect(view.x, view.y, ReportTitleWidth, Mathf.Max(textHeight, contentHeight) + 8f),
+                          reportBody, uiBodyWrap);
             }
 
-            if (GUI.Button(new Rect(p.x + 330, p.y + 50 + textHeight + 14, 140, 40), "Continue", btn)) CloseReport();
+            float continueX = p.x + (ReportPanelWidth - ReportContinueWidth) * 0.5f;
+            if (GUI.Button(new Rect(continueX, p.y + 50 + textHeight + 14,
+                                    ReportContinueWidth, ReportContinueHeight), "Continue", btn))
+                CloseReport();
         }
 
         static string TreatyLabel(string type)
