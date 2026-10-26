@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- LS-015 W6: one staged real-provider turn for a manual capability probe.
+       Pure C# like the harness: the engine sources are compiled directly, no Unity types.
+       Its own Compile item is local-only, so Tests/Harness/EngineHarness.csproj (which uses
+       "*.cs" of its own folder) never picks up Program.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.LiveCapture</AssemblyName>
+    <RootNamespace>LuanShi.LiveCapture</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+  </ItemGroup>
+
+</Project>
