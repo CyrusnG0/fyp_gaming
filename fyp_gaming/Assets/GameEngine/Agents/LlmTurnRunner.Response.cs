@@ -122,6 +122,8 @@ namespace LuanShi.Engine
             {
                 LastResult = "end_turn";
                 LastCommandJson = "{\"type\":\"end_turn\"}";
+                StoreMemory(LlmMemoryExtractor.FromSummary(_gameId, _seatId, flight.Season,
+                    action.Summary ?? action.Reason));
                 AddActivity("result", "Turn ended by model.");
                 EndReason = EndReason.ModelEndedTurn;
                 FinishTerminal(RunnerState.Finished, "end_turn");
@@ -161,6 +163,10 @@ namespace LuanShi.Engine
                 AddHistory(HistoryLine(action, "rejected: " + resultError));
                 Status = "order rejected; continuing";
             }
+            StoreMemory(LlmMemoryExtractor.FromAction(_gameId, _seatId, flight.Season,
+                action, accepted, resultError));
+            StoreMemory(LlmMemoryExtractor.FromSummary(_gameId, _seatId, flight.Season,
+                action.Summary ?? action.Reason));
             AddActivity("result", accepted ? "Accepted by engine." : "Rejected: " + LastResult);
 
             if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
@@ -168,6 +174,7 @@ namespace LuanShi.Engine
                 FinishLimit("invalid-response limit reached", EndReason.InvalidResponseLimit);
                 WriteRecord(flight, response, true, commandJson, resultOk, resultError);
             }
+
             else if (ActionsThisTurn >= _config.MaxActionsPerTurn)
             {
                 FinishLimit("action limit reached", EndReason.ActionLimit);
@@ -179,6 +186,13 @@ namespace LuanShi.Engine
                 WriteRecord(flight, response, true, commandJson, resultOk, resultError);
                 StartRequest();
             }
+        }
+
+        private void StoreMemory(LlmMemory memory)
+        {
+            if (memory == null || _memoryStore == null) return;
+            if (_memories.Exists(existing => existing.Id == memory.Id)) return;
+            if (_memoryStore.Append(memory)) _memories.Add(memory);
         }
 
         private static string ActivityCommandText(LlmAction action)

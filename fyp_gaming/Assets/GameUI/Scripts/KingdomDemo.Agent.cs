@@ -119,6 +119,7 @@ namespace LuanShi
             {
                 string runsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "runs"));
                 agentRecorder = new LlmRunRecorder(runsDir);
+                var agentMemoryStore = new LocalLlmMemoryStore(Path.Combine(runsDir, "memory"));
                 if (useFakeLlm)
                 {
                     agentFake = new FakeLlmTransport();
@@ -137,7 +138,7 @@ namespace LuanShi
                     agentTransport = new OpenAiChatTransport(agentConfig);
                     agentUnavailableReason = null;
                 }
-                agentRunner = new LlmTurnRunner(agentTransport, agentConfig, agentRecorder);
+                agentRunner = new LlmTurnRunner(agentTransport, agentConfig, agentRecorder, agentMemoryStore);
                 agentRecorderShort = "runs/" + Path.GetFileName(agentRecorder.FilePath);
             }
             catch (Exception)

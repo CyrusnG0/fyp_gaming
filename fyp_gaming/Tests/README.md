@@ -85,6 +85,21 @@ Adding coverage: put feature tests in a new `Harness.<Feature>.cs` partial and c
 after the recovered sections, so historical output stays a stable prefix. Name new assertions so they
 cannot be mistaken for recovered ones.
 
+## LLM memory MVP
+
+The LLM runner supports game-scoped, seat-private memory through `LocalLlmMemoryStore`. It writes
+bounded JSONL records under `runs/memory/` and extracts deterministic facts/lessons from engine
+action results plus bounded decision summaries from the model. Records are keyed by game id and seat
+id, so a new runner can reload the same game's memory without sharing it with another seat or game.
+Memory retrieval and relevance ranking are intentionally deferred to a later phase; the current
+memory list is exposed by `LlmTurnRunner.Memories` for that integration.
+Before prompt construction, the runner now ranks matching memories by action/target relevance,
+importance, confidence, and recency, then applies a 3,000-character budget. Retrieved records are
+rendered as untrusted data and are rejected when their game or seat does not match the observation.
+At a new season boundary, the runner compacts the store: expired records are removed, exact
+duplicates are merged, the store is capped at 100 records, and conflicting action outcomes retain
+supersession metadata so the newer outcome wins retrieval without erasing provenance.
+
 ## Version control
 
 `fyp_gaming/.gitignore` ignores `*.csproj`/`*.sln` because Unity regenerates those files. The two

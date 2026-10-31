@@ -926,6 +926,7 @@ namespace LuanShi.Engine
 
             var obs = new Observation
             {
+                GameId = State.GameId,
                 SeatId = fac.SeatId,
                 Season = State.Season,
                 SeasonName = BalanceConfig.SeasonName(State.Season),
