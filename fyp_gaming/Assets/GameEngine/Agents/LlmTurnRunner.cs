@@ -43,6 +43,7 @@ namespace LuanShi.Engine
         private readonly ILlmTransport _transport;
         private readonly LlmConfig _config;
         private readonly ILlmRunRecorder _recorder;
+        private readonly ILlmMemoryStore _memoryStore;
         private readonly string _runId;
         private readonly string _schemaHash;
 
@@ -70,6 +71,9 @@ namespace LuanShi.Engine
         private double _cost;
         private long? _totalInput;
         private long? _totalOutput;
+        private string _gameId;
+        private int _memorySeason = -1;
+        private readonly List<LlmMemory> _memories = new List<LlmMemory>();
 
         public RunnerState State { get; private set; } = RunnerState.Idle;
         public string Status { get; private set; } = "idle";
@@ -91,12 +95,15 @@ namespace LuanShi.Engine
 
         /// <summary>The current seat's bounded feedback list; never another seat's history.</summary>
         public IReadOnlyList<string> RecentHistory => _history;
+        public IReadOnlyList<LlmMemory> Memories => _memories.AsReadOnly();
 
-        public LlmTurnRunner(ILlmTransport transport, LlmConfig config, ILlmRunRecorder recorder)
+        public LlmTurnRunner(ILlmTransport transport, LlmConfig config, ILlmRunRecorder recorder,
+            ILlmMemoryStore memoryStore = null)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _config = config ?? new LlmConfig();
             _recorder = recorder;
+            _memoryStore = memoryStore;
             _runId = "run-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "-"
                    + Guid.NewGuid().ToString("N").Substring(0, 8);
             _schemaHash = PromptBuilder.SchemaHash();
@@ -118,6 +125,9 @@ namespace LuanShi.Engine
             _seed = seed;
             _season = 0;
             _factionName = null;
+            _gameId = null;
+            _memorySeason = -1;
+            _memories.Clear();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
             // seats must not leak either seat's action feedback into the other's prompt. A seed
             // change starts a genuinely new session and clears every seat.
@@ -165,6 +175,9 @@ namespace LuanShi.Engine
             _activity.Clear();
             _history = new List<string>();
             _historySeed = null;
+            _gameId = null;
+            _memorySeason = -1;
+            _memories.Clear();
             RequestsThisTurn = 0;
             ActionsThisTurn = 0;
             InvalidThisTurn = 0;
@@ -247,14 +260,32 @@ namespace LuanShi.Engine
             if (!string.Equals(observation.SeatId, _seatId, StringComparison.Ordinal))
             { FinishFailed("observation seat mismatch", EndReason.HostError); return; }
             _season = observation.Season;
+            bool newGame = !string.Equals(_gameId, observation.GameId, StringComparison.Ordinal);
+            bool seasonBoundary = !newGame && observation.Season > _memorySeason;
+            if (newGame || seasonBoundary)
+            {
+                _gameId = observation.GameId;
+                _memories.Clear();
+                if (_memoryStore != null && !string.IsNullOrEmpty(_gameId))
+                {
+                    _memoryStore.Consolidate(_gameId, _seatId, observation.Season,
+                        LlmMemoryLifecycle.DefaultRetentionSeasons,
+                        LlmMemoryLifecycle.DefaultMaxItems);
+                    _memories.AddRange(_memoryStore.Load(_gameId, _seatId));
+                }
+                _memorySeason = observation.Season;
+            }
             // Chat attribution comes from the seat-filtered observation, never canonical state.
             _factionName = observation.Faction(_seatId)?.Name;
 
             // The prompt carries a bounded event history; record exactly that same JSON, not the full one.
             string observationJson = PromptBuilder.BoundedObservationJson(observation);
             string system = PromptBuilder.SystemPrompt();
-            string user = PromptBuilder.UserPrompt(observation, ActionCatalogue.Build(observation),
-                _history, RemainingRequests(), RemainingActions());
+            List<ActionOption> options = ActionCatalogue.Build(observation);
+            IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
+                _memories, observation, options);
+            string user = PromptBuilder.UserPrompt(observation, options,
+                _history, RemainingRequests(), RemainingActions(), relevantMemories);
             if (system.Length + user.Length > MaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 

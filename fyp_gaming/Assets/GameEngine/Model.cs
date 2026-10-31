@@ -653,6 +653,7 @@ namespace LuanShi.Engine
     /// </summary>
     public sealed class Observation
     {
+        public string GameId;
         public string SeatId;
         public int Season;
         public string SeasonName;        // 春/夏/秋/冬 in English (design §3)
@@ -708,7 +709,8 @@ namespace LuanShi.Engine
             foreach (var e in Events) events.Add(e.ToJson());
 
             var sb = new StringBuilder(640);
-            sb.Append("{\"seat_id\":").Append(MiniJson.Str(SeatId));
+            sb.Append("{\"game_id\":").Append(MiniJson.Str(GameId));
+            sb.Append(",\"seat_id\":").Append(MiniJson.Str(SeatId));
             sb.Append(",\"season\":").Append(MiniJson.Num(Season));
             sb.Append(",\"season_name\":").Append(MiniJson.Str(SeasonName));
             sb.Append(",\"phase\":").Append(MiniJson.Str(Phase));
