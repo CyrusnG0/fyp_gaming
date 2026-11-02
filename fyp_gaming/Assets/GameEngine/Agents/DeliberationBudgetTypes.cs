@@ -107,6 +107,7 @@ namespace LuanShi.Engine
         InvalidUsage,
         UnknownReservation,
         AlreadySettled,
+        AlreadyDispatched,
         AccountingOverflow,
     }
 
@@ -150,6 +151,7 @@ namespace LuanShi.Engine
                 case DeliberationDenyReason.InvalidUsage: return "invalid_usage";
                 case DeliberationDenyReason.UnknownReservation: return "unknown_reservation";
                 case DeliberationDenyReason.AlreadySettled: return "already_settled";
+                case DeliberationDenyReason.AlreadyDispatched: return "already_dispatched";
                 case DeliberationDenyReason.AccountingOverflow: return "accounting_overflow";
                 default: return "unknown_reason";
             }
@@ -186,6 +188,8 @@ namespace LuanShi.Engine
                 case DeliberationDenyReason.InvalidUsage: return "The settlement contains negative or missing values.";
                 case DeliberationDenyReason.UnknownReservation: return "No reservation with this identity exists.";
                 case DeliberationDenyReason.AlreadySettled: return "This reservation was already settled or released.";
+                case DeliberationDenyReason.AlreadyDispatched:
+                    return "This reservation was already dispatched; dispatch is a one-time permission gate.";
                 case DeliberationDenyReason.AccountingOverflow:
                     return "The ledger counters cannot represent this usage safely, so admission is halted.";
                 default: return "Unknown reason.";

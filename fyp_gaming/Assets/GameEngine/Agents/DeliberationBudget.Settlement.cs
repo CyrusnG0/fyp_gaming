@@ -9,9 +9,13 @@ namespace LuanShi.Engine
     public sealed partial class DeliberationBudgetLedger
     {
         /// <summary>
-        /// Record that the admitted work was handed to the provider (or tool). Only an undispatched
-        /// reservation can be released by <see cref="Cancel"/>; after this call the reservation's upper
-        /// bound counts even if the call is cancelled or times out.
+        /// Atomically grant the one-time permission to hand an admission to the provider (or tool).
+        /// <c>Ok</c> is the host's authority to dispatch; a denial means no work may be sent. Dispatch is
+        /// refused for an unknown or finalized reservation, a duplicate dispatch, a reservation whose
+        /// (seat, turn) bucket is no longer bound, a halted ledger, an unusable monotonic clock, or an
+        /// admission held past the turn/session wall-time window. Every denial leaves counters and holds
+        /// untouched, so the host can still <see cref="Cancel"/> an undispatched reservation. Only
+        /// <see cref="Cancel"/> releases a hold; a denial never does so implicitly.
         /// </summary>
         public DeliberationBindingResult MarkDispatched(string reservationId)
         {
@@ -24,6 +28,37 @@ namespace LuanShi.Engine
                 if (reservation.Finalized)
                     return Binding(false, DeliberationDenyReason.AlreadySettled,
                         DeliberationBudgetReasons.Message(DeliberationDenyReason.AlreadySettled));
+                if (reservation.Dispatched)
+                    return Binding(false, DeliberationDenyReason.AlreadyDispatched,
+                        DeliberationBudgetReasons.Message(DeliberationDenyReason.AlreadyDispatched));
+
+                if (_turn == null || reservation.SeatId == null
+                    || !string.Equals(reservation.SeatId, _turn.SeatId, StringComparison.Ordinal)
+                    || reservation.TurnToken != _turn.TurnToken
+                    || !ReferenceEquals(reservation.TurnCounters, _turn.Counters))
+                    return Binding(false, DeliberationDenyReason.StaleTurn,
+                        "The reservation does not belong to the currently bound seat/turn; dispatch is "
+                        + "refused. Cancel it to release its undispatched holds.");
+
+                if (_blocked)
+                    return Binding(false, _blockReason, _blockMessage);
+
+                long now;
+                if (!TryReadClock(out now))
+                    return Binding(false, DeliberationDenyReason.ClockInvalid, _blockMessage);
+
+                long turnElapsed = now - _turn.StartMillis;
+                if (DeliberationBudgetLimits.IsEnforced(_limits.MaxWallMillisPerTurn)
+                    && turnElapsed >= _limits.MaxWallMillisPerTurn)
+                    return Binding(false, DeliberationDenyReason.TurnWallTimeExhausted,
+                        "The admission expired before dispatch: the per-turn wall-time budget is "
+                        + "exhausted. Cancel it to release its undispatched holds.");
+                long sessionElapsed = now - _sessionStartMillis;
+                if (DeliberationBudgetLimits.IsEnforced(_limits.MaxWallMillisPerSession)
+                    && sessionElapsed >= _limits.MaxWallMillisPerSession)
+                    return Binding(false, DeliberationDenyReason.SessionWallTimeExhausted,
+                        "The admission expired before dispatch: the session wall-time budget is "
+                        + "exhausted. Cancel it to release its undispatched holds.");
 
                 reservation.Dispatched = true;
                 return Binding(true, DeliberationDenyReason.None, "dispatched");
@@ -76,7 +111,11 @@ namespace LuanShi.Engine
                                    || (knownOutput && reservation.OutputBounded
                                        && chargeOutput > reservation.ReservedOutputTokens));
                 bool usageUnknown = tokenBearing && (!knownInput || !knownOutput);
-                bool appliedToTurn = ReferenceEquals(reservation.TurnCounters, _turn);
+                // Both sides must be the same bucket's Counters. The current bucket's identity is
+                // (_turn.Counters), not the TurnBucket object itself; a restored bucket keeps the
+                // same Counters instance, so returning to that still-open turn reads as applied.
+                bool appliedToTurn = _turn != null
+                                     && ReferenceEquals(reservation.TurnCounters, _turn.Counters);
 
                 Apply(reservation, chargeInput, chargeOutput, usage.ElapsedMillis, usage.Accepted,
                     usage.Failed, usageUnknown, overrun);

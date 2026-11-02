@@ -25,6 +25,9 @@ internal static partial class Harness
         DeliberationTokenReservations();
         DeliberationSettlementLifecycle();
         DeliberationDispatchAndCancel();
+        DeliberationDispatchGate();
+        DeliberationDispatchExpiry();
+        DeliberationAppliedToTurnIdentity();
         DeliberationTurnBucketsAndUnboundedTokens();
         DeliberationLateCompletion();
         DeliberationUnknownUsage();
