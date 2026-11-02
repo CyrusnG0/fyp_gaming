@@ -18,7 +18,7 @@ namespace LuanShi
             var e = Event.current;
             if (e.type != EventType.MouseDown) return;
             // a concept tab is modal over the map, exactly like the court report
-            if (!ready || reportShowing || handoverShowing || activeTab != "map") return;
+            if (!ready || reportShowing || battleResultShowing || handoverShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
             // While a controller owns the turn, map input is inert as a whole. Selection is intentionally
@@ -207,7 +207,7 @@ namespace LuanShi
         {
             if (Screen.width <= 0 || Screen.height <= 0) return false;
             UiPointerMapping.ToDesignSpace(Input.mousePosition.x, Input.mousePosition.y,
-                Screen.width, Screen.height, out float designX, out float designY);
+                Mathf.RoundToInt(Screen.width / uiScale), Screen.height, out float designX, out float designY);
             return PointerOverDesignSpace(designX, designY);
         }
 
@@ -227,7 +227,11 @@ namespace LuanShi
 
         void Update()
         {
-            bool blocked = handoverShowing || reportShowing || activeTab != "map"
+            if (Input.GetKeyDown(KeyCode.Escape))
+                TogglePauseMenu();
+
+            bool blocked = handoverShowing || reportShowing || battleResultShowing || activeTab != "map"
+                || pauseMenuOpen
                 || (engine != null && engine.State.WinnerSeatId != null);
             if (!blocked && PointerOverUIFromInput()) blocked = true;
 
@@ -256,7 +260,7 @@ namespace LuanShi
         /// </summary>
         bool HumanDebugInputAllowed()
         {
-            if (!ready || engine == null || uiInputLocked || reportShowing || handoverShowing) return false;
+            if (!ready || engine == null || uiInputLocked || reportShowing || battleResultShowing || handoverShowing) return false;
             if (engine.State.WinnerSeatId != null) return false;
             return SeatRotation.IsHuman(engine.State, currentSeat);
         }

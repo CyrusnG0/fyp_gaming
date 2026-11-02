@@ -160,8 +160,11 @@ namespace LuanShi
             {
                 try
                 {
-                    if (spectatorMode) TickSpectator();
-                    else TickAgent();
+                    if (!pauseMenuOpen)
+                    {
+                        if (spectatorMode) TickSpectator();
+                        else TickAgent();
+                    }
                 }
                 catch (Exception e)
                 {

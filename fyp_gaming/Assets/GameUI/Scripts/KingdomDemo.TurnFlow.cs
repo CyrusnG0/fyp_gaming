@@ -50,6 +50,9 @@ namespace LuanShi
             }
             RefreshObservation();            // the world just moved: the fog radius moves with it
 
+            if (r.Ok && IsBattle(cmd.Type) && cmd.ControllerType == ControllerType.Human)
+                OpenBattleResultModal(LatestBattleEvent());
+
             if (!r.Ok)
                 statusMsg = r.Error == "no command points left"
                     ? "Not enough command points: no command points remain this season"

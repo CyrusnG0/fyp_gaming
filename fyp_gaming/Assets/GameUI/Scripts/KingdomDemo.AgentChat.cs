@@ -142,7 +142,7 @@ namespace LuanShi
             Event e = Event.current;
             if (e == null || e.type != EventType.ScrollWheel) return;
             UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Screen.width, out float mouseX, out float mouseY);
+                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
             if (!viewport.Contains(new Vector2(mouseX, mouseY))) return;
             agentChatScroll.y = ChatScrollLogic.OffsetAfterWheel(
                 agentChatScroll.y, e.delta.y, ChatWheelStep, maxScroll);

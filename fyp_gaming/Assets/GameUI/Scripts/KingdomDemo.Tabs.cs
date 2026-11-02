@@ -100,7 +100,7 @@ namespace LuanShi
             var e = Event.current;
             if (e == null || e.type != EventType.ScrollWheel) return false;
             UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Screen.width, out float mouseX, out float mouseY);
+                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
             if (!panel.Contains(new Vector2(mouseX, mouseY))) return false;
 
             float range = contentHeight - view.height;

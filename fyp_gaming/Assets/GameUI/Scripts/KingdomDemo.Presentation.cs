@@ -57,23 +57,23 @@ namespace LuanShi
         static float TextLineHeight(GUIStyle style)
             => style.lineHeight > 0f ? style.lineHeight : style.fontSize + 3f;
 
-        static bool DesignPointerIn(Rect rect)
+        bool DesignPointerIn(Rect rect)
         {
             var e = Event.current;
             if (e == null || Screen.width <= 0) return false;
             UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Screen.width, out float mouseX, out float mouseY);
+                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
             return rect.Contains(new Vector2(mouseX, mouseY));
         }
 
-        static void DrawFittedLabel(Rect rect, string text, GUIStyle style, string tooltip = null)
+        void DrawFittedLabel(Rect rect, string text, GUIStyle style, string tooltip = null)
         {
             GUI.Label(rect, new GUIContent(text, tooltip), style);
             if (!string.IsNullOrEmpty(tooltip) && DesignPointerIn(rect)) GUI.tooltip = tooltip;
         }
 
-        static void DrawWrappedClampedLabel(Rect rect, string text, GUIStyle wrapStyle, int maxLines,
-                                            string tooltip = null)
+        void DrawWrappedClampedLabel(Rect rect, string text, GUIStyle wrapStyle, int maxLines,
+                                     string tooltip = null)
         {
             string clamped = ClampWrappedText(wrapStyle, text, rect.width, maxLines);
             GUI.Label(rect, new GUIContent(clamped, tooltip), wrapStyle);
@@ -87,7 +87,7 @@ namespace LuanShi
             var e = Event.current;
             if (e == null) return;
             UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Screen.width, out float mouseX, out float mouseY);
+                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
             var mouse = new Vector2(mouseX, mouseY);
             float width = Mathf.Min(TooltipMaxWidth,
                 Mathf.Max(120f, uiSmall.CalcSize(new GUIContent(GUI.tooltip)).x + TooltipPadding * 2f));

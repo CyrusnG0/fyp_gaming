@@ -16,12 +16,25 @@ namespace LuanShi
         {
             uiRects.Clear();
             float s = Screen.width / DesignWidth;
+            s *= uiScale;
             GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
             PrepareUiTheme();
 
             if (!ready)
             {
                 GUI.Label(new Rect(20, 20, 900, 40), "KingdomDemo init failed: " + initError, uiTitle);
+                return;
+            }
+
+            if (pauseMenuOpen)
+            {
+                DrawPauseMenu();
+                return;
+            }
+
+            if (battleResultShowing)
+            {
+                DrawBattleResultModal(uiBody, uiButton, uiTitle);
                 return;
             }
 

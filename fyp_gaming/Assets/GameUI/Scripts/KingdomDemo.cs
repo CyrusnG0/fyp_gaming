@@ -113,6 +113,8 @@ namespace LuanShi
         private string statusMsg = "";
         private readonly List<string> jsonFeed = new List<string>();   // recent ActionCommand JSON
         private bool reportShowing;
+        private bool battleResultShowing;
+        private EventView battleResultEvent;
         private readonly List<string> reportLines = new List<string>();
         private readonly List<Rect> uiRects = new List<Rect>();
         private string envoyText = "";        // envoy draft for the diplomacy tab (never sent automatically)
@@ -155,6 +157,7 @@ namespace LuanShi
         {
             // A provider request may outlive editor focus; keep the per-frame runner tick alive.
             Application.runInBackground = true;
+            LoadPresentationSettings();
 
             var gc = FindAnyObjectByType<TBTK.GameControl>();
             if (gc != null) gc.enabled = false;
