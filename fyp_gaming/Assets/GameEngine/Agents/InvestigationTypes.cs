@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 
@@ -91,6 +90,12 @@ namespace LuanShi.Engine
     /// <summary>Typed envelope shared by every read-only investigation result.</summary>
     public abstract class InvestigationResult
     {
+        internal const string ResponseTooLargeCode = "response_too_large";
+        internal const string ResponseTooLargeMessage =
+            "Response exceeds the configured character bound.";
+
+        private bool _compactPayload;
+
         public string Tool { get; internal set; }
         public string ResponseVersion => InvestigationOptions.ResponseVersion;
         public bool Ok { get; internal set; }
@@ -105,6 +110,7 @@ namespace LuanShi.Engine
 
         internal void Fail(string code, string message)
         {
+            _compactPayload = false;
             Ok = false;
             ErrorCode = code;
             Error = message;
@@ -114,10 +120,55 @@ namespace LuanShi.Engine
 
         internal void Succeed(int returned)
         {
+            _compactPayload = false;
             Ok = true;
             ErrorCode = null;
             Error = null;
             ReturnedCount = returned;
+        }
+
+        /// <summary>
+        /// Enforces <see cref="InvestigationOptions.MaxResponseChars"/> on the serialized envelope.
+        /// The length is measured after JSON escaping. Subclasses remove whole structural elements
+        /// (or explicitly clip the frontier hit); if nothing more can be removed the result becomes a
+        /// distinct, bounded explicit error. The caller's cap is never silently expanded.
+        /// </summary>
+        internal void ApplyResponseBound(InvestigationOptions options)
+        {
+            int cap = options.MaxResponseChars;
+            while (ToJson().Length > cap)
+            {
+                if (!TrimForResponse(options))
+                {
+                    BecomeBoundedError(cap);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Removes/shrinks one structural element. Returns false when the response cannot be made
+        /// smaller without losing valid JSON; the base then emits a bounded error envelope.
+        /// </summary>
+        protected virtual bool TrimForResponse(InvestigationOptions options) => false;
+
+        private void BecomeBoundedError(int cap)
+        {
+            // A compact payload drops the type-specific fields. If this was already a typed failure,
+            // keep its semantic code/message as long as that smaller envelope still fits; only a
+            // success that cannot fit (or an over-long message) becomes response_too_large.
+            _compactPayload = true;
+            if (!Ok && ErrorCode != null && ToJson().Length <= cap)
+            {
+                ReturnedCount = 0;
+                Truncated = true;
+                return;
+            }
+            Ok = false;
+            ErrorCode = ResponseTooLargeCode;
+            Error = ResponseTooLargeMessage;
+            ReturnedCount = 0;
+            Truncated = true;
         }
 
         public string ToJson()
@@ -131,13 +182,17 @@ namespace LuanShi.Engine
             sb.Append(",\"error\":").Append(MiniJson.Str(Error));
             sb.Append(",\"returned\":").Append(MiniJson.Num(ReturnedCount));
             sb.Append(",\"truncated\":").Append(Truncated ? "true" : "false");
-            sb.Append(",\"payload\":").Append(BuildPayloadJson());
+            sb.Append(",\"payload\":").Append(_compactPayload ? "{}" : BuildPayloadJson());
             sb.Append('}');
             return sb.ToString();
         }
 
         protected static string ObjectArray(IEnumerable<string> objects)
             => MiniJson.Array(objects);
+
+        /// <summary>Copies a read-only view into a private mutable list so trimming stays structural.</summary>
+        protected static List<T> CopyList<T>(IReadOnlyList<T> source)
+            => source == null ? new List<T>() : new List<T>(source);
     }
 
     /// <summary>One discoverable operation exposed by the investigation foundation.</summary>
@@ -166,16 +221,30 @@ namespace LuanShi.Engine
     /// <summary>Tool discovery result. It does not require a match context.</summary>
     public sealed class InvestigationToolCatalogueResult : InvestigationResult
     {
-        public IReadOnlyList<InvestigationToolDescriptor> Tools =
-            new List<InvestigationToolDescriptor>().AsReadOnly();
+        private List<InvestigationToolDescriptor> _tools = new List<InvestigationToolDescriptor>();
+
+        public IReadOnlyList<InvestigationToolDescriptor> Tools
+        {
+            get => _tools.AsReadOnly();
+            set => _tools = CopyList(value);
+        }
 
         public InvestigationToolCatalogueResult() : base("tool_catalogue") { }
 
         protected override string BuildPayloadJson()
         {
-            var items = new List<string>(Tools.Count);
-            foreach (InvestigationToolDescriptor tool in Tools) items.Add(tool.ToJson());
+            var items = new List<string>(_tools.Count);
+            foreach (InvestigationToolDescriptor tool in _tools) items.Add(tool.ToJson());
             return "{\"tools\":" + ObjectArray(items) + "}";
+        }
+
+        protected override bool TrimForResponse(InvestigationOptions options)
+        {
+            if (_tools.Count == 0) return false;
+            _tools.RemoveAt(_tools.Count - 1);
+            Truncated = true;
+            Succeed(_tools.Count);
+            return true;
         }
     }
 
@@ -222,6 +291,10 @@ namespace LuanShi.Engine
     /// <summary>A bounded manual_lookup result, including the discoverable topic index.</summary>
     public sealed class ManualLookupResult : InvestigationResult
     {
+        private List<ManualFact> _facts = new List<ManualFact>();
+        private List<string> _notes = new List<string>();
+        private List<TopicIndexEntry> _topics = new List<TopicIndexEntry>();
+
         public string TopicId;
         public string Title;
         public string Category;
@@ -229,18 +302,34 @@ namespace LuanShi.Engine
         public bool Implemented;
         public bool LlmActionExposed;
         public int CommandPointCost = -1;   // -1 = this topic is not an action
-        public IReadOnlyList<ManualFact> Facts = new List<ManualFact>().AsReadOnly();
-        public IReadOnlyList<string> Notes = new List<string>().AsReadOnly();
-        public IReadOnlyList<TopicIndexEntry> Topics = new List<TopicIndexEntry>().AsReadOnly();
+        internal bool IsTopicIndex;
+
+        public IReadOnlyList<ManualFact> Facts
+        {
+            get => _facts.AsReadOnly();
+            set => _facts = CopyList(value);
+        }
+
+        public IReadOnlyList<string> Notes
+        {
+            get => _notes.AsReadOnly();
+            set => _notes = CopyList(value);
+        }
+
+        public IReadOnlyList<TopicIndexEntry> Topics
+        {
+            get => _topics.AsReadOnly();
+            set => _topics = CopyList(value);
+        }
 
         public ManualLookupResult() : base("manual_lookup") { }
 
         protected override string BuildPayloadJson()
         {
-            var facts = new List<string>(Facts.Count);
-            foreach (ManualFact fact in Facts) facts.Add(fact.ToJson());
-            var topics = new List<string>(Topics.Count);
-            foreach (TopicIndexEntry topic in Topics) topics.Add(topic.ToJson());
+            var facts = new List<string>(_facts.Count);
+            foreach (ManualFact fact in _facts) facts.Add(fact.ToJson());
+            var topics = new List<string>(_topics.Count);
+            foreach (TopicIndexEntry topic in _topics) topics.Add(topic.ToJson());
 
             var sb = new StringBuilder(512);
             sb.Append('{');
@@ -252,148 +341,36 @@ namespace LuanShi.Engine
             sb.Append(",\"llm_action_exposed\":").Append(LlmActionExposed ? "true" : "false");
             sb.Append(",\"command_point_cost\":").Append(MiniJson.Num(CommandPointCost));
             sb.Append(",\"facts\":").Append(ObjectArray(facts));
-            sb.Append(",\"notes\":").Append(MiniJson.StrArray(Notes));
+            sb.Append(",\"notes\":").Append(MiniJson.StrArray(_notes));
             sb.Append(",\"topics\":").Append(ObjectArray(topics));
             sb.Append('}');
             return sb.ToString();
         }
-    }
 
-    /// <summary>A detached copy of one observation entity. Only current-observation fields are exposed.</summary>
-    public sealed class EntityInspectionResult : InvestigationResult
-    {
-        public string Kind;
-        public bool Found;
-        public string Knowledge;      // "current_observation" when Found
-        public int Season;
-        public CityView City;         // detached copy; null unless a city was found
-        public ArmyView Army;         // detached copy; null unless an army was found
-
-        public EntityInspectionResult() : base("inspect_entity") { }
-
-        protected override string BuildPayloadJson()
+        // The redundant index goes first for a detailed topic; then optional prose and, finally,
+        // whole facts. Every step keeps the JSON structural and flips the explicit truncation flag.
+        protected override bool TrimForResponse(InvestigationOptions options)
         {
-            string entity = City != null ? City.ToJson() : Army != null ? Army.ToJson() : "null";
-            var sb = new StringBuilder(320);
-            sb.Append('{');
-            sb.Append("\"kind\":").Append(MiniJson.Str(Kind));
-            sb.Append(",\"found\":").Append(Found ? "true" : "false");
-            sb.Append(",\"knowledge\":").Append(MiniJson.Str(Knowledge));
-            sb.Append(",\"season\":").Append(MiniJson.Num(Season));
-            sb.Append(",\"entity\":").Append(entity);
-            sb.Append('}');
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>One detached history hit. Payload/args are copied and bounded.</summary>
-    public sealed class HistoryHit
-    {
-        public int Seq;
-        public int Season;
-        public string Phase;
-        public string ActorSeatId;
-        public string ControllerType;
-        public string EventType;
-        public string Visibility;
-        public string SourceActionId;
-        public string Text;
-        public IReadOnlyDictionary<string, string> Payload = new ReadOnlyDictionary<string, string>(
-            new Dictionary<string, string>());
-        public IReadOnlyDictionary<string, string> Args;
-
-        public string ToJson()
-        {
-            var sb = new StringBuilder(320);
-            sb.Append('{');
-            sb.Append("\"seq\":").Append(MiniJson.Num(Seq));
-            sb.Append(",\"season\":").Append(MiniJson.Num(Season));
-            sb.Append(",\"phase\":").Append(MiniJson.Str(Phase));
-            sb.Append(",\"actor_seat_id\":").Append(MiniJson.Str(ActorSeatId));
-            sb.Append(",\"controller_type\":").Append(MiniJson.Str(ControllerType));
-            sb.Append(",\"event_type\":").Append(MiniJson.Str(EventType));
-            sb.Append(",\"visibility\":").Append(MiniJson.Str(Visibility));
-            sb.Append(",\"source_action_id\":").Append(MiniJson.Str(SourceActionId));
-            sb.Append(",\"text\":").Append(MiniJson.Str(Text));
-            sb.Append(",\"payload\":").Append(MiniJson.Dict(Payload));
-            sb.Append(",\"args\":").Append(Args == null ? "null" : MiniJson.Dict(Args));
-            sb.Append('}');
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>A bounded, deterministic search over the seat's already filtered history.</summary>
-    public sealed class HistorySearchResult : InvestigationResult
-    {
-        public string Query;
-        public int Offset;
-        public int NextOffset = -1;   // -1 = no further page
-        public IReadOnlyList<HistoryHit> Hits = new List<HistoryHit>().AsReadOnly();
-
-        public HistorySearchResult() : base("search_history") { }
-
-        protected override string BuildPayloadJson()
-        {
-            var hits = new List<string>(Hits.Count);
-            foreach (HistoryHit hit in Hits) hits.Add(hit.ToJson());
-            var sb = new StringBuilder(384);
-            sb.Append('{');
-            sb.Append("\"query\":").Append(MiniJson.Str(Query));
-            sb.Append(",\"offset\":").Append(MiniJson.Num(Offset));
-            sb.Append(",\"next_offset\":").Append(MiniJson.Num(NextOffset));
-            sb.Append(",\"hits\":").Append(ObjectArray(hits));
-            sb.Append('}');
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>One detached memory hit. Beliefs are explicitly marked as untrusted model memory.</summary>
-    public sealed class MemoryHit
-    {
-        public string MemoryId;
-        public string Type;
-        public string Source;
-        public int Season;
-        public string Content;
-        public int Importance;
-        public int Confidence;
-        public string EpistemicStatus = "untrusted_model_memory";
-
-        public string ToJson()
-        {
-            var sb = new StringBuilder(320);
-            sb.Append('{');
-            sb.Append("\"memory_id\":").Append(MiniJson.Str(MemoryId));
-            sb.Append(",\"type\":").Append(MiniJson.Str(Type));
-            sb.Append(",\"source\":").Append(MiniJson.Str(Source));
-            sb.Append(",\"season\":").Append(MiniJson.Num(Season));
-            sb.Append(",\"content\":").Append(MiniJson.Str(Content));
-            sb.Append(",\"importance\":").Append(MiniJson.Num(Importance));
-            sb.Append(",\"confidence\":").Append(MiniJson.Num(Confidence));
-            sb.Append(",\"epistemic_status\":").Append(MiniJson.Str(EpistemicStatus));
-            sb.Append('}');
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>A bounded, deterministic search over injected own-seat memory records.</summary>
-    public sealed class MemoryRecallResult : InvestigationResult
-    {
-        public string Query;
-        public IReadOnlyList<MemoryHit> Memories = new List<MemoryHit>().AsReadOnly();
-
-        public MemoryRecallResult() : base("recall_memory") { }
-
-        protected override string BuildPayloadJson()
-        {
-            var memories = new List<string>(Memories.Count);
-            foreach (MemoryHit memory in Memories) memories.Add(memory.ToJson());
-            var sb = new StringBuilder(256);
-            sb.Append('{');
-            sb.Append("\"query\":").Append(MiniJson.Str(Query));
-            sb.Append(",\"memories\":").Append(ObjectArray(memories));
-            sb.Append('}');
-            return sb.ToString();
+            if (_topics.Count > 0)
+            {
+                _topics.RemoveAt(_topics.Count - 1);
+                Truncated = true;
+                if (Ok && IsTopicIndex) Succeed(_topics.Count);
+                return true;
+            }
+            if (_notes.Count > 0)
+            {
+                _notes.RemoveAt(_notes.Count - 1);
+                Truncated = true;
+                return true;
+            }
+            if (_facts.Count > 0)
+            {
+                _facts.RemoveAt(_facts.Count - 1);
+                Truncated = true;
+                return true;
+            }
+            return false;
         }
     }
 }

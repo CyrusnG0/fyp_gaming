@@ -22,6 +22,7 @@ internal static partial class Harness
         InvestigationHiddenWorldParity();
         InvestigationBoundsAndNonMutation();
         InvestigationContextFailClosed();
+        InvestigationResponseBounds();
     }
 
     // ---- fixtures ----------------------------------------------------------

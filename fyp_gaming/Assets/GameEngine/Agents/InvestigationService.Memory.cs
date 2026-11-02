@@ -16,65 +16,65 @@ namespace LuanShi.Engine
         public MemoryRecallResult RecallMemory(string query, int limit)
         {
             var result = new MemoryRecallResult();
-            if (_contextError != null)
+            try
             {
-                result.Fail("context_mismatch", ContextMismatchMessage);
-                return result;
-            }
+                if (_contextError != null)
+                {
+                    result.Fail("context_mismatch", ContextMismatchMessage);
+                    return result;
+                }
 
-            string effectiveQuery = query ?? "";
-            if (effectiveQuery.Length > _options.MaxQueryLength)
-            {
-                result.Fail("query_too_long", "The query exceeds the configured length bound.");
-                return result;
-            }
+                string effectiveQuery = query ?? "";
+                if (effectiveQuery.Length > _options.MaxQueryLength)
+                {
+                    result.Fail("query_too_long", "The query exceeds the configured length bound.");
+                    return result;
+                }
 
-            int take;
-            if (limit < 0)
-            {
-                result.Fail("invalid_limit", "The result limit cannot be negative.");
-                return result;
-            }
-            if (limit == 0)
-            {
-                take = Math.Min(_options.DefaultMemoryLimit, _options.EffectiveMemoryLimit);
-                take = Math.Max(1, take);
-            }
-            else if (limit > _options.EffectiveMemoryLimit)
-            {
-                result.Fail("limit_too_large", "The result limit exceeds the configured bound.");
-                return result;
-            }
-            else
-            {
-                take = limit;
-            }
+                int take;
+                if (limit < 0)
+                {
+                    result.Fail("invalid_limit", "The result limit cannot be negative.");
+                    return result;
+                }
+                if (limit == 0)
+                {
+                    take = Math.Min(_options.DefaultMemoryLimit, _options.EffectiveMemoryLimit);
+                    take = Math.Max(1, take);
+                }
+                else if (limit > _options.EffectiveMemoryLimit)
+                {
+                    result.Fail("limit_too_large", "The result limit exceeds the configured bound.");
+                    return result;
+                }
+                else
+                {
+                    take = limit;
+                }
 
-            List<string> tokens = InvestigationText.Tokens(effectiveQuery);
-            var matches = new List<LlmMemory>();
-            foreach (LlmMemory memory in _memories)
-            {
-                if (!IsOwnActiveMemory(memory)) continue;
-                if (InvestigationText.MatchesAll(BuildHaystack(memory), tokens)) matches.Add(memory);
-            }
-            matches.Sort(CompareMemories);
+                List<string> tokens = InvestigationText.Tokens(effectiveQuery);
+                var matches = new List<LlmMemory>();
+                foreach (LlmMemory memory in _memories)
+                {
+                    if (!IsOwnActiveMemory(memory)) continue;
+                    if (InvestigationText.MatchesAll(BuildHaystack(memory), tokens)) matches.Add(memory);
+                }
+                matches.Sort(CompareMemories);
 
-            result.Query = effectiveQuery;
-            int count = Math.Min(take, matches.Count);
-            var hits = new List<MemoryHit>(count);
-            for (int i = 0; i < count; i++) hits.Add(ToHit(matches[i], _options));
+                result.Query = effectiveQuery;
+                int count = Math.Min(take, matches.Count);
+                var hits = new List<MemoryHit>(count);
+                for (int i = 0; i < count; i++) hits.Add(ToHit(matches[i], _options));
 
-            result.Memories = hits.AsReadOnly();
-            result.Truncated = matches.Count > hits.Count;
-            result.Succeed(hits.Count);
-
-            while (hits.Count > 0 && result.ToJson().Length > _options.EffectiveResponseChars)
-            {
-                hits.RemoveAt(hits.Count - 1);
-                result.Truncated = true;
+                result.Memories = hits.AsReadOnly();
+                result.Truncated = matches.Count > hits.Count;
                 result.Succeed(hits.Count);
+                return result;
             }
-            return result;
+            finally
+            {
+                result.ApplyResponseBound(_options);
+            }
         }
 
         private bool IsOwnActiveMemory(LlmMemory memory)

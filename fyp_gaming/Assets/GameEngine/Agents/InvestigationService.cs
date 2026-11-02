@@ -41,6 +41,8 @@ namespace LuanShi.Engine
             _observation = observation;
             _memories = memories ?? NoMemories;
             _options = options == null ? InvestigationOptions.Defaults() : options.Copy();
+            // Reject an impossible output cap explicitly; never emit a response above the caller's cap.
+            _options.Validate();
             _contextError = ValidateContext(expectedGameId, expectedSeatId, observation);
         }
 
@@ -50,7 +52,8 @@ namespace LuanShi.Engine
         /// </summary>
         public static InvestigationToolCatalogueResult Catalogue(InvestigationOptions options = null)
         {
-            options = options ?? InvestigationOptions.Defaults();
+            options = (options ?? InvestigationOptions.Defaults()).Copy();
+            options.Validate();
             var result = new InvestigationToolCatalogueResult();
             var tools = new List<InvestigationToolDescriptor>();
             foreach (InvestigationToolDescriptor tool in InvestigationCatalogue.Tools)
@@ -67,6 +70,7 @@ namespace LuanShi.Engine
             }
             result.Tools = tools.AsReadOnly();
             result.Succeed(tools.Count);
+            result.ApplyResponseBound(options);
             return result;
         }
 
@@ -74,12 +78,21 @@ namespace LuanShi.Engine
         public ManualLookupResult ManualLookup(string topic)
         {
             var result = new ManualLookupResult();
-            if (_contextError != null)
+            try
             {
-                result.Fail("context_mismatch", ContextMismatchMessage);
+                if (_contextError != null)
+                {
+                    result.Fail("context_mismatch", ContextMismatchMessage);
+                    return result;
+                }
+                result = InvestigationManual.Lookup(topic, _options);
                 return result;
             }
-            return InvestigationManual.Lookup(topic, _options);
+            finally
+            {
+                // Every path, including errors and the index, is bounded after JSON escaping.
+                result.ApplyResponseBound(_options);
+            }
         }
 
         /// <summary>
@@ -89,49 +102,56 @@ namespace LuanShi.Engine
         public EntityInspectionResult InspectEntity(string kind, string id)
         {
             var result = new EntityInspectionResult();
-            if (_contextError != null)
+            try
             {
-                result.Fail("context_mismatch", ContextMismatchMessage);
+                if (_contextError != null)
+                {
+                    result.Fail("context_mismatch", ContextMismatchMessage);
+                    return result;
+                }
+
+                string normalizedKind = InvestigationText.Normalize(kind);
+                if (normalizedKind != "city" && normalizedKind != "army")
+                {
+                    result.Fail("unsupported_kind", "Supported inspection kinds are 'city' and 'army'.");
+                    return result;
+                }
+                if (string.IsNullOrEmpty(id))
+                {
+                    result.Fail("invalid_request", "An entity id is required.");
+                    return result;
+                }
+                if (id.Length > _options.MaxEntityIdLength)
+                {
+                    result.Fail("invalid_request", "The entity id exceeds the configured length bound.");
+                    return result;
+                }
+
+                result.Kind = normalizedKind;
+                result.Season = _observation.Season;
+
+                if (normalizedKind == "city")
+                {
+                    CityView city = _observation.FindCity(id);
+                    if (city == null) return EntityNotFound(result);
+                    result.City = CopyCity(city, _options);
+                }
+                else
+                {
+                    ArmyView army = _observation.FindArmy(id);
+                    if (army == null) return EntityNotFound(result);
+                    result.Army = CopyArmy(army, _options);
+                }
+
+                result.Found = true;
+                result.Knowledge = "current_observation";
+                result.Succeed(1);
                 return result;
             }
-
-            string normalizedKind = InvestigationText.Normalize(kind);
-            if (normalizedKind != "city" && normalizedKind != "army")
+            finally
             {
-                result.Fail("unsupported_kind", "Supported inspection kinds are 'city' and 'army'.");
-                return result;
+                result.ApplyResponseBound(_options);
             }
-            if (string.IsNullOrEmpty(id))
-            {
-                result.Fail("invalid_request", "An entity id is required.");
-                return result;
-            }
-            if (id.Length > _options.MaxEntityIdLength)
-            {
-                result.Fail("invalid_request", "The entity id exceeds the configured length bound.");
-                return result;
-            }
-
-            result.Kind = normalizedKind;
-            result.Season = _observation.Season;
-
-            if (normalizedKind == "city")
-            {
-                CityView city = _observation.FindCity(id);
-                if (city == null) return EntityNotFound(result);
-                result.City = CopyCity(city, _options);
-            }
-            else
-            {
-                ArmyView army = _observation.FindArmy(id);
-                if (army == null) return EntityNotFound(result);
-                result.Army = CopyArmy(army, _options);
-            }
-
-            result.Found = true;
-            result.Knowledge = "current_observation";
-            result.Succeed(1);
-            return result;
         }
 
         private static EntityInspectionResult EntityNotFound(EntityInspectionResult result)

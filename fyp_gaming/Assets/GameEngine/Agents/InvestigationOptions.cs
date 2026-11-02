@@ -1,3 +1,5 @@
+using System;
+
 namespace LuanShi.Engine
 {
     /// <summary>
@@ -29,7 +31,9 @@ namespace LuanShi.Engine
         public int MaxPaginationOffset = 1000;
 
         // ---- output bounds --------------------------------------------------
-        public int MaxResponseChars = 16000;      // serialized result envelope, before any trimming
+        // The serialized envelope, measured AFTER JSON escaping. It is a hard cap: results are
+        // structurally trimmed or replaced by a bounded explicit error, never allowed to exceed it.
+        public int MaxResponseChars = 16000;
         public int MaxTextChars = 600;            // one event/memory/name text field
         public int MaxPayloadEntries = 16;        // event payload/args entries returned per hit
         public int MaxPayloadKeyChars = 64;
@@ -62,9 +66,31 @@ namespace LuanShi.Engine
         /// <summary>A fresh instance with the documented conservative defaults.</summary>
         public static InvestigationOptions Defaults() => new InvestigationOptions();
 
+        /// <summary>
+        /// The smallest response cap that can carry the bounded error envelope used when a result
+        /// cannot be trimmed further. A smaller cap is rejected rather than silently expanded.
+        /// </summary>
+        public const int MinimumResponseChars = 256;
+
+        /// <summary>
+        /// Rejects a configuration that cannot honour the serialized response bound. Callers see an
+        /// explicit <see cref="ArgumentOutOfRangeException"/> instead of a quietly enlarged cap.
+        /// </summary>
+        public void Validate()
+        {
+            if (MaxResponseChars < MinimumResponseChars)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(MaxResponseChars), MaxResponseChars,
+                    "MaxResponseChars must be at least " + MinimumResponseChars
+                    + " so a bounded error envelope can fit.");
+            }
+        }
+
         // Effective values protect the service from a nonsensical caller configuration such as a
         // negative budget. They never change the defaults on disk and are not paid-model budgets.
-        internal int EffectiveResponseChars => MaxResponseChars < 256 ? 256 : MaxResponseChars;
+        // The response cap is deliberately NOT raised here: Validate() rejects impossible caps.
+        internal int EffectiveResponseChars => MaxResponseChars;
         internal int EffectiveTextChars
         {
             get

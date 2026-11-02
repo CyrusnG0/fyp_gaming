@@ -72,6 +72,7 @@ namespace LuanShi.Engine
 
         private static void FillIndex(ManualLookupResult result)
         {
+            result.IsTopicIndex = true;
             result.Title = "English topic index";
             result.Category = "index";
             result.Implemented = true;
