@@ -132,6 +132,7 @@ namespace LuanShi.Engine
             _gameId = null;
             _memorySeason = -1;
             _memories.Clear();
+            _pendingInquiryResult = null;
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
             // seats must not leak either seat's action feedback into the other's prompt. A seed
             // change starts a genuinely new session and clears every seat.
@@ -184,6 +185,7 @@ namespace LuanShi.Engine
             _gameId = null;
             _memorySeason = -1;
             _memories.Clear();
+            _pendingInquiryResult = null;
             RequestsThisTurn = 0;
             ActionsThisTurn = 0;
             InvalidThisTurn = 0;
@@ -295,15 +297,21 @@ namespace LuanShi.Engine
 
             // The prompt carries a bounded event history; record exactly that same JSON, not the full one.
             string observationJson = PromptBuilder.BoundedObservationJson(observation);
-            string system = PromptBuilder.SystemPromptFor(planning);
+            // The private result is consumed by exactly this prompt; it never survives into a
+            // later seat's request or a recreated turn.
+            string inquiryResult = TakePendingInquiryResult();
+            bool inquiry = _config.EnableManualLookup;
+            string system = PromptBuilder.SystemPromptFor(planning, inquiry);
             List<ActionOption> options = ActionCatalogue.Build(observation);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             string user = planning
                 ? PromptBuilder.UserPrompt(observation, options, _history,
-                    RemainingRequests(), RemainingActions(), movement, relevantMemories)
+                    RemainingRequests(), RemainingActions(), movement, relevantMemories,
+                    inquiryResult, inquiry)
                 : PromptBuilder.UserPrompt(observation, options, _history,
-                    RemainingRequests(), RemainingActions(), relevantMemories);
+                    RemainingRequests(), RemainingActions(), relevantMemories, inquiryResult,
+                    inquiry);
             if (system.Length + user.Length > MaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
@@ -342,8 +350,8 @@ namespace LuanShi.Engine
                 ObservationHash = Hash(observationJson),
                 Season = observation.Season,
                 Observation = observation,
-                PromptVersion = PromptBuilder.VersionFor(planning),
-                SchemaHash = PromptBuilder.SchemaHashFor(planning),
+                PromptVersion = PromptBuilder.VersionFor(planning, inquiry),
+                SchemaHash = PromptBuilder.SchemaHashFor(planning, inquiry),
             };
             State = RunnerState.Requesting;
             Status = "requesting response " + index;

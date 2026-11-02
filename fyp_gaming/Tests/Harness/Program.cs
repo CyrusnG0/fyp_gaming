@@ -102,6 +102,7 @@ internal static partial class Harness
         RunLlmMemory();
         RunInvestigation();
         RunInvestigationRequests();
+        RunLlmInquiry();
         RunDemoS4();
         RunUiScale();
         RunMovementOptions();

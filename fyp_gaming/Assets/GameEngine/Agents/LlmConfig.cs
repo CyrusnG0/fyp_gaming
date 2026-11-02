@@ -18,6 +18,14 @@ namespace LuanShi.Engine
         public string ApiKeyEnv = "LUANSHI_LLM_API_KEY";
         public bool JsonMode = true;
 
+        /// <summary>
+        /// Demo-scope opt-in, default OFF. When true, a model reply shaped as an investigation
+        /// request may run the read-only manual_lookup tool and its bounded result is added to the
+        /// next prompt. When false, the runner, prompt text and legacy action-only path are
+        /// unchanged. No other inquiry tool is enabled by this flag.
+        /// </summary>
+        public bool EnableManualLookup;
+
         public int MaxRequestsPerTurn = 6;
         public int MaxActionsPerTurn = 5;
         public int MaxInvalidPerTurn = 2;
@@ -58,7 +66,7 @@ namespace LuanShi.Engine
         /// File first, then environment override. Recognised snake_case keys are provider, base_url,
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
-        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd.
+        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup.
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
         {
@@ -104,6 +112,8 @@ namespace LuanShi.Engine
             sb.Append("; usd_per_mtok_in=").Append(Number(UsdPerMTokIn));
             sb.Append("; usd_per_mtok_out=").Append(Number(UsdPerMTokOut));
             sb.Append("; max_usd=").Append(Number(MaxUsd));
+            // Appending only when enabled keeps the legacy disabled diagnostic byte-for-byte unchanged.
+            if (EnableManualLookup) sb.Append("; manual_lookup=true");
             return sb.ToString();
         }
 
@@ -133,6 +143,8 @@ namespace LuanShi.Engine
                     case "usd_per_mtok_in": UsdPerMTokIn = Number(field.Value, UsdPerMTokIn); break;
                     case "usd_per_mtok_out": UsdPerMTokOut = Number(field.Value, UsdPerMTokOut); break;
                     case "max_usd": MaxUsd = Number(field.Value, MaxUsd); break;
+                    case "enable_manual_lookup":
+                        EnableManualLookup = Bool(field.Value, EnableManualLookup); break;
                 }
             }
         }

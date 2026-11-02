@@ -198,7 +198,8 @@ namespace LuanShi.Engine
         }
 
         private void WriteRecord(InFlight flight, LlmResponse response, bool parseOk,
-            string commandJson, bool? resultOk, string resultError)
+            string commandJson, bool? resultOk, string resultError,
+            string inquiryTool = null, int? inquiryResultChars = null)
         {
             if (_recorder == null) return;
             try
@@ -237,6 +238,13 @@ namespace LuanShi.Engine
                 parts.Add(Num("actions_this_turn", ActionsThisTurn));
                 parts.Add(Num("invalid_this_turn", InvalidThisTurn));
                 parts.Add(Num("total_requests", TotalRequests));
+                // Optional fields keep old JSONL readers working. Only the tool name and a bounded
+                // size are recorded; the private result text never enters the run record.
+                if (!string.IsNullOrEmpty(inquiryTool))
+                {
+                    parts.Add(Str("inquiry_tool", inquiryTool));
+                    parts.Add(nullableInt("inquiry_result_chars", inquiryResultChars));
+                }
                 _recorder.Record(_runId, "{" + string.Join(",", parts) + "}");
             }
             catch (Exception)

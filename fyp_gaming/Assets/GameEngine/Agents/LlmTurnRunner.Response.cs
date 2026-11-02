@@ -102,6 +102,14 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // Opt-in only: an inquiry-shaped reply is classified before the action parser. The
+            // disabled path below is untouched, so legacy replies are handled exactly as before.
+            if (_config.EnableManualLookup && IsInquiryCandidate(response.Text))
+            {
+                HandleInquiry(flight, response);
+                return;
+            }
+
             ParseResult parsed = LlmActionParser.Parse(response.Text);
             if (!parsed.Ok)
             {
