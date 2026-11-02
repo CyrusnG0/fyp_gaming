@@ -100,6 +100,7 @@ internal static partial class Harness
         RunLlmActivity();
         RunLlmSessionChat();
         RunLlmMemory();
+        RunInvestigation();
         RunDemoS4();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
