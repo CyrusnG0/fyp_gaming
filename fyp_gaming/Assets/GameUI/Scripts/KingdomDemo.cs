@@ -231,7 +231,11 @@ namespace LuanShi
                     map.Neighbors[map.Index(x, z)] = list.ToArray();
                 }
 
-            engine = new GameEngine(randomSeed);
+            // Every InitGame is a genuinely new match (Start and the pause-menu Restart both rebuild
+            // the scene), so it needs an identity independent of randomSeed. The same identity is then
+            // carried by observation.GameId, which scopes the runner's durable seat memory; recreating
+            // a runner for this engine therefore keeps this match's memories. There is no save/load.
+            engine = new GameEngine(randomSeed, GameIdentity.NewMatchId());
             engine.CombatDebugLogger = message => Debug.Log(message);
             engine.State.Map = map;
             InitializeFogOverlays(nodes, w, h);

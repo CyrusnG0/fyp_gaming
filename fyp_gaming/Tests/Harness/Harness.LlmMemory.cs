@@ -12,6 +12,8 @@ internal static partial class Harness
         RunMemoryMalformedRecords();
         RunMemoryRetrieval();
         RunMemoryConsolidation();
+        RunLlmMemoryIsolation();
+        RunLlmMemorySupersession();
     }
 
     private static void RunMemoryStoreIsolation()
