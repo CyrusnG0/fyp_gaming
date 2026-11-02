@@ -105,6 +105,8 @@ namespace LuanShi.Engine
               .Append(session.FailedEndings.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"cancelled_endings\":")
               .Append(session.CancelledEndings.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"game_over_endings\":")
+              .Append(session.GameOverEndings.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"input_tokens\":").Append(NullableLong(input));
             sb.Append(",\"output_tokens\":").Append(NullableLong(output));
             sb.Append(",\"cost_usd\":").Append(Cost(cost));

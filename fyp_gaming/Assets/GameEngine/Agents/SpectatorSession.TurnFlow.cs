@@ -7,6 +7,8 @@ namespace LuanShi.Engine
         private void BeginSeat(string seatId)
         {
             if (State != SpectatorState.Running) return;
+            // A winner is authoritative: never open (or resume) the next seat in a decided game.
+            if (_engine.State.WinnerSeatId != null) { Complete("game_over"); return; }
             if (_runner.State == RunnerState.Requesting || _runner.State == RunnerState.Executing)
             {
                 State = SpectatorState.Paused;
@@ -61,7 +63,9 @@ namespace LuanShi.Engine
             RunnerState runnerState = _runner.State;
             string failure = _runner.FailureReason;
             string endedBy;
-            if (runnerState == RunnerState.Failed)
+            if (runnerState == RunnerState.Finished && _runner.EndReason == EndReason.GameOver)
+                endedBy = "game over";
+            else if (runnerState == RunnerState.Failed)
                 endedBy = "failed: " + (failure ?? "runner failed");
             else if (runnerState == RunnerState.Finished && !string.IsNullOrEmpty(failure))
                 endedBy = "limit: " + failure;

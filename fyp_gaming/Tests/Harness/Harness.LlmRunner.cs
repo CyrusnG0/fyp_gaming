@@ -240,8 +240,8 @@ internal static partial class Harness
                 JsonObject first = objects[0];
                 JsonObject second = objects[1];
                 Check(LlmStr(first, "provider") == "fake" && LlmStr(first, "model") == "fake-model"
-                      && LlmStr(first, "prompt_version") == PromptBuilder.PromptVersion
-                      && LlmStr(first, "schema_hash") == PromptBuilder.SchemaHash()
+                      && LlmStr(first, "prompt_version") == PromptBuilder.VersionFor(false)
+                      && LlmStr(first, "schema_hash") == PromptBuilder.SchemaHashFor(false)
                       && LlmInt(first, "game_seed") == 11 && LlmInt(first, "seed") == 11
                       && LlmInt(first, "turn_token") == 77
                       && LlmStr(first, "run_id") == runner.RunId,

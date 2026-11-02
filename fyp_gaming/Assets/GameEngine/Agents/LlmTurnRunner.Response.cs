@@ -22,6 +22,7 @@ namespace LuanShi.Engine
         HostError,
         PromptTooLarge,
         TransportError,
+        GameOver,
         Cancelled,
     }
 
@@ -54,6 +55,7 @@ namespace LuanShi.Engine
                     case EndReason.PromptTooLarge: return "Failed - prompt too large";
                     case EndReason.TransportError:
                         return "Failed - " + (FailureReason ?? "transport error");
+                    case EndReason.GameOver: return "Finished - game over";
                     case EndReason.Cancelled:
                         return "Cancelled - " + (FailureReason ?? "by host");
                     default: return "Turn not finished";
@@ -66,6 +68,17 @@ namespace LuanShi.Engine
             string commandJson = null;
             bool? resultOk = null;
             string resultError = null;
+
+            // Terminal stop: a winner declared while this request was in flight makes the response
+            // stale. Discard it (never parse or execute it) and stop before any new dispatch.
+            if (HasPlanningHost && PlanningHost.IsGameOver)
+            {
+                LastResult = "game over";
+                AddActivity("validation", "Game over: in-flight response discarded.");
+                FinishGameOver();
+                WriteRecord(flight, response, false, null, null, "game over");
+                return;
+            }
 
             if (!response.Ok)
             {
@@ -131,6 +144,27 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // A march is only advertised to a planning host. A plain domestic host must never let a
+            // model-submitted march reach the engine (it was not offered in that prompt).
+            if (action.Type == ActionType.March && !HasPlanningHost)
+            {
+                InvalidThisTurn++;
+                LastResult = FeedbackPolicy.UnsupportedAction;
+                LastCommandJson = null;
+                AddActivity("validation", "march is not advertised for this seat.");
+                AddActivity("result", "Rejected: " + LastResult);
+                AddHistory(HistoryLine(action, "rejected: " + LastResult));
+                Status = "order rejected; continuing";
+                resultOk = false;
+                resultError = LastResult;
+                WriteRecord(flight, response, true, null, resultOk, resultError);
+                if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
+                    FinishLimit("invalid-response limit reached", EndReason.InvalidResponseLimit);
+                else
+                    StartRequest();
+                return;
+            }
+
             ActionCommand command = LlmActionParser.ToCommand(action);
             ActionsThisTurn++;
             bool accepted = false;
@@ -138,9 +172,9 @@ namespace LuanShi.Engine
             {
                 ValidationResult validation = _host.Submit(command);
                 accepted = validation.Ok;
-                // The engine's target errors can distinguish a hidden-but-existing id from a
-                // nonexistent one. The model gets one indistinguishable answer in both cases.
-                resultError = accepted ? null : SanitizeModelFeedback(validation.Error);
+                // Deny-by-default feedback: raw engine text can distinguish a hidden-but-existing
+                // id from a nonexistent one, so only the typed allowlist reaches the model.
+                resultError = accepted ? null : FeedbackPolicy.ForModel(validation.Error);
             }
             catch (Exception)
             {
@@ -167,7 +201,21 @@ namespace LuanShi.Engine
                 action, accepted, resultError));
             StoreMemory(LlmMemoryExtractor.FromSummary(_gameId, _seatId, flight.Season,
                 action.Summary ?? action.Reason));
-            AddActivity("result", accepted ? "Accepted by engine." : "Rejected: " + LastResult);
+
+            string capture = accepted && action.Type == ActionType.March
+                ? CapturedCityName(flight, action) : null;
+            string resultText = accepted ? "Accepted by engine." : "Rejected: " + LastResult;
+            if (!string.IsNullOrEmpty(capture)) resultText += " Captured " + capture + ".";
+            AddActivity("result", resultText);
+
+            // Terminal stop (c): the authoritative host signal right after execution, before limit
+            // handling or any new request. A game-ending order must cost no further provider call.
+            if (HasPlanningHost && PlanningHost.IsGameOver)
+            {
+                FinishGameOver();
+                WriteRecord(flight, response, true, commandJson, resultOk, resultError);
+                return;
+            }
 
             if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
             {
@@ -197,6 +245,11 @@ namespace LuanShi.Engine
 
         private static string ActivityCommandText(LlmAction action)
         {
+            if (action.Type == ActionType.March)
+                return "march " + (action.TargetId ?? "?") + " -> ("
+                     + action.ParamA.ToString(System.Globalization.CultureInfo.InvariantCulture) + ","
+                     + action.ParamB.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+
             string text = action.Type ?? "?";
             if (!string.IsNullOrEmpty(action.TargetId)) text += " " + action.TargetId;
             if (action.Args != null && action.Args.TryGetValue("unit_type", out string unit)

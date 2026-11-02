@@ -22,6 +22,9 @@ namespace LuanShi
         private string spectatorSummaryPath;
         private string spectatorSetupError;
         private SpectatorState spectatorSummaryNotified = SpectatorState.NotStarted;
+        // Command counters of the last frame whose accepted commands were already reflected on the map.
+        private int spectatorSyncedTotalActions = -1;
+        private int spectatorSyncedTurnActions = -1;
 
         // ------------------------------------------------------------------ setup & tick
 
@@ -37,6 +40,8 @@ namespace LuanShi
             locationChoiceOpen = false;
             statusMsg = "Spectator pilot - both seats are LLM-controlled; orders are locked";
             spectatorSummaryNotified = SpectatorState.NotStarted;
+            spectatorSyncedTotalActions = -1;
+            spectatorSyncedTurnActions = -1;
 
             if (engine == null || agentRunner == null)
             {
@@ -73,8 +78,44 @@ namespace LuanShi
             if (session == null) return;
 
             session.Tick();
+            // SpectatorSession executes each seat's orders inside its own host, so the UI's
+            // SubmitAgentCommand (the single-LLM sync point) never sees them. Watch the conductor's
+            // command counters and re-sync the banners whenever a command advanced.
+            bool advanced = SpectatorCommandsAdvanced(session);
             RefreshSpectatorView();
+            if (advanced)
+            {
+                SyncSpectatorArmyVisuals();
+                ApplyFog();   // a banner just created outside the viewed seat's sight stays hidden
+            }
             UpdateSpectatorSummary(session);
+        }
+
+        /// <summary>
+        /// True when the session executed at least one more command since the previous frame. The
+        /// closed-turn total plus the open turn's action count covers both a march in flight and a
+        /// turn that closed in this Tick, while an idle frame does no banner work.
+        /// </summary>
+        bool SpectatorCommandsAdvanced(SpectatorSession session)
+        {
+            int total = session.TotalActions;
+            int current = session.Runner != null ? session.Runner.ActionsThisTurn : 0;
+            bool advanced = total != spectatorSyncedTotalActions
+                         || current != spectatorSyncedTurnActions;
+            spectatorSyncedTotalActions = total;
+            spectatorSyncedTurnActions = current;
+            return advanced;
+        }
+
+        /// <summary>
+        /// Presentation-only: places every banner from the engine's authoritative army positions, the
+        /// same routine the human and single-LLM march paths use. Visibility is still decided by
+        /// ApplyFog from the viewed seat's filtered observation, so hidden banners stay hidden.
+        /// </summary>
+        void SyncSpectatorArmyVisuals()
+        {
+            if (engine == null) return;
+            foreach (ArmyState army in engine.State.Armies) EnsureArmyVisual(army);
         }
 
         /// <summary>Keeps the map on the active (or most recently active) seat's filtered observation.</summary>
@@ -129,28 +170,16 @@ namespace LuanShi
         /// <summary>
         /// FAKE rehearsal script. Responses are queued for the whole run in turn order because the
         /// conductor opens the next seat inside Tick(); a per-frame queue would arrive too late.
-        /// Every turn is levy, reclaim, end_turn and every summary is labelled FAKE.
+        /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn)
+        /// and every summary is labelled FAKE.
         /// </summary>
         void EnqueueFakeSeatTurn(string seatId)
         {
             if (agentFake == null || engine == null || string.IsNullOrEmpty(seatId)) return;
             Observation seatObs = engine.Observe(seatId);
-            string cityId = null;
-            if (seatObs != null)
-            {
-                var cities = seatObs.CitiesOf(seatId);
-                if (cities.Count > 0) cityId = cities[0].Id;
-            }
-
-            if (!string.IsNullOrEmpty(cityId))
-            {
-                agentFake.EnqueueSuccess("{\"type\":\"levy_tax\",\"target_id\":\"" + JsonText(cityId)
-                    + "\",\"summary\":\"FAKE rehearsal: levy tax\"}", 200, 120, 20);
-                agentFake.EnqueueSuccess("{\"type\":\"reclaim\",\"target_id\":\"" + JsonText(cityId)
-                    + "\",\"summary\":\"FAKE rehearsal: reclaim\"}", 200, 120, 20);
-            }
-            agentFake.EnqueueSuccess("{\"type\":\"end_turn\",\"summary\":\"FAKE rehearsal: end turn\"}",
-                150, 60, 10);
+            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId);
+            foreach (string command in plan)
+                agentFake.EnqueueSuccess(command, 200, 120, 20);
         }
 
         void ResetFakeSpectatorQueue(string firstSeatId, int seasons)
