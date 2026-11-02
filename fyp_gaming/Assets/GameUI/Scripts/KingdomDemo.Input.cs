@@ -192,22 +192,26 @@ namespace LuanShi
         }
 
         /// <summary>
-        /// IMGUI event coordinates are top-left screen pixels; uiRects are top-left design pixels.
-        /// Scale the point with the same uniform GUI.matrix factor OnGUI uses before hit testing.
+        /// IMGUI event coordinates are already in GUI space, which - because OnGUI installs a pure
+        /// scale with no translation - is the design space every uiRect lives in. Converting them again
+        /// (the old Screen.width/uiScale form) double-scaled the point and let clicks fall through.
         /// </summary>
-        bool PointerOverUI(Vector2 screenTopLeft)
+        bool PointerOverUI(Vector2 eventMousePosition)
         {
-            UiPointerMapping.ToDesignSpaceFromTopLeft(screenTopLeft.x, screenTopLeft.y, Screen.width,
+            UiPointerMapping.EventToDesignSpace(eventMousePosition.x, eventMousePosition.y,
                 out float designX, out float designY);
             return PointerOverDesignSpace(designX, designY);
         }
 
-        /// <summary>Input.mousePosition is bottom-left screen pixels, so flip Y before mapping.</summary>
+        /// <summary>
+        /// Input.mousePosition is bottom-left screen pixels untouched by the GUI matrix, so it needs the
+        /// same fit x uiScale transform OnGUI draws with (Y flipped once).
+        /// </summary>
         bool PointerOverUIFromInput()
         {
             if (Screen.width <= 0 || Screen.height <= 0) return false;
             UiPointerMapping.ToDesignSpace(Input.mousePosition.x, Input.mousePosition.y,
-                Mathf.RoundToInt(Screen.width / uiScale), Screen.height, out float designX, out float designY);
+                Screen.width, Screen.height, uiScale, out float designX, out float designY);
             return PointerOverDesignSpace(designX, designY);
         }
 

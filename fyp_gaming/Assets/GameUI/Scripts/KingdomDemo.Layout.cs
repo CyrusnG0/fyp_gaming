@@ -10,8 +10,6 @@ namespace LuanShi
 {
     public partial class KingdomDemo
     {
-        private const float DesignHeight = 900f;
-
         // ---------------------------------------------------------------- HUD rows
         // Two compact HUD lines. The top bar never exceeds 56 design px; the status strip never
         // exceeds 60 and no longer repeats the full controls legend.
@@ -29,24 +27,19 @@ namespace LuanShi
         // ---------------------------------------------------------------- side dock / tab body
         // The agent/spectator details are docked on the right, in the gap between the map and the tab
         // column. They never cover the tab column, and the selection panel/centre tab body step aside.
+        // SidePanelX, ChatBottomY and the tab body's width are anchored per frame (KingdomDemo.UiFrame.cs).
         private const float PanelPadX = 12f;
         private const float PanelHeaderPadX = 14f;
-        private const float SidePanelX = 960f;
-        private const float SidePanelY = 68f;
-        private const float SidePanelWidth = 420f;
-        private const float AgentPanelX = SidePanelX;
-        private const float AgentPanelY = SidePanelY;
-        private const float AgentPanelWidth = SidePanelWidth;
+        private const float SidePanelY = UiLayout.DockY;
+        private const float SidePanelWidth = UiLayout.DockWidth;
+        private const float AgentPanelY = UiLayout.DockY;
         private const float AgentPanelIdleHeight = 124f;
         private const float AgentPanelDetailHeight = 260f;
         // Tall enough for the two-line totals block plus the button and run-record rows; the chat dock
         // starts at this rect's yMax (KingdomDemo.AgentChat.cs), so increasing it shortens the chat.
         private const float SpectatorPanelHeight = SpectatorPanelLayout.PanelHeight;
-        private const float TabPanelX = 400f;
-        private const float TabPanelDockedX = 148f;   // 800-wide body left of the 420 side dock
-        private const float TabPanelY = 190f;
-        private const float TabPanelWidth = 800f;
-        private const float TabPanelDefaultHeight = 480f;
+        private const float TabPanelDockedX = UiLayout.TabPanelDockedX;
+        private const float TabPanelY = UiLayout.TabPanelY;
 
         // ---------------------------------------------------------------- selection panel placement
         // The panel is capped at 440 design px and anchored beside the selected marker. It never parks
@@ -119,9 +112,10 @@ namespace LuanShi
         private const float ArmyBannerStaggerMaxSteps = 2f;
 
         // ---------------------------------------------------------------- court report
-        private const float ReportPanelX = 400f;
+        // ReportPanelX is anchored per frame (KingdomDemo.UiFrame.cs) so the modal stays left of the
+        // right column at 120%, where the content area is narrower than 1600 design units.
         private const float ReportPanelY = 150f;
-        private const float ReportPanelWidth = 800f;
+        private const float ReportPanelWidth = UiLayout.ReportPanelWidth;
         private const float ReportPanelBaseHeight = 116f;
         private const float ReportBodyWidth = 736f;
         private const float ReportTitleWidth = 760f;
@@ -188,12 +182,11 @@ namespace LuanShi
         // ---------------------------------------------------------------- live session chat
         // The chat fills the right dock below the agent/spectator panel and stops above the status
         // strip. At 16:9 (900 design height) it never overlaps the tabs, dock or status strip.
-        private const float ChatGap = 8f;
+        private const float ChatGap = UiLayout.ChatGap;
         private const float ChatHeaderHeight = 30f;
         private const float ChatFilterHeight = 24f;
         private const float ChatFooterHeight = 36f;   // two short footer lines, checkbox on the left
         private const float ChatMinBodyHeight = 110f;
-        private const float ChatBottomY = StatusBarY - ChatGap;
         private const float ChatPadX = 10f;
         private const float ChatTextPad = 4f;
         private const float ChatEntryGap = 6f;

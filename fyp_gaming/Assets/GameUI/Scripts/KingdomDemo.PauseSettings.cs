@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using LuanShi.Engine;
 
 namespace LuanShi
 {
@@ -25,7 +26,7 @@ namespace LuanShi
         {
             musicVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(MusicVolumeKey, 1f));
             effectsVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(EffectsVolumeKey, 1f));
-            uiScale = Mathf.Clamp(PlayerPrefs.GetFloat(UiScaleKey, 1f), 0.8f, 1.2f);
+            uiScale = UiPointerMapping.ClampUiScale(PlayerPrefs.GetFloat(UiScaleKey, 1f));
             fullscreen = PlayerPrefs.GetInt(FullscreenKey, Screen.fullScreen ? 1 : 0) != 0;
             ApplyPresentationSettings();
         }
@@ -87,7 +88,9 @@ namespace LuanShi
         private void DrawPauseMenu()
         {
             FillScreen(InkScreen);
-            Rect panel = new Rect(490f, 120f, 620f, 660f);
+            // The preferred 620x660 panel, shrunk to and centred in the visible viewport. At 120% the
+            // design viewport is 1333x750 units, so a fixed y=120 panel would put Back off the bottom.
+            Rect panel = ModalPanelRect(620f, 660f);
             DrawBackdrop(panel, AccentGold);
 
             GUI.Label(new Rect(panel.x + 28f, panel.y + 22f, panel.width - 56f, 36f),
@@ -148,10 +151,11 @@ namespace LuanShi
 
             GUI.Label(new Rect(x, y, width, 24f),
                 $"UI scale  {Mathf.RoundToInt(uiScale * 100f)}%", uiBody);
-            float nextScale = GUI.HorizontalSlider(new Rect(x, y + 32f, width, 24f), uiScale, 0.8f, 1.2f);
+            float nextScale = GUI.HorizontalSlider(new Rect(x, y + 32f, width, 24f), uiScale,
+                UiPointerMapping.MinUiScale, UiPointerMapping.MaxUiScale);
             if (!Mathf.Approximately(nextScale, uiScale))
             {
-                uiScale = Mathf.Clamp(nextScale, 0.8f, 1.2f);
+                uiScale = UiPointerMapping.ClampUiScale(nextScale);
                 SavePresentationSettings();
             }
             y += 92f;

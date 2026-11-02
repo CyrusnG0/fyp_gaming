@@ -26,33 +26,29 @@ namespace LuanShi
         private static readonly Color InkScreen = new Color(0.10f, 0.08f, 0.06f, 1f);
 
         // ---------------------------------------------------------------- layout (1600x900 design space)
-        private const float DesignWidth = 1600f;
-        private const float TopBarX = 10f;
-        private const float TopBarY = 8f;
-        private const float TopBarWidth = 1380f;
-        private const float TopBarHeight = 52f;
-        private const float EndTurnX = 1400f;
-        private const float EndTurnY = 8f;
-        private const float EndTurnWidth = 190f;
+        // Fixed presentation sizes. Anything anchored to a window edge is computed per frame in
+        // KingdomDemo.UiFrame.cs, because the visible design viewport is wider at 80% and narrower at
+        // 120%; the shared arithmetic lives in LuanShi.Engine.UiLayout.
+        private const float TopBarX = UiLayout.EdgeMargin;
+        private const float TopBarY = UiLayout.TopBarY;
+        private const float TopBarHeight = UiLayout.TopBarHeight;
+        private const float EndTurnY = UiLayout.TopBarY;
+        private const float EndTurnWidth = UiLayout.ColumnWidth;
         private const float EndTurnHeight = 44f;
-        private const float TabColumnX = 1400f;
-        private const float TabColumnWidth = 190f;
+        private const float TabColumnWidth = UiLayout.ColumnWidth;
         private const float TabTop = 68f;
         private const float TabStep = 46f;
         private const float TabHeight = 40f;
-        private const float PanelTop = 68f;
-        private const float LeftPanelX = 10f;
-        private const float ContentRight = 1390f;
+        private const float PanelTop = UiLayout.DockY;
+        private const float LeftPanelX = UiLayout.EdgeMargin;
         private const float CityPanelWidth = SelectionPanelMaxWidth;
         private const float ArmyPanelWidth = SelectionPanelMaxWidth;
-        private const float StatusBarX = 10f;
-        private const float StatusBarY = 846f;
-        private const float StatusBarWidth = 1380f;
-        private const float StatusBarHeight = 46f;
+        private const float StatusBarX = UiLayout.EdgeMargin;
+        private const float StatusBarHeight = UiLayout.StatusBarHeight;
 
         private const float PanelAccentWidth = 5f;
         private const float PanelBorderWidth = 1.5f;
-        private const float PanelGutter = 12f;
+        private const float PanelGutter = UiLayout.PanelGutter;
 
         // Selected-marker ring: a double, high-contrast ring that survives the fog wash.
         private const float SelectionRingHeight = 0.04f;

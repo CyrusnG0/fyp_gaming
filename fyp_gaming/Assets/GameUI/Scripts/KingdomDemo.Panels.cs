@@ -15,9 +15,7 @@ namespace LuanShi
         void OnGUI()
         {
             uiRects.Clear();
-            float s = Screen.width / DesignWidth;
-            s *= uiScale;
-            GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
+            BeginUiFrame();
             PrepareUiTheme();
 
             if (!ready)

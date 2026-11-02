@@ -36,12 +36,14 @@ namespace LuanShi
         {
             if (uiInputLocked && !spectatorMode) return;   // single-LLM lock: no tab body at all
             float height = TabPanelHeight();
-            // The side dock (agent/spectator) owns 960..1380, so a docked tab body stays left of it.
+            // The side dock owns the right of the map area, so a docked tab body stays left of it. The
+            // width is anchored: at 120% the visible design viewport is narrower than 1600 units.
             float x = SideDockVisible() ? TabPanelDockedX : TabPanelX;
-            var p = new Rect(x, TabPanelY, TabPanelWidth, height);
+            float width = TabPanelWidth;
+            var p = new Rect(x, TabPanelY, width, height);
             uiRects.Add(p);
             DrawBackdrop(p, CurrentSeatAccent());
-            GUI.Label(new Rect(p.x + 20, p.y + 12, TabPanelWidth - 40f, 30), TabTitle(), title);
+            GUI.Label(new Rect(p.x + 20, p.y + 12, width - 40f, 30), TabTitle(), title);
 
             bool scrolls = activeTab == "domestic" || activeTab == "diplomacy"
                         || activeTab == "intel" || activeTab == "research";
@@ -50,22 +52,29 @@ namespace LuanShi
                 // A concept panel can outgrow the shell (diplomacy rows, intel missions, research lines):
                 // it gets a scroll view, and Input.cs switches TBTK's camera zoom off while the pointer
                 // is over a panel, so the wheel scrolls here instead of zooming the map underneath.
-                var view = new Rect(p.x + 4, p.y + 52, TabPanelWidth - 8f, height - 52f - 56f);
+                var view = new Rect(p.x + 4, p.y + 52, width - 8f, height - 52f - 56f);
                 float contentHeight = tabContentHeights.TryGetValue(activeTab, out var measured)
                     ? measured : view.height;
                 // Never below the view height: content that fits yields a zero scroll range (no phantom
                 // scrolling into blank space), while real overflow keeps its exact measured range.
                 contentHeight = Mathf.Max(contentHeight, view.height);
+
+                // The drawers keep their 800-wide design layout. When the viewport is too narrow for it
+                // (120% with the side dock up) the content keeps that width and stays reachable through
+                // a horizontal bar instead of being cut off. At 100% the bar never appears.
+                float contentWidth = Mathf.Max(UiLayout.TabPanelBaseWidth - 24f, view.width);
+                bool horizontal = contentWidth > view.width + 0.5f;
+
                 tabScrolls.TryGetValue(activeTab, out var scroll);
                 TryWheelScroll(p, view, contentHeight, ref scroll);
 
-                // 776 leaves room for the vertical bar (16px) without ever triggering a horizontal one
-                scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, TabPanelWidth - 24f, contentHeight), false, false);
+                scroll = GUI.BeginScrollView(view, scroll, new Rect(0f, 0f, contentWidth, contentHeight),
+                                             horizontal, false);
                 tabScrolls[activeTab] = scroll;
 
                 // x - 4 and y - 52 cancel the view's own offsets, so a panel keeps the exact layout it
                 // had outside the scroll view (its drawers still work in the old panel coordinates).
-                var inner = new Rect(-4f, -52f, TabPanelWidth, contentHeight);
+                var inner = new Rect(-4f, -52f, contentWidth, contentHeight);
                 float endY;
                 switch (activeTab)
                 {
@@ -85,7 +94,10 @@ namespace LuanShi
             }
 
             // pinned to the panel bottom, so a content-sized panel keeps its button inside
-            if (GUI.Button(new Rect(p.x + 320, p.y + height - 56, 160, 40), "Close", btn)) activeTab = "map";
+            float closeWidth = 160f;
+            float closeX = Mathf.Clamp(p.x + 320f, p.x + 20f, p.x + width - 20f - closeWidth);
+            if (GUI.Button(new Rect(closeX, p.y + height - 56, closeWidth, 40), "Close", btn))
+                activeTab = "map";
         }
 
         /// <summary>
@@ -99,8 +111,8 @@ namespace LuanShi
         {
             var e = Event.current;
             if (e == null || e.type != EventType.ScrollWheel) return false;
-            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
+            UiPointerMapping.EventToDesignSpace(e.mousePosition.x, e.mousePosition.y,
+                out float mouseX, out float mouseY);
             if (!panel.Contains(new Vector2(mouseX, mouseY))) return false;
 
             float range = contentHeight - view.height;
@@ -208,15 +220,16 @@ namespace LuanShi
             // scrollbar only appears when the cap actually bites
             float viewHeight = HistorianViewHeight();
             float contentHeight = records.Count * HistorianLineHeight + 8f;
-            var view = new Rect(p.x + 20, p.y + 80, 760, viewHeight);
+            float viewWidth = Mathf.Min(760f, Mathf.Max(200f, p.width - 40f));
+            var view = new Rect(p.x + 20, p.y + 80, viewWidth, viewHeight);
             TryWheelScroll(p, view, contentHeight, ref historianScroll);
             historianScroll = GUI.BeginScrollView(view, historianScroll,
-                                                  new Rect(0, 0, 744, contentHeight), false, false);
+                                                  new Rect(0, 0, viewWidth - 16f, contentHeight), false, false);
             for (int i = 0; i < records.Count; i++)
             {
                 string line = HistorianLine(records[i]);
-                GUI.Label(new Rect(4, 4 + i * HistorianLineHeight, TabPanelWidth - 64f, HistorianLineHeight),
-                          EllipsizeToWidth(mono, line, TabPanelWidth - 64f), mono);
+                GUI.Label(new Rect(4, 4 + i * HistorianLineHeight, viewWidth - 24f, HistorianLineHeight),
+                          EllipsizeToWidth(mono, line, viewWidth - 24f), mono);
             }
             GUI.EndScrollView();
 

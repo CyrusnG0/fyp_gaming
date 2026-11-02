@@ -141,8 +141,10 @@ namespace LuanShi
         {
             Event e = Event.current;
             if (e == null || e.type != EventType.ScrollWheel) return;
-            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
+            // Event.mousePosition is already in design space under OnGUI's GUI.matrix (see
+            // UiPointerMapping.EventToDesignSpace); only Input.mousePosition needs converting.
+            UiPointerMapping.EventToDesignSpace(e.mousePosition.x, e.mousePosition.y,
+                out float mouseX, out float mouseY);
             if (!viewport.Contains(new Vector2(mouseX, mouseY))) return;
             agentChatScroll.y = ChatScrollLogic.OffsetAfterWheel(
                 agentChatScroll.y, e.delta.y, ChatWheelStep, maxScroll);

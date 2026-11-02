@@ -61,8 +61,10 @@ namespace LuanShi
         {
             var e = Event.current;
             if (e == null || Screen.width <= 0) return false;
-            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
+            // Event positions are already design-space under the GUI matrix (see
+            // UiPointerMapping.EventToDesignSpace), so no scale division here.
+            UiPointerMapping.EventToDesignSpace(e.mousePosition.x, e.mousePosition.y,
+                out float mouseX, out float mouseY);
             return rect.Contains(new Vector2(mouseX, mouseY));
         }
 
@@ -86,14 +88,16 @@ namespace LuanShi
             if (string.IsNullOrEmpty(GUI.tooltip)) return;
             var e = Event.current;
             if (e == null) return;
-            UiPointerMapping.ToDesignSpaceFromTopLeft(e.mousePosition.x, e.mousePosition.y,
-                Mathf.RoundToInt(Screen.width / uiScale), out float mouseX, out float mouseY);
+            UiPointerMapping.EventToDesignSpace(e.mousePosition.x, e.mousePosition.y,
+                out float mouseX, out float mouseY);
             var mouse = new Vector2(mouseX, mouseY);
             float width = Mathf.Min(TooltipMaxWidth,
                 Mathf.Max(120f, uiSmall.CalcSize(new GUIContent(GUI.tooltip)).x + TooltipPadding * 2f));
             float height = uiSmallWrap.CalcHeight(new GUIContent(GUI.tooltip), width - TooltipPadding * 2f)
                            + TooltipPadding * 2f;
             var rect = new Rect(mouse.x + TooltipOffset, mouse.y + TooltipOffset, width, height);
+            // Bounds are the *visible* viewport (DesignWidth/DesignHeight), not the 1600x900 reference:
+            // at 120% clamping to the reference would park the tooltip over the clipped area.
             if (rect.xMax > DesignWidth - 8f) rect.x = mouse.x - TooltipOffset - width;
             if (rect.yMax > DesignHeight - 8f) rect.y = mouse.y - TooltipOffset - height;
             rect.x = Mathf.Clamp(rect.x, 8f, Mathf.Max(8f, DesignWidth - rect.width - 8f));
@@ -153,8 +157,10 @@ namespace LuanShi
             if (node == null || cam == null) return false;
             var screen = cam.WorldToScreenPoint(node.GetPos() + Vector3.up * CityLabelAnchorHeight);
             if (screen.z <= 0f) return false;
-            float scale = Screen.width / DesignWidth;
-            designPoint = new Vector2(screen.x / scale, (Screen.height - screen.y) / scale);
+            // Same frame transform as OnGUI and the pointer paths: fit x uiScale, Y flipped once.
+            UiPointerMapping.ToDesignSpace(screen.x, screen.y, Screen.width, Screen.height, uiScale,
+                out float designX, out float designY);
+            designPoint = new Vector2(designX, designY);
             // Off-screen anchors must not all clamp to one edge and pile their labels together.
             return designPoint.x >= LeftPanelX && designPoint.x <= ContentRight
                 && designPoint.y >= TopBarY + TopBarHeight && designPoint.y <= DesignHeight;
