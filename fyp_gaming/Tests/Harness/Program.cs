@@ -104,6 +104,14 @@ internal static partial class Harness
         RunInvestigationRequests();
         RunDemoS4();
         RunUiScale();
+        RunMovementOptions();
+        RunLlmMovement();
+        RunLlmMovementPrompts();
+        RunLlmMovementStale();
+        RunFakeTurnPlan();
+        RunFeedbackPolicy();
+        RunLlmTerminal();
+        RunMovementMemoryIntegration();
         RunDeliberationBudget();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
