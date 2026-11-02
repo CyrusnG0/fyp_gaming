@@ -47,7 +47,10 @@ namespace LuanShi
             }
 
             FillScreen(InkScreen);
-            Rect panel = new Rect(340f, 130f, 920f, 640f);
+            // Same fitted modal geometry as pause/settings: at 100% 16:9 this is the historical
+            // (340,130,920,640); at 120% the panel is centred in the 1333x750 viewport so Continue and
+            // every stat row stay well inside it.
+            Rect panel = ModalPanelRect(920f, 640f);
             DrawBackdrop(panel, MutedRed);
             GUI.Label(new Rect(panel.x + 28f, panel.y + 22f, panel.width - 56f, 34f),
                 "Battle result", title);

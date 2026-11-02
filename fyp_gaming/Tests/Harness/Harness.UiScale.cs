@@ -19,6 +19,8 @@ internal static partial class Harness
         RunUiScaleLayoutAnchors();
         RunUiScalePointerAgreement();
         RunUiScaleModalFit();
+        RunUiScaleSelectionPopup();
+        RunUiScaleBattleModal();
     }
 
     // ---- 1: 100% on 16:9 must be the unchanged reference layout -------------------
@@ -234,4 +236,116 @@ internal static partial class Harness
 
     private static float MathfPercent(float scale)
         => (float)Math.Round(scale * 100f);
+
+    // ---- 6: the location-choice popup is anchored with the same transform --------
+
+    private static void RunUiScaleSelectionPopup()
+    {
+        Section("[UI-SCALE] location-choice popup follows the shared frame transform");
+
+        // DrawLocationChoice projects the marker to screen pixels and maps them back with
+        // UiPointerMapping.ToDesignSpace(..., uiScale) - the same call TryProjectCity uses - then offsets
+        // by (+24, -42) and clamps inside ContentRight/StatusBarY with a 220x112 popup (8 px margins).
+        // A marker at a fixed design point must therefore put the popup at the same design point at every
+        // UI scale, and the clamped popup must stay inside the map band.
+        int[] widths = { 1920, 1280, 1600 };
+        int[] heights = { 1080, 960, 900 };
+        float[] scales = { 0.8f, 1f, 1.2f };
+        const float popupWidth = 220f;
+        const float popupHeight = 112f;
+
+        for (int w = 0; w < widths.Length; w++)
+        {
+            for (int s = 0; s < scales.Length; s++)
+            {
+                UiViewport viewport = UiPointerMapping.Viewport(widths[w], heights[w], scales[s]);
+                UiLayoutMetrics layout = UiLayout.Compute(viewport);
+                float markerX = layout.ContentRight * 0.5f;
+                float markerY = layout.StatusBarY * 0.5f;
+
+                UiPointerMapping.ToScreenPoint(markerX, markerY, heights[w], viewport.Scale,
+                    out float screenX, out float screenYBottomLeft);
+                UiPointerMapping.ToDesignSpace(screenX, screenYBottomLeft, widths[w], heights[w],
+                    scales[s], out float anchorX, out float anchorY);
+
+                float popupX = ClampValue(anchorX + 24f, UiLayout.EdgeMargin,
+                    layout.ContentRight - popupWidth - 8f);
+                float popupY = ClampValue(anchorY - 42f, UiLayout.TopBarY + UiLayout.TopBarHeight + 8f,
+                    layout.StatusBarY - popupHeight - 8f);
+
+                bool anchored = Math.Abs(anchorX - markerX) < 0.05f && Math.Abs(anchorY - markerY) < 0.05f;
+                bool inside = popupX >= UiLayout.EdgeMargin
+                              && popupX + popupWidth <= layout.ContentRight + 0.01f
+                              && popupY >= UiLayout.TopBarY + UiLayout.TopBarHeight
+                              && popupY + popupHeight <= layout.StatusBarY + 0.01f;
+                Check(anchored && inside,
+                    $"[UI-SCALE] {MathfPercent(scales[s])} {widths[w]}x{heights[w]}: the location-choice "
+                    + "popup stays beside its marker and inside the map band");
+            }
+        }
+
+        // The removed Screen.width/1600f scale placed the same marker at marker * uiScale (16:9), i.e.
+        // 20% off at 120% on a 1920 window; the shared transform must not reproduce that drift.
+        UiViewport large = UiPointerMapping.Viewport(1920, 1080, 1.2f);
+        UiLayoutMetrics largeLayout = UiLayout.Compute(large);
+        float probe = largeLayout.ContentRight * 0.5f;
+        UiPointerMapping.ToScreenPoint(probe, largeLayout.StatusBarY * 0.5f, 1080, large.Scale,
+            out float probeScreenX, out float probeScreenY);
+        float legacyAnchorX = probeScreenX / (1920f / 1600f);
+        UiPointerMapping.ToDesignSpace(probeScreenX, probeScreenY, 1920, 1080, 1.2f,
+            out float sharedAnchorX, out _);
+        Check(Near(sharedAnchorX, probe) && Math.Abs(legacyAnchorX - probe) > 40f,
+            "[UI-SCALE] at 120% the old Screen.width/1600f anchor drifted the popup off its hex");
+    }
+
+    // ---- 7: the battle-result modal fits and Continue stays reachable -------------
+
+    private static void RunUiScaleBattleModal()
+    {
+        Section("[UI-SCALE] battle-result modal fits and Continue stays reachable");
+
+        UiViewport reference = UiPointerMapping.Viewport(1600, 900, 1f);
+        DesignRect historical = UiLayout.CenteredModal(reference, 920f, 640f);
+        Check(Near(historical.X, 340f) && Near(historical.Y, 130f)
+              && Near(historical.Width, 920f) && Near(historical.Height, 640f),
+            "[UI-SCALE] 100% 16:9 keeps the battle modal at its historical 340,130 920x640");
+
+        int[] widths = { 1920, 1280, 1600 };
+        int[] heights = { 1080, 960, 900 };
+        float[] scales = { 0.8f, 1f, 1.2f };
+
+        for (int w = 0; w < widths.Length; w++)
+        {
+            for (int s = 0; s < scales.Length; s++)
+            {
+                UiViewport viewport = UiPointerMapping.Viewport(widths[w], heights[w], scales[s]);
+                DesignRect panel = UiLayout.CenteredModal(viewport, 920f, 640f);
+                // Continue sits at the panel's bottom-right (yMax - 62, height 38); the defender block
+                // starts 340 below the panel top and its troop row ends 70 further down.
+                float continueTop = panel.YMax - 62f;
+                float continueBottom = continueTop + 38f;
+                float defenderBlockBottom = panel.Y + 340f + 70f;
+                bool fits = panel.X >= 0f && panel.XMax <= viewport.Width + 0.01f
+                            && panel.Y >= 0f && panel.YMax <= viewport.Height + 0.01f
+                            && continueTop >= panel.Y && continueBottom <= panel.YMax
+                            && continueBottom <= viewport.Height - 24f
+                            && defenderBlockBottom <= panel.YMax - 92f;
+                Check(fits,
+                    $"[UI-SCALE] {MathfPercent(scales[s])} {widths[w]}x{heights[w]}: battle Continue and "
+                    + "the stat rows stay at least 24 design units above the window bottom");
+            }
+        }
+
+        // The old fixed y=130..770 plate left only 4 design units under Continue at 120% 16:9; the
+        // fitted modal must give it real clearance.
+        UiViewport large = UiPointerMapping.Viewport(1600, 900, 1.2f);
+        DesignRect fitted = UiLayout.CenteredModal(large, 920f, 640f);
+        float clearance = large.Height - (fitted.YMax - 62f + 38f);
+        float legacyClearance = large.Height - (130f + 640f - 62f + 38f);
+        Check(clearance >= 60f && clearance > legacyClearance + 50f,
+            "[UI-SCALE] at 120% 16:9 the fitted battle modal gives Continue far more bottom clearance");
+    }
+
+    private static float ClampValue(float value, float min, float max)
+        => value < min ? min : (value > max ? max : value);
 }

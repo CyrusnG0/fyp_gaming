@@ -5,6 +5,7 @@
 // always obvious. It is presentation-only: no game state is read or changed.
 
 using UnityEngine;
+using LuanShi.Engine;
 
 namespace LuanShi
 {
@@ -75,12 +76,23 @@ namespace LuanShi
                 return;
             }
 
-            float scale = Screen.width / 1600f;
-            Vector3 screenPoint = Camera.main != null
-                ? Camera.main.WorldToScreenPoint(node.GetPos())
-                : new Vector3(800f * scale, Screen.height * 0.5f, 1f);
-            float x = screenPoint.x / scale + 24f;
-            float y = (Screen.height - screenPoint.y) / scale - 42f;
+            // Same frame transform as Presentation.TryProjectCity and every pointer path: world ->
+            // screen pixels -> visible design space (fit x uiScale, Y flipped once). The hardcoded
+            // Screen.width/1600 here put the popup beside the wrong hex at 80% and 120%.
+            float designX, designY;
+            if (Camera.main != null)
+            {
+                Vector3 screenPoint = Camera.main.WorldToScreenPoint(node.GetPos());
+                UiPointerMapping.ToDesignSpace(screenPoint.x, screenPoint.y, Screen.width, Screen.height,
+                    uiScale, out designX, out designY);
+            }
+            else
+            {
+                designX = DesignWidth * 0.5f;
+                designY = DesignHeight * 0.5f;
+            }
+            float x = designX + 24f;
+            float y = designY - 42f;
             const float width = 220f;
             const float height = 112f;
             x = Mathf.Clamp(x, LeftPanelX, ContentRight - width - 8f);
