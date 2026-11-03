@@ -19,11 +19,14 @@ namespace LuanShi.Engine
         /// Builds one bounded fake turn: capture march (captures preferred, else the first option),
         /// then one affordable domestic order, then end_turn. Null/blocked movement still yields a
         /// valid domestic plan, so the editor rehearsal never stalls on a map-less fixture.
+        /// When manualLookup is enabled, prepend a rule query before the existing action sequence.
         /// </summary>
         public static IReadOnlyList<string> Build(MovementView movement, Observation observation,
-            string seatId)
+            string seatId, bool manualLookup = false)
         {
             var actions = new List<string>();
+            if (manualLookup)
+                actions.Add("{\"tool\":\"manual_lookup\",\"topic\":\"recruit\"}");
             int ordersLeft = observation == null ? 0 : observation.CommandPoints;
 
             ArmyMovePlan marchArmy = null;

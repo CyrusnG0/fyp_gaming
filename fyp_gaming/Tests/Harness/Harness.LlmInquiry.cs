@@ -22,6 +22,7 @@ internal static partial class Harness
         Section("[LS-022] manual_lookup inquiry loop (offline, opt-in)");
         InquiryFlagIsOffByDefault();
         InquiryRunsResultInNextPromptThenEndTurn();
+        InquiryFakePlanActsAfterLookup();
         InquiryOptOutKeepsLegacyActionPath();
         InquiryRejectsOtherToolsBeforeExecution();
         InquiryRejectsModelSuppliedAuthority();

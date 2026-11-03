@@ -373,7 +373,8 @@ namespace LuanShi
         {
             if (agentFake == null) return;
             agentFake.Reset();
-            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId);
+            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId,
+                agentConfig != null && agentConfig.EnableManualLookup);
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
