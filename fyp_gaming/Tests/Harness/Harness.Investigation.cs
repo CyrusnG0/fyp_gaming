@@ -23,6 +23,7 @@ internal static partial class Harness
         InvestigationBoundsAndNonMutation();
         InvestigationContextFailClosed();
         InvestigationResponseBounds();
+        InvestigationManualTopicsExpansion();
     }
 
     // ---- fixtures ----------------------------------------------------------
@@ -152,7 +153,8 @@ internal static partial class Harness
         InvestigationService service = InvestigationServiceFor(engine, observation);
 
         ManualLookupResult index = service.ManualLookup("");
-        Check(index.Ok && index.Topics.Count == 9, "[LS-018] empty topic returns the nine-topic index");
+        Check(index.Ok && index.Topics.Count == 17,
+            "[LS-018] empty topic returns the seventeen-topic index");
         Check(index.CommandPointCost == -1 && index.Facts.Count == 0,
             "[LS-018] the index is not itself an action");
         Check(InvestigationParses(index.ToJson()), "[LS-018] topic index JSON is valid");
@@ -202,9 +204,9 @@ internal static partial class Harness
                 "[LS-018] the seven domestic actions are individually discoverable: " + domestic);
         }
 
-        ManualLookupResult unsupported = service.ManualLookup("combat");
+        ManualLookupResult unsupported = service.ManualLookup("navy");
         Check(!unsupported.Ok && unsupported.ErrorCode == "unsupported_topic"
-              && unsupported.Topics.Count == 9,
+              && unsupported.Topics.Count == 17,
             "[LS-018] unsupported rules return an explicit bounded index, not invented content");
         Check(InvestigationParses(unsupported.ToJson()), "[LS-018] unsupported-topic JSON is valid");
 

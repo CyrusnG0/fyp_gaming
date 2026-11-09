@@ -4,8 +4,9 @@ using System.Collections.Generic;
 namespace LuanShi.Engine
 {
     /// <summary>
-    /// Builds the bounded English manual_lookup answer from the catalogue plus BalanceConfig and the
-    /// existing action contract. No game-state object is read and no rule is invented here.
+    /// Builds the bounded English manual_lookup answer from the combined topic library
+    /// (<see cref="InvestigationManualTopics.All"/>) plus BalanceConfig and the existing action
+    /// contract. No game-state object is read and no rule is invented here.
     /// </summary>
     internal static class InvestigationManual
     {
@@ -14,8 +15,8 @@ namespace LuanShi.Engine
         private const int LevelGainPerOrder = 1;
 
         private const string CoverageNote =
-            "Implemented rules only. This is a partial manual: combat, pathfinding, diplomacy, "
-            + "espionage, research and deferred actions are not served by this foundation.";
+            "Implemented rules only, rendered from the engine's balance configuration. Espionage mission "
+            + "detail, runner/UI behaviour and unimplemented features are not served by this foundation.";
 
         private const string InquiryNote =
             "Read-only inquiry spends no game command points here; runner investigation budgets are deferred.";
@@ -49,7 +50,7 @@ namespace LuanShi.Engine
 
             var exact = new List<InvestigationTopicDefinition>();
             var partial = new List<InvestigationTopicDefinition>();
-            foreach (InvestigationTopicDefinition candidate in InvestigationCatalogue.Topics)
+            foreach (InvestigationTopicDefinition candidate in InvestigationManualTopics.All)
             {
                 if (IsExact(candidate, normalized)) exact.Add(candidate);
                 else if (IsPartial(candidate, normalized)) partial.Add(candidate);
@@ -109,9 +110,13 @@ namespace LuanShi.Engine
                 case ActionType.Fortify: FillFortify(facts); break;
                 case ActionType.Relief: FillRelief(facts); break;
                 default:
-                    result.Fail("unsupported_topic", "No implemented rule content is available.");
-                    result.Notes = new List<string> { CoverageNote }.AsReadOnly();
-                    return result;
+                    if (!InvestigationManualTopicContent.TryFill(topic.Id, facts, notes, balance))
+                    {
+                        result.Fail("unsupported_topic", "No implemented rule content is available.");
+                        result.Notes = new List<string> { CoverageNote }.AsReadOnly();
+                        return result;
+                    }
+                    break;
             }
 
             if (topic.ActionType != null)
@@ -121,6 +126,10 @@ namespace LuanShi.Engine
                 facts.Insert(1, Fact("llm_action_exposed", topic.LlmActionExposed ? "yes" : "no",
                     "The current LLM action catalogue advertises the seven domestic actions for owned cities."));
                 notes.Add("The engine's single validator remains authoritative; advertised actions are candidates.");
+            }
+            else
+            {
+                notes.Add(InvestigationManualTopics.ActionCaveat);
             }
 
             result.Facts = facts.AsReadOnly();
@@ -298,7 +307,7 @@ namespace LuanShi.Engine
         {
             var entries = new List<TopicIndexEntry>();
             int limit = options.MaxTopicIndexEntries;
-            foreach (InvestigationTopicDefinition topic in InvestigationCatalogue.Topics)
+            foreach (InvestigationTopicDefinition topic in InvestigationManualTopics.All)
             {
                 if (entries.Count >= limit) break;
                 entries.Add(new TopicIndexEntry
