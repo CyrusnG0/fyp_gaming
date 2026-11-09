@@ -89,6 +89,16 @@ namespace LuanShi.Engine
         public const int StartGold = 300;                 // TBD
         public const int StartFieldArmyTroops = 2000;     // TBD
 
+        // ---- opt-in reduced profile (BalanceProfile.EasyResearch, 2026-11-09) -------------------
+        // A match plays either the standard values above or this profile; nothing here changes the
+        // standard path. Domestic gold costs are multiplied then rounded up (see BalanceProfile).
+
+        public const int EasyStartFood = 1500;                 // reduced: 3× the standard opening food
+        public const int EasyStartGold = 900;                  // reduced: 3× the standard opening gold
+        public const int EasyCityBaseFoodYield = 300;          // reduced: 1.5× the standard passive harvest
+        public const float EasyArmyFoodUpkeepMultiplier = 0.5f;    // reduced: troop (army/garrison) upkeep halved
+        public const float EasyDomesticGoldCostMultiplier = 0.5f;  // reduced: 輕徭/募兵 gold halved, rounded up
+
         // ---- 戰鬥 M2/M3 (design §6, ACTIONS.md §4) ------------------------------
 
         public const int ArmyMoraleStart = 60;             // TBD: 士氣 of a new army

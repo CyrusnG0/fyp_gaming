@@ -19,6 +19,13 @@ namespace LuanShi.Engine
         public readonly EventLog Log = new EventLog();
         public Action<string> CombatDebugLogger;
 
+        /// <summary>
+        /// The match-scoped balance rules chosen when this engine was created. Immutable for the
+        /// match's lifetime, and read by every seat's command pipeline, so the rules cannot drift
+        /// between a human and an LLM seat or leak into another match.
+        /// </summary>
+        public readonly BalanceProfile Balance;
+
         private readonly Random rng;
         private int nextActionId = 1;
 
@@ -26,10 +33,11 @@ namespace LuanShi.Engine
         // hidden own/neutral city). This keeps rejected espionage orders from becoming a free oracle.
         private const string UnavailableSpyTarget = "target city is not available for this mission";
 
-        public GameEngine(int seed, string gameId = "g-001")
+        public GameEngine(int seed, string gameId = "g-001", BalanceProfile balance = null)
         {
             rng = new Random(seed);
             State.GameId = gameId;
+            Balance = balance ?? BalanceProfile.Standard;
         }
 
         // ---- season lifecycle ------------------------------------------------
@@ -104,12 +112,12 @@ namespace LuanShi.Engine
                 city.Gold += taxes;
 
                 int harvest = revolted ? 0
-                            : (int)(BalanceConfig.CityBaseFoodYield
+                            : (int)(Balance.CityBaseFoodYield
                                   * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood
                                   * BalanceConfig.ResearchFoodYieldMult(agriLevel));
                 city.Food += harvest;
                 int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
-                                + city.Garrison * UnitTypes.FoodPerTroop(city.GarrisonType));
+                                + Balance.TroopFoodUpkeep(city.Garrison, city.GarrisonType));
                 city.Food -= eaten;
 
                 string note = null;
@@ -195,13 +203,14 @@ namespace LuanShi.Engine
         /// <summary>
         /// One army's seasonal ration (design §5.1 補給 down → desert, §6.3 斷補 10%/季).
         /// Simplification (documented in ADR-013): 補給 0–100 and distance-from-home are not modelled.
-        /// The army eats Troops × UnitTypes.FoodPerTroop(army.UnitType); the city it stands on pays first, the faction's
+        /// The army eats Troops × UnitTypes.FoodPerTroop(army.UnitType), scaled by the match's profile
+        /// (the reduced profile halves troop upkeep); the city it stands on pays first, the faction's
         /// other cities cover the rest in proportion to their stores. A faction pool that cannot cover
         /// the whole ration feeds nobody — the army deserts instead of eating a fraction.
         /// </summary>
         private void ResolveArmySupply(ArmyState army)
         {
-            int need = (int)(army.Troops * UnitTypes.FoodPerTroop(army.UnitType));
+            int need = (int)Balance.TroopFoodUpkeep(army.Troops, army.UnitType);
             if (need <= 0) return;
 
             if (FoodPoolOf(army.OwnerSeatId) < need)
@@ -370,18 +379,19 @@ namespace LuanShi.Engine
             return ValidationResult.Success;
         }
 
-        /// <summary>D2 輕徭: gold buys 民心.</summary>
+        /// <summary>D2 輕徭: gold buys 民心 (the profile may discount the gold cost).</summary>
         private ValidationResult DoLightenLabor(FactionState fac, ActionCommand cmd)
         {
             ValidationResult check = OwnCity(fac, cmd, out CityState city);
             if (!check.Ok) return check;
-            if (city.Gold < BalanceConfig.LightenLaborGoldCost)
-                return ValidationResult.Fail($"not enough gold (needs {BalanceConfig.LightenLaborGoldCost})");
+            int cost = Balance.LightenLaborGoldCost;
+            if (city.Gold < cost)
+                return ValidationResult.Fail($"not enough gold (needs {cost})");
 
-            city.Gold -= BalanceConfig.LightenLaborGoldCost;
+            city.Gold -= cost;
             AddMorale(city, BalanceConfig.LightenLaborMoraleGain);
             Emit(fac.SeatId, fac.Controller, "labor_lightened", "owner_and_observers",
-                P("city_id", city.Id, "gold_spent", BalanceConfig.LightenLaborGoldCost.ToString(),
+                P("city_id", city.Id, "gold_spent", cost.ToString(),
                   "morale", city.Morale.ToString()), cmd.ActionId);
             return ValidationResult.Success;
         }
@@ -425,7 +435,7 @@ namespace LuanShi.Engine
                 return ValidationResult.Fail(
                     $"garrison is {garrisonType}; recruit the same type or empty the garrison first");
 
-            int goldCost = UnitTypes.RecruitGoldCost(unitType, BalanceConfig.RecruitTroopGain);
+            int goldCost = Balance.RecruitGoldCost(unitType, BalanceConfig.RecruitTroopGain);
             if (city.Gold < goldCost)
                 return ValidationResult.Fail($"not enough gold (needs {goldCost})");
             if (city.Population < BalanceConfig.RecruitPopCost)
@@ -935,6 +945,7 @@ namespace LuanShi.Engine
                 Prestige = fac.Prestige,
                 ResearchPoints = fac.ResearchPoints,     // 研究 is private to the seat (ADR-014)
                 WinnerSeatId = State.WinnerSeatId,
+                Balance = this.Balance,                  // seat-safe queries advertise the match's costs
             };
             foreach (string line in ResearchLine.All) obs.Research[line] = fac.ResearchLevel(line);
 
