@@ -44,6 +44,7 @@ namespace LuanShi.Engine
             public Observation Observation;
             public string PromptVersion;
             public string SchemaHash;
+            public int MaxOutputTokens;
         }
 
         private readonly ILlmTransport _transport;
@@ -207,8 +208,23 @@ namespace LuanShi.Engine
             InFlight flight = _inflight;
             if (flight.Generation != _generation) return;
 
-            if (TurnTimeExpired()) { FinishLimit("turn time limit reached", EndReason.TurnTimeLimit); return; }
-            if (RequestTimedOut(flight)) { FinishFailed("request timed out", EndReason.RequestTimeout); return; }
+            if (TurnTimeExpired())
+            {
+                var expired = LlmResponse.Failure(LlmErrorKind.Timeout, "turn time limit reached",
+                    ElapsedMs(flight));
+                FinishLimit("turn time limit reached", EndReason.TurnTimeLimit);
+                // No provider response arrived: finish reason and usage are recorded as unknown.
+                WriteRecord(flight, expired, false, null, null, "turn time limit reached");
+                return;
+            }
+            if (RequestTimedOut(flight))
+            {
+                var timeout = LlmResponse.Failure(LlmErrorKind.Timeout, "request timed out",
+                    ElapsedMs(flight));
+                FinishFailed("request timed out", EndReason.RequestTimeout);
+                WriteRecord(flight, timeout, false, null, null, "request timed out");
+                return;
+            }
             if (!flight.Task.IsCompleted) return;
 
             _inflight = null;
@@ -228,6 +244,7 @@ namespace LuanShi.Engine
         {
             if (!IsRunning) return;
             string reason = Limit(Redact(why), 200);
+            InFlight flight = _inflight;
             _generation++;
             DropInflight();
             _clock?.Stop();
@@ -236,6 +253,14 @@ namespace LuanShi.Engine
             EndReason = EndReason.Cancelled;
             Status = "cancelled: " + FailureReason;
             AddActivity("finished", EndReasonText);
+            if (flight != null)
+            {
+                // Record the abandoned request with explicitly unknown provider fields. A late
+                // response is inert and must not be mistaken for this request's result.
+                var cancelled = LlmResponse.Failure(LlmErrorKind.Cancelled, FailureReason,
+                    ElapsedMs(flight));
+                WriteRecord(flight, cancelled, false, null, null, FailureReason);
+            }
         }
 
         private bool IsRunning => State == RunnerState.Requesting || State == RunnerState.Executing;
@@ -316,7 +341,11 @@ namespace LuanShi.Engine
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
+            string promptVersion = PromptBuilder.VersionFor(planning, inquiry);
+            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
+            // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
+            CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
             var cts = new CancellationTokenSource();
             if (_config.RequestTimeoutMs > 0) cts.CancelAfter(_config.RequestTimeoutMs);
 
@@ -325,12 +354,16 @@ namespace LuanShi.Engine
             catch (Exception)
             {
                 cts.Dispose();
+                CaptureExchangeDispatchFailure(index, observation.Season, promptVersion, schemaHash,
+                    "transport failed to start");
                 FinishFailed("transport failed to start", EndReason.TransportError);
                 return;
             }
             if (task == null)
             {
                 cts.Dispose();
+                CaptureExchangeDispatchFailure(index, observation.Season, promptVersion, schemaHash,
+                    "transport returned no task");
                 FinishFailed("transport returned no task", EndReason.TransportError);
                 return;
             }
@@ -350,8 +383,10 @@ namespace LuanShi.Engine
                 ObservationHash = Hash(observationJson),
                 Season = observation.Season,
                 Observation = observation,
-                PromptVersion = PromptBuilder.VersionFor(planning, inquiry),
-                SchemaHash = PromptBuilder.SchemaHashFor(planning, inquiry),
+                PromptVersion = promptVersion,
+                SchemaHash = schemaHash,
+                // Match the transport's effective fallback when the configured cap is zero.
+                MaxOutputTokens = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400,
             };
             State = RunnerState.Requesting;
             Status = "requesting response " + index;

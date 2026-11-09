@@ -74,22 +74,26 @@ namespace LuanShi.Engine
                     {
                         int latency = (int)Math.Min(int.MaxValue, clock.ElapsedMilliseconds);
                         int status = (int)response.StatusCode;
-                        if (!response.IsSuccessStatusCode)
-                            return FailureForStatus(status, latency);
 
                         long? declared = response.Content.Headers.ContentLength;
                         if (declared.HasValue && declared.Value > MaxResponseBytes)
                         {
                             cts.Cancel();
-                            return LlmResponse.Failure(LlmErrorKind.Malformed, "response too large", latency);
+                            return LlmResponse.Failure(LlmErrorKind.Malformed, "response too large", latency,
+                                null, status);
                         }
 
+                        // The body is read for success and failure alike so local evidence can keep the
+                        // exact provider response. It is bounded and never enters ErrorDetail.
                         BodyRead body = await ReadResponseBodyAsync(response, cts.Token);
                         if (body == null || body.TooLarge)
                         {
                             cts.Cancel();
-                            return LlmResponse.Failure(LlmErrorKind.Malformed, "response too large", latency);
+                            return LlmResponse.Failure(LlmErrorKind.Malformed, "response too large", latency,
+                                null, status);
                         }
+                        if (!response.IsSuccessStatusCode)
+                            return FailureForStatus(status, latency, body);
                         return ParseSuccess(body, latency, response);
                     }
                 }
@@ -241,27 +245,33 @@ namespace LuanShi.Engine
             return string.Join(",", encodings);
         }
 
-        private static LlmResponse FailureForStatus(int status, int latency)
+        private static LlmResponse FailureForStatus(int status, int latency, BodyRead body)
         {
+            string raw = body == null ? null : body.Text;
             if (status == 401 || status == 403)
-                return LlmResponse.Failure(LlmErrorKind.Auth, "authentication failed (HTTP " + status + ")", latency);
+                return LlmResponse.Failure(LlmErrorKind.Auth, "authentication failed (HTTP " + status + ")",
+                    latency, raw, status);
             if (status == 429)
-                return LlmResponse.Failure(LlmErrorKind.RateLimited, "rate limited (HTTP 429)", latency);
+                return LlmResponse.Failure(LlmErrorKind.RateLimited, "rate limited (HTTP 429)",
+                    latency, raw, status);
             if (status >= 500)
-                return LlmResponse.Failure(LlmErrorKind.Server, "provider error (HTTP " + status + ")", latency);
-            return LlmResponse.Failure(LlmErrorKind.Network, "provider rejected request (HTTP " + status + ")", latency);
+                return LlmResponse.Failure(LlmErrorKind.Server, "provider error (HTTP " + status + ")",
+                    latency, raw, status);
+            return LlmResponse.Failure(LlmErrorKind.Network, "provider rejected request (HTTP " + status + ")",
+                latency, raw, status);
         }
 
         private static LlmResponse ParseSuccess(BodyRead body, int latency, HttpResponseMessage response)
         {
             string text = body == null ? null : body.Text;
             int byteCount = body == null ? 0 : body.ByteCount;
+            int? status = response == null ? (int?)null : (int)response.StatusCode;
             if (body != null && !string.IsNullOrEmpty(body.DecodeError))
                 return LlmResponse.Failure(LlmErrorKind.Malformed,
-                    MalformedDetail(response, byteCount, body.DecodeError, text), latency);
+                    MalformedDetail(response, byteCount, body.DecodeError, text), latency, text, status);
             if (string.IsNullOrEmpty(text))
                 return LlmResponse.Failure(LlmErrorKind.Malformed,
-                    MalformedDetail(response, byteCount, "empty body", text), latency);
+                    MalformedDetail(response, byteCount, "empty body", text), latency, text, status);
 
             // Provider envelopes may carry floats/exponents in fields we ignore (usage details,
             // logprobs); model output itself is still parsed by the strict LlmActionParser.
@@ -272,24 +282,63 @@ namespace LuanShi.Engine
                 if (string.IsNullOrEmpty(step))
                     step = root == null ? "unexpected end" : "root not object";
                 return LlmResponse.Failure(LlmErrorKind.Malformed,
-                    MalformedDetail(response, byteCount, step, text), latency);
+                    MalformedDetail(response, byteCount, step, text), latency, text, status);
             }
 
             var choices = Field(obj, "choices") as JsonArray;
             var choice = choices != null && choices.Count > 0 ? choices.Items[0] as JsonObject : null;
             var message = choice == null ? null : Field(choice, "message") as JsonObject;
-            var content = message == null ? null : Field(message, "content") as JsonString;
-            if (content == null)
+            if (message == null)
                 return LlmResponse.Failure(LlmErrorKind.Malformed,
-                    MalformedDetail(response, byteCount, "no message content", text), latency);
+                    MalformedDetail(response, byteCount, "no message content", text), latency, text, status);
+
+            // A reasoning model may legitimately return content:null (or omit it) when the output
+            // budget was consumed. Treat that as an empty answer so the runner can diagnose it,
+            // rather than as a malformed provider envelope. A non-string content value is still a
+            // malformed envelope.
+            JsonNode contentNode = Field(message, "content");
+            string contentText = "";
+            if (contentNode is JsonString contentString)
+                contentText = contentString.Value;
+            else if (contentNode != null && !(contentNode is JsonNull))
+                return LlmResponse.Failure(LlmErrorKind.Malformed,
+                    MalformedDetail(response, byteCount, "invalid message content", text), latency, text, status);
+
+            string finishReason = null;
+            JsonNode finishNode = choice == null ? null : Field(choice, "finish_reason");
+            if (finishNode is JsonString finishString) finishReason = finishString.Value;
+
+            // reasoning_content is provider text, not the model's final answer. Only its presence
+            // and length are recorded as telemetry; it is never parsed as an action.
+            int? reasoningContentChars = null;
+            JsonNode reasoningNode = Field(message, "reasoning_content") ?? Field(message, "reasoning");
+            if (reasoningNode is JsonString reasoningString)
+                reasoningContentChars = reasoningString.Value.Length;
 
             int? inputTokens = null;
             int? outputTokens = null;
+            int? reasoningTokens = null;
+            int? totalTokens = null;
             var usage = Field(obj, "usage") as JsonObject;
             if (usage != null)
             {
                 inputTokens = ReadToken(usage, "prompt_tokens");
+                if (inputTokens == null) inputTokens = ReadToken(usage, "input_tokens");
                 outputTokens = ReadToken(usage, "completion_tokens");
+                if (outputTokens == null) outputTokens = ReadToken(usage, "output_tokens");
+                totalTokens = ReadToken(usage, "total_tokens");
+
+                var completionDetails = Field(usage, "completion_tokens_details") as JsonObject;
+                if (completionDetails != null)
+                    reasoningTokens = ReadToken(completionDetails, "reasoning_tokens");
+                if (reasoningTokens == null)
+                    reasoningTokens = ReadToken(usage, "reasoning_tokens");
+                if (reasoningTokens == null)
+                {
+                    var outputDetails = Field(usage, "output_tokens_details") as JsonObject;
+                    if (outputDetails != null)
+                        reasoningTokens = ReadToken(outputDetails, "reasoning_tokens");
+                }
             }
 
             string requestId = null;
@@ -301,7 +350,8 @@ namespace LuanShi.Engine
                 foreach (string value in ids) { requestId = value; break; }
             }
 
-            return LlmResponse.Success(content.Value, latency, inputTokens, outputTokens, requestId);
+            return LlmResponse.Success(contentText, latency, inputTokens, outputTokens, requestId,
+                finishReason, reasoningTokens, totalTokens, reasoningContentChars, text, status);
         }
 
         private static JsonNode Field(JsonObject obj, string key)

@@ -42,7 +42,13 @@ namespace LuanShi.Engine
                     case EndReason.RequestLimit:
                         return "Finished - request limit ("
                             + RequestsThisTurn + "/" + _config.MaxRequestsPerTurn + ")";
-                    case EndReason.InvalidResponseLimit: return "Stopped - invalid-response limit";
+                    case EndReason.InvalidResponseLimit:
+                        // The ordinary limit keeps its historical text; a budget-exhausted empty
+                        // answer reuses this category (so ending tallies stay complete) but shows
+                        // the evidence-supported cause instead of a generic repair-limit message.
+                        return FailureReason == "invalid-response limit reached"
+                            ? "Stopped - invalid-response limit"
+                            : "Stopped - " + (FailureReason ?? "invalid-response limit");
                     case EndReason.TurnTimeLimit: return "Stopped - time limit";
                     case EndReason.SessionRequestLimit: return "Stopped - session request limit";
                     case EndReason.UsdBudgetLimit: return "Stopped - budget limit";
@@ -114,10 +120,34 @@ namespace LuanShi.Engine
             if (!parsed.Ok)
             {
                 InvalidThisTurn++;
-                LastResult = Redact("invalid response: " + parsed.Error);
+                // An empty answer that already used the whole completion budget is an evidenced
+                // truncation, not a repairable schema mistake. Retrying at the same cap is the
+                // behaviour that produced consecutive empty replies in the recorded real run.
+                bool budgetExhaustedEmpty =
+                    LlmResponseDiagnostics.IsBudgetExhaustedEmpty(response, flight.MaxOutputTokens);
+                string diagnostic = budgetExhaustedEmpty
+                    ? LlmResponseDiagnostics.Describe(response, flight.MaxOutputTokens)
+                    : parsed.Error;
+                LastResult = Redact(budgetExhaustedEmpty
+                    ? diagnostic
+                    : "invalid response: " + parsed.Error);
                 AddActivity("validation", LastResult);
+                // Keep model-facing feedback stable; the detailed provider diagnostic is evidence.
                 AddHistory("invalid model response -> " + parsed.Error);
-                resultError = parsed.Error;
+                resultError = diagnostic;
+                if (budgetExhaustedEmpty)
+                {
+                    string why = LlmResponseDiagnostics.ReasoningConsumedBudget(
+                        response, flight.MaxOutputTokens)
+                        ? "output budget consumed by provider reasoning"
+                        : "response truncated at output budget";
+                    Status = "response truncated; stopping";
+                    // Reuse the invalid-response-limit category so existing ending tallies count
+                    // this stop; FailureReason and the run record carry the precise cause.
+                    FinishLimit(why, EndReason.InvalidResponseLimit);
+                    WriteRecord(flight, response, false, null, null, resultError);
+                    return;
+                }
                 Status = "invalid response; requesting repair";
                 if (InvalidThisTurn >= _config.MaxInvalidPerTurn)
                 {

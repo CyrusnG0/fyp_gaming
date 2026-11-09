@@ -39,6 +39,10 @@ namespace LuanShi.Engine
     /// <summary>
     /// Provider-neutral response. ErrorDetail is deliberately short and never contains the API key
     /// or a response-body echo; null token counts mean the provider did not report usage.
+    ///
+    /// <see cref="RawResponse"/> is the exact body received from the provider (when one was read).
+    /// It may contain untrusted model text and must only be written to local, ignored run evidence;
+    /// it is never part of ErrorDetail, Status or any model-facing feedback.
     /// </summary>
     public sealed class LlmResponse
     {
@@ -49,10 +53,24 @@ namespace LuanShi.Engine
         public int LatencyMs;
         public int? InputTokens;
         public int? OutputTokens;
+        /// <summary>Provider-reported reasoning/thinking tokens, or null when not supplied.</summary>
+        public int? ReasoningTokens;
+        /// <summary>Provider-reported total tokens, or null when not supplied.</summary>
+        public int? TotalTokens;
+        /// <summary>Provider finish reason ("stop", "length", ...), or null when not supplied.</summary>
+        public string FinishReason;
+        /// <summary>Length of a separate message.reasoning_content field, or null when absent.</summary>
+        public int? ReasoningContentChars;
+        /// <summary>HTTP status when a provider response was received; null for local failures.</summary>
+        public int? HttpStatus;
+        /// <summary>Exact received body. Untrusted; local capture only, never model feedback.</summary>
+        public string RawResponse;
         public string ProviderRequestId;
 
         public static LlmResponse Success(string text, int latencyMs, int? inputTokens,
-            int? outputTokens, string providerRequestId)
+            int? outputTokens, string providerRequestId, string finishReason = null,
+            int? reasoningTokens = null, int? totalTokens = null,
+            int? reasoningContentChars = null, string rawResponse = null, int? httpStatus = null)
         {
             return new LlmResponse
             {
@@ -62,11 +80,18 @@ namespace LuanShi.Engine
                 LatencyMs = latencyMs,
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
+                ReasoningTokens = reasoningTokens,
+                TotalTokens = totalTokens,
+                FinishReason = finishReason,
+                ReasoningContentChars = reasoningContentChars,
+                HttpStatus = httpStatus,
+                RawResponse = rawResponse,
                 ProviderRequestId = providerRequestId,
             };
         }
 
-        public static LlmResponse Failure(LlmErrorKind error, string detail, int latencyMs = 0)
+        public static LlmResponse Failure(LlmErrorKind error, string detail, int latencyMs = 0,
+            string rawResponse = null, int? httpStatus = null)
         {
             return new LlmResponse
             {
@@ -74,6 +99,8 @@ namespace LuanShi.Engine
                 Error = error == LlmErrorKind.None ? LlmErrorKind.Network : error,
                 ErrorDetail = Shorten(detail),
                 LatencyMs = latencyMs,
+                HttpStatus = httpStatus,
+                RawResponse = rawResponse,
             };
         }
 

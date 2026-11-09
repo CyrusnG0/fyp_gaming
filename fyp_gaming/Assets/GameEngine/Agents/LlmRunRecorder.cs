@@ -24,7 +24,7 @@ namespace LuanShi.Engine
     /// best-effort so a disk problem cannot break a turn; <see cref="LastWriteError"/> is a safe
     /// diagnostic that never includes file contents or the API key.
     /// </summary>
-    public sealed class LlmRunRecorder : ILlmRunRecorder
+    public sealed partial class LlmRunRecorder : ILlmRunRecorder, ILlmExchangeRecorder
     {
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
 
@@ -177,8 +177,9 @@ namespace LuanShi.Engine
         private string Redact(string value)
         {
             if (string.IsNullOrEmpty(value)) return value;
-            string key = _config.ApiKeyValue;
-            return string.IsNullOrEmpty(key) ? value : value.Replace(key, "[redacted]");
+            // The configured key is always removed; common bearer/sk- token shapes are also
+            // redacted defensively so model/game text cannot leak a credential into run evidence.
+            return LlmResponseDiagnostics.RedactForCapture(value, _config.ApiKeyValue);
         }
 
         private static string Limit(string value, int max)
@@ -202,9 +203,13 @@ namespace LuanShi.Engine
             string inquiryTool = null, int? inquiryResultChars = null)
         {
             if (_recorder == null) return;
+            // The exact prompt and the full provider body are written to ignored run evidence.
+            // Capture is best-effort and must never abort or alter the turn.
+            CaptureExchangeResult(flight, response, parseOk, commandJson, resultOk, resultError,
+                inquiryTool, inquiryResultChars);
             try
             {
-                var parts = new List<string>(30);
+                var parts = new List<string>(40);
                 parts.Add(Str("run_id", _runId));
                 parts.Add(Num("game_seed", _seed));
                 parts.Add(Num("seed", _seed));
@@ -218,7 +223,10 @@ namespace LuanShi.Engine
                 parts.Add(Num("turn_token", _turnToken));
                 parts.Add(Num("season", flight.Season));
                 parts.Add(Str("observation_hash", flight.ObservationHash));
-                parts.Add(Str("observation_json", flight.ObservationJson));
+                // The observation can legitimately contain player-entered or imported text; redact
+                // credentials before it reaches local evidence (the hash above still covers the
+                // exact dispatched bytes).
+                parts.Add(Str("observation_json", Redact(flight.ObservationJson)));
                 parts.Add(Num("request_index", flight.RequestIndex));
                 parts.Add(Num("latency_ms", response == null ? 0 : response.LatencyMs));
                 parts.Add(nullableInt("input_tokens", response?.InputTokens));
@@ -233,6 +241,20 @@ namespace LuanShi.Engine
                     ? LlmErrorKind.Network.ToString() : response.Error.ToString()));
                 parts.Add(Str("error_detail", Redact(response?.ErrorDetail)));
                 parts.Add(Str("provider_request_id", response?.ProviderRequestId));
+                // Provider accounting. Every one of these is explicitly null when the provider did
+                // not supply it; null never means zero. content_chars/trimmed state distinguish an
+                // empty answer from a whitespace-only one under JSON mode.
+                parts.Add(Str("finish_reason", response?.FinishReason));
+                parts.Add(nullableInt("reasoning_tokens", response?.ReasoningTokens));
+                parts.Add(nullableInt("total_tokens", response?.TotalTokens));
+                parts.Add(nullableInt("http_status", response?.HttpStatus));
+                parts.Add(nullableInt("reasoning_content_chars", response?.ReasoningContentChars));
+                parts.Add(Num("content_chars", response?.Text?.Length ?? 0));
+                parts.Add(Bool("content_trimmed_empty",
+                    response?.Text != null && response.Text.Trim().Length == 0));
+                parts.Add(Num("max_output_tokens", flight.MaxOutputTokens));
+                parts.Add(Str("response_diagnostic",
+                    LlmResponseDiagnostics.Describe(response, flight.MaxOutputTokens)));
                 parts.Add(nullableDouble("cost_usd", CostUsd));
                 parts.Add(Num("requests_this_turn", RequestsThisTurn));
                 parts.Add(Num("actions_this_turn", ActionsThisTurn));
