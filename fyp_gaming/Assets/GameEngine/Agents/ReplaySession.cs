@@ -102,7 +102,7 @@ namespace LuanShi.Engine
             _state = ReplayState.NotStarted; _stepTimer = 0f; _currentRequestIndex = 0;
             _currentTurnToken = 0; _currentSeatId = null; _turnOpen = false; _isCompleted = false;
 
-            _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 5;
+            _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
             _totalRequests = _bundle.Requests.Count;
             _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedVoluntaryEndTurns = 0;
             for (int i = 0; i < _bundle.Requests.Count; i++)

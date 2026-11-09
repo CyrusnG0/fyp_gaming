@@ -35,14 +35,14 @@ namespace LuanShi
             y += 22f;
 
             ReplaySummaryData sum = _replayBundle != null ? _replayBundle.Summary : null;
-            string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : ReplayLoader.VerifiedDemoRunId;
+            string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : "unknown";
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Run: " + runId, width), uiSmall);
             y += 15f;
 
-            int seedVal = sum != null ? sum.Seed : 12345;
-            string profKey = sum != null && !string.IsNullOrEmpty(sum.BalanceProfileKey) ? sum.BalanceProfileKey : "easy-research";
-            string lookupStr = sum != null && sum.ManualLookupEnabled ? "on (historical)" : "off";
-            GUI.Label(new Rect(x, y, width, 14f), $"seed: {seedVal}  |  profile: {profKey}  |  lookup: {lookupStr}", uiSmall);
+            string sSeed = (sum != null && sum.Seed != 0) ? sum.Seed.ToString() : "unknown";
+            string profKey = sum != null && !string.IsNullOrEmpty(sum.BalanceProfileKey) ? sum.BalanceProfileKey : "unknown";
+            string lookupStr = sum != null ? (sum.ManualLookupEnabled ? "on (historical)" : "off") : "unknown";
+            GUI.Label(new Rect(x, y, width, 14f), $"seed: {sSeed}  |  profile: {profKey}  |  lookup: {lookupStr}", uiSmall);
             y += 15f;
 
             string personaInfo = "";
@@ -52,7 +52,7 @@ namespace LuanShi
                 foreach (var t in sum.Turns) if (!string.IsNullOrEmpty(t.PersonaId)) personas.Add(t.PersonaId);
                 personaInfo = string.Join("  |  ", personas);
             }
-            if (string.IsNullOrEmpty(personaInfo)) personaInfo = "unrecorded";
+            if (string.IsNullOrEmpty(personaInfo)) personaInfo = "unknown";
             GUI.Label(new Rect(x, y, width, 14f), "historical personas: " + personaInfo, uiSmall);
             y += 18f;
 
@@ -67,8 +67,10 @@ namespace LuanShi
             int reqIdx = _replaySession.CurrentRequestIndex;
             int totalSeasons = _replaySession.TotalSeasons;
             int totalReq = _replaySession.TotalRequests;
+            string sSeasons = totalSeasons > 0 ? totalSeasons.ToString() : "unknown";
+            string sReqs = totalReq > 0 ? totalReq.ToString() : "unknown";
             string stateText = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
-            GUI.Label(new Rect(x, y, width, 18f), $"Season {curSeason} of {totalSeasons}  |  Req {reqIdx} of {totalReq} ({stateText})", uiBody);
+            GUI.Label(new Rect(x, y, width, 18f), $"Season {curSeason} of {sSeasons}  |  Req {reqIdx} of {sReqs} ({stateText})", uiBody);
             y += 20f;
 
             // Progress Pips
@@ -121,6 +123,12 @@ namespace LuanShi
 
                 string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
+                y += 16f;
+
+                string sLatency = (rec != null && rec.LatencyMs > 0) ? $"{rec.LatencyMs}ms" : "unknown";
+                string sInTok = (rec != null && rec.InputTokens > 0) ? rec.InputTokens.ToString() : "unknown";
+                string sOutTok = (rec != null && rec.OutputTokens > 0) ? rec.OutputTokens.ToString() : "unknown";
+                GUI.Label(new Rect(x, y, width, 14f), $"Tokens: in {sInTok} | out {sOutTok}  |  Latency: {sLatency}", uiSmall);
                 y += 16f;
 
                 // Saved Prompt Excerpt (scrollable box)
@@ -184,6 +192,20 @@ namespace LuanShi
             }
         }
 
+        static string FormatScoreField(ReplaySeatScore sc, string field, int val)
+        {
+            if (sc == null) return "unknown";
+            if (sc.MissingFields != null)
+            {
+                for (int i = 0; i < sc.MissingFields.Count; i++)
+                {
+                    if (string.Equals(sc.MissingFields[i], field, System.StringComparison.Ordinal))
+                        return "unknown";
+                }
+            }
+            return val.ToString();
+        }
+
         void DrawReplayScoreboards(float x, float y, float width)
         {
             float colW = (width - 8f) * 0.5f;
@@ -191,19 +213,19 @@ namespace LuanShi
             ReplaySeatScore wei = scores != null && scores.Count > 0 ? scores[0] : null;
             ReplaySeatScore shu = scores != null && scores.Count > 1 ? scores[1] : null;
 
-            int weiG = wei != null ? wei.Gold : 0;
-            int weiF = wei != null ? wei.Food : 0;
-            int weiP = wei != null ? wei.Population : 0;
-            int weiGar = wei != null ? wei.Garrison : 0;
+            string weiG = FormatScoreField(wei, "gold", wei?.Gold ?? 0);
+            string weiF = FormatScoreField(wei, "food", wei?.Food ?? 0);
+            string weiP = FormatScoreField(wei, "population", wei?.Population ?? 0);
+            string weiGar = FormatScoreField(wei, "garrison", wei?.Garrison ?? 0);
 
             GUI.Label(new Rect(x, y, colW, 16f), "Wei (Capital)", uiPanelTitle);
             GUI.Label(new Rect(x, y + 16f, colW, 14f), $"Gold {weiG}  Food {weiF}", uiSmall);
             GUI.Label(new Rect(x, y + 30f, colW, 14f), $"Pop {weiP}  Gar {weiGar}", uiSmall);
 
-            int shuG = shu != null ? shu.Gold : 0;
-            int shuF = shu != null ? shu.Food : 0;
-            int shuP = shu != null ? shu.Population : 0;
-            int shuGar = shu != null ? shu.Garrison : 0;
+            string shuG = FormatScoreField(shu, "gold", shu?.Gold ?? 0);
+            string shuF = FormatScoreField(shu, "food", shu?.Food ?? 0);
+            string shuP = FormatScoreField(shu, "population", shu?.Population ?? 0);
+            string shuGar = FormatScoreField(shu, "garrison", shu?.Garrison ?? 0);
 
             float col2X = x + colW + 8f;
             GUI.Label(new Rect(col2X, y, colW, 16f), "Shu (Chengdu)", uiPanelTitle);

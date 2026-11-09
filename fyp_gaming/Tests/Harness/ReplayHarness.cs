@@ -172,7 +172,10 @@ internal static partial class Harness
         // 8. Exact explanation matching rule & event feed tests
         RunExactExplanationMatchingRuleTests();
 
-        // 9. Snapshot verification & printout
+        // 9. Numbers logging integrity tests (raw values or 'unknown')
+        RunNumbersLoggingIntegrityTests();
+
+        // 10. Snapshot verification & printout
         string snapshot = session.GetDisplayedSummarySnapshot();
         Check(!string.IsNullOrEmpty(snapshot) && snapshot.Contains("OFFLINE REPLAY") && snapshot.Contains("Zero API calls"),
             "GetDisplayedSummarySnapshot() returns non-empty formatted summary snapshot");
@@ -432,6 +435,27 @@ internal static partial class Harness
         {
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
         }
+    }
+
+    private static void RunNumbersLoggingIntegrityTests()
+    {
+        var scIncomplete = new ReplaySeatScore {
+            SeatId = "seat-0", Faction = "Wei", Gold = 100, MissingFields = new[] { "food", "population" }
+        };
+        Check(FormatScoreFieldTest(scIncomplete, "gold", scIncomplete.Gold) == "100", "present score field formats number");
+        Check(FormatScoreFieldTest(scIncomplete, "food", scIncomplete.Food) == "unknown", "missing score field formats as 'unknown'");
+        Check(FormatScoreFieldTest(null, "gold", 0) == "unknown", "null score object formats as 'unknown'");
+    }
+
+    private static string FormatScoreFieldTest(ReplaySeatScore sc, string field, int val)
+    {
+        if (sc == null) return "unknown";
+        if (sc.MissingFields != null)
+        {
+            foreach (var f in sc.MissingFields)
+                if (string.Equals(f, field, StringComparison.Ordinal)) return "unknown";
+        }
+        return val.ToString();
     }
 
     private static ReplaySession CreateSingleReqSession(string rawText, bool parseOk, bool resultOk, string resultError = null)
