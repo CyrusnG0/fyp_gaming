@@ -34,7 +34,7 @@ namespace LuanShi.Engine
                    "- Only attack a target that appears as an attack_army or attack_city option, with its listed coordinates. Do not invent a target.\n" +
                    "- The engine decides every battle. Results are not guaranteed: your army can lose troops and morale, be routed or be destroyed, and a routed army cannot attack. Compare troop numbers before attacking.\n" +
                    "- Attacking a faction you hold a treaty with breaks the treaty and costs trust and prestige.\n" +
-                   "- A rejected attack may be reported as \"" + FeedbackPolicy.ArmyMoraleBroken + "\" or \"" + FeedbackPolicy.AssaultRatioTooLow + "\". Other rejections are reported generically.\n" +
+                   "- A rejected attack may be reported as \"" + FeedbackPolicy.ArmyMoraleBroken + "\" or \"" + FeedbackPolicy.AssaultRatioTooLow + "\". Other rejections may receive another safe category or a generic response.\n" +
                    "- For attack_army and attack_city, param_a and param_b are required integers copied from a listed option.";
         }
 

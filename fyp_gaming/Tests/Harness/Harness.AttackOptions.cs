@@ -475,6 +475,9 @@ internal static partial class Harness
         rule = rule.Substring(0, rule.IndexOf('\n'));
         bool noDigits = true;
         foreach (char c in rule) if (char.IsDigit(c)) noDigits = false;
+        AtkCheck(rule.Contains("Other rejections may receive another safe category or a generic response.")
+           && !rule.Contains("reported generically"),
+            "the category line is accurate: other rejections may get another safe category or a generic response");
         AtkCheck(noDigits && !system.Contains(oldVersion + "\n") && !system.Contains(oldVersion + "\""),
             "the category line adds names only (no numbers) and no old version string appears in the rules");
         string hashOn = PromptBuilder.SchemaHashFor(true, false, null, true);
