@@ -260,6 +260,8 @@ namespace LuanShi.Engine
             sb.Append("Prompt version: ").Append(version).Append('\n');
             if (persona != null)
                 sb.Append("Persona ID: ").Append(CleanLine(persona.Id)).Append('\n');
+            if (observation?.Balance != null && !observation.Balance.IsStandard)
+                sb.Append("Match balance profile: ").Append(observation.Balance.ToJson()).Append('\n');
             sb.Append("Requests left this turn: ")
               .Append(requestsLeft.ToString(CultureInfo.InvariantCulture)).Append('\n');
             sb.Append("Actions left this turn: ")

@@ -172,9 +172,9 @@ namespace LuanShi
             string[] live =
             {
                 $"Tax      costs {OrderCost(ActionType.LevyTax)}  Gold +{BalanceConfig.TaxLevyAmount}, morale -{BalanceConfig.TaxLevyMoraleCost}",
-                $"Lighten labor  costs {OrderCost(ActionType.LightenLabor)}  Gold -{BalanceConfig.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
+                $"Lighten labor  costs {OrderCost(ActionType.LightenLabor)}  Gold -{engine.Balance.LightenLaborGoldCost}, morale +{BalanceConfig.LightenLaborMoraleGain}",
                 $"Reclaim  costs {OrderCost(ActionType.Reclaim)}  City food yield +{BalanceConfig.ReclaimPctPerUse}% (cap +{BalanceConfig.ReclaimPctCap}%)",
-                $"Recruit  costs {OrderCost(ActionType.Recruit)}  Gold -{UnitTypes.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Archer, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Cavalry, BalanceConfig.RecruitTroopGain)}/{UnitTypes.RecruitGoldCost(UnitTypes.Siege, BalanceConfig.RecruitTroopGain)} by type, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
+                $"Recruit  costs {OrderCost(ActionType.Recruit)}  Gold -{engine.Balance.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain)}/{engine.Balance.RecruitGoldCost(UnitTypes.Archer, BalanceConfig.RecruitTroopGain)}/{engine.Balance.RecruitGoldCost(UnitTypes.Cavalry, BalanceConfig.RecruitTroopGain)}/{engine.Balance.RecruitGoldCost(UnitTypes.Siege, BalanceConfig.RecruitTroopGain)} by type, population -{BalanceConfig.RecruitPopCost}, garrison +{BalanceConfig.RecruitTroopGain}",
                 $"Train    costs {OrderCost(ActionType.Train)}  Training +1 (cap {MyTrainingCap()})",
                 $"Fortify  costs {OrderCost(ActionType.Fortify)}  Defense +1 (cap {BalanceConfig.DefenseMax})",
                 $"Relief   costs {OrderCost(ActionType.Relief)}  Food -{BalanceConfig.ReliefFoodCost}, morale +{BalanceConfig.ReliefMoraleGain}",

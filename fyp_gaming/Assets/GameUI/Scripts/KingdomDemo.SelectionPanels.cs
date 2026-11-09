@@ -52,13 +52,13 @@ namespace LuanShi
                 string hint = null;
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop, buttonWidth, 34), ActionType.LevyTax, city.Id, "Tax", null, 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(rightButtonLeft, buttonTop, buttonWidth, 34), ActionType.LightenLabor, city.Id, "Lighten labor",
-                    city.Gold >= BalanceConfig.LightenLaborGoldCost ? null : "Not enough gold", 0, 0, btn));
+                    city.Gold >= engine.Balance.LightenLaborGoldCost ? null : "Not enough gold", 0, 0, btn));
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + 38f, buttonWidth, 34), ActionType.Reclaim, city.Id, "Reclaim",
                     city.ReclaimPct >= BalanceConfig.ReclaimPctCap ? "Limit reached"
                     : city.ReclaimedThisSeason ? "Already reclaimed this season" : null, 0, 0, btn));
                 string recruitType = UnitTypes.Normalize(recruitUnitType);
                 int recruitRequired = UnitTypes.RequiredMilitaryLevel(recruitType);
-                int recruitCost = UnitTypes.RecruitGoldCost(recruitType, BalanceConfig.RecruitTroopGain);
+                int recruitCost = engine.Balance.RecruitGoldCost(recruitType, BalanceConfig.RecruitTroopGain);
                 string recruitBlocked =
                     MilitaryLevel() < recruitRequired ? $"needs Military {recruitRequired}"
                     : city.Garrison > 0 && UnitTypes.Normalize(city.GarrisonType) != recruitType
@@ -227,7 +227,7 @@ namespace LuanShi
             {
                 selectionScroll = Vector2.zero;
             }
-            int foodPerSeason = (int)(army.Troops * UnitTypes.FoodPerTroop(army.UnitType));
+            int foodPerSeason = (int)engine.Balance.TroopFoodUpkeep(army.Troops, army.UnitType);
             int factionFood = 0;
             if (obs != null)
                 foreach (var city in obs.CitiesOf(army.OwnerSeatId)) factionFood += city.Food;

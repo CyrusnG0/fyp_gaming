@@ -20,8 +20,9 @@ namespace LuanShi.Engine
         private const string InquiryNote =
             "Read-only inquiry spends no game command points here; runner investigation budgets are deferred.";
 
-        public static ManualLookupResult Lookup(string topic, InvestigationOptions options)
+        public static ManualLookupResult Lookup(string topic, InvestigationOptions options, BalanceProfile balance = null)
         {
+            balance = balance ?? BalanceProfile.Standard;
             options = options ?? InvestigationOptions.Defaults();
             var result = new ManualLookupResult
             {
@@ -54,7 +55,7 @@ namespace LuanShi.Engine
                 else if (IsPartial(candidate, normalized)) partial.Add(candidate);
             }
 
-            if (exact.Count == 1) return FillDetail(result, exact[0]);
+            if (exact.Count == 1) return FillDetail(result, exact[0], balance);
             if (exact.Count > 1 || partial.Count > 1)
             {
                 result.Fail("ambiguous_topic",
@@ -62,7 +63,7 @@ namespace LuanShi.Engine
                 result.Notes = new List<string> { CoverageNote }.AsReadOnly();
                 return result;
             }
-            if (partial.Count == 1) return FillDetail(result, partial[0]);
+            if (partial.Count == 1) return FillDetail(result, partial[0], balance);
 
             result.Fail("unsupported_topic",
                 "No implemented English topic matches. Use the bounded topic index.");
@@ -82,7 +83,7 @@ namespace LuanShi.Engine
         }
 
         private static ManualLookupResult FillDetail(ManualLookupResult result,
-            InvestigationTopicDefinition topic)
+            InvestigationTopicDefinition topic, BalanceProfile balance)
         {
             result.TopicId = topic.Id;
             result.Title = topic.Title;
@@ -101,9 +102,9 @@ namespace LuanShi.Engine
                 case "turn_and_command_points": FillTurn(facts, notes); break;
                 case "fog_of_war": FillFog(facts, notes); break;
                 case ActionType.LevyTax: FillLevyTax(facts); break;
-                case ActionType.LightenLabor: FillLightenLabor(facts); break;
-                case ActionType.Reclaim: FillReclaim(facts, notes); break;
-                case ActionType.Recruit: FillRecruit(facts); break;
+                case ActionType.LightenLabor: FillLightenLabor(facts, balance); break;
+                case ActionType.Reclaim: FillReclaim(facts, notes, balance); break;
+                case ActionType.Recruit: FillRecruit(facts, balance); break;
                 case ActionType.Train: FillTrain(facts); break;
                 case ActionType.Fortify: FillFortify(facts); break;
                 case ActionType.Relief: FillRelief(facts); break;
@@ -192,16 +193,18 @@ namespace LuanShi.Engine
             facts.Add(Fact("event", "tax_levied", "Public with a limited cross-seat projection."));
         }
 
-        private static void FillLightenLabor(List<ManualFact> facts)
+        private static void FillLightenLabor(List<ManualFact> facts, BalanceProfile balance)
         {
-            facts.Add(Fact("gold_cost", InvestigationText.Number(BalanceConfig.LightenLaborGoldCost), null));
+            facts.Add(Fact("gold_cost", InvestigationText.Number(balance.LightenLaborGoldCost), null));
             facts.Add(Fact("morale_gain", "+" + InvestigationText.Number(BalanceConfig.LightenLaborMoraleGain),
                 "民心 change, clamped by the engine."));
             facts.Add(Fact("event", "labor_lightened", null));
         }
 
-        private static void FillReclaim(List<ManualFact> facts, List<string> notes)
+        private static void FillReclaim(List<ManualFact> facts, List<string> notes, BalanceProfile balance)
         {
+            facts.Add(Fact("base_food_yield", InvestigationText.Number(balance.CityBaseFoodYield),
+                "Per city per season before modifiers."));
             facts.Add(Fact("food_yield_gain_per_use", "+" + InvestigationText.Number(BalanceConfig.ReclaimPctPerUse) + "%",
                 "Cumulative, stored as the city's reclaim percentage."));
             facts.Add(Fact("cumulative_cap", InvestigationText.Number(BalanceConfig.ReclaimPctCap) + "%",
@@ -211,18 +214,22 @@ namespace LuanShi.Engine
             notes.Add("`farm` remains a legacy alias that the engine maps to `reclaim`.");
         }
 
-        private static void FillRecruit(List<ManualFact> facts)
+        private static void FillRecruit(List<ManualFact> facts, BalanceProfile balance)
         {
             facts.Add(Fact("troops_gained_per_order", InvestigationText.Number(BalanceConfig.RecruitTroopGain), null));
             facts.Add(Fact("population_cost", InvestigationText.Number(BalanceConfig.RecruitPopCost), null));
-            facts.Add(Fact("gold_cost_infantry", InvestigationText.Number(BalanceConfig.RecruitGoldCostInfantry),
+            facts.Add(Fact("gold_cost_infantry", InvestigationText.Number(balance.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain)),
                 "Per 1,000 troops."));
-            facts.Add(Fact("gold_cost_archer", InvestigationText.Number(BalanceConfig.RecruitGoldCostArcher),
+            facts.Add(Fact("gold_cost_archer", InvestigationText.Number(balance.RecruitGoldCost(UnitTypes.Archer, BalanceConfig.RecruitTroopGain)),
                 "Per 1,000 troops."));
-            facts.Add(Fact("gold_cost_cavalry", InvestigationText.Number(BalanceConfig.RecruitGoldCostCavalry),
+            facts.Add(Fact("gold_cost_cavalry", InvestigationText.Number(balance.RecruitGoldCost(UnitTypes.Cavalry, BalanceConfig.RecruitTroopGain)),
                 "Per 1,000 troops."));
-            facts.Add(Fact("gold_cost_siege", InvestigationText.Number(BalanceConfig.RecruitGoldCostSiege),
+            facts.Add(Fact("gold_cost_siege", InvestigationText.Number(balance.RecruitGoldCost(UnitTypes.Siege, BalanceConfig.RecruitTroopGain)),
                 "Per 1,000 troops."));
+            foreach (string type in new[] { UnitTypes.Infantry, UnitTypes.Archer, UnitTypes.Cavalry, UnitTypes.Siege })
+                facts.Add(Fact("food_upkeep_per_1000_" + type,
+                    balance.TroopFoodUpkeep(1000, type).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                    "Seasonal troop food before other consumption and rounding."));
             facts.Add(Fact("unit_type",
                 UnitTypes.Infantry + " | " + UnitTypes.Archer + " | " + UnitTypes.Cavalry + " | " + UnitTypes.Siege,
                 "Optional args.unit_type; the engine defaults to infantry."));

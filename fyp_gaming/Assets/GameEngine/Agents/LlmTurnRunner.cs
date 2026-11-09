@@ -326,23 +326,24 @@ namespace LuanShi.Engine
             // later seat's request or a recreated turn.
             string inquiryResult = TakePendingInquiryResult();
             bool inquiry = _config.EnableManualLookup;
-            string system = PromptBuilder.SystemPromptFor(planning, inquiry);
+            LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
+            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona);
             List<ActionOption> options = ActionCatalogue.Build(observation);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             string user = planning
                 ? PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), movement, relevantMemories,
-                    inquiryResult, inquiry)
+                    inquiryResult, inquiry, persona)
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), relevantMemories, inquiryResult,
-                    inquiry);
+                    inquiry, persona);
             if (system.Length + user.Length > MaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
-            string promptVersion = PromptBuilder.VersionFor(planning, inquiry);
-            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry);
+            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona);
+            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);

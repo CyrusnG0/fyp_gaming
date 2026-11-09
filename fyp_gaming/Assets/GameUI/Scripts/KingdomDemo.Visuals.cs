@@ -27,9 +27,7 @@ namespace LuanShi
             };
             if (ownerSeat != null)
             {
-                city.Population = BalanceConfig.StartPopulation;
-                city.Food = BalanceConfig.StartFood;
-                city.Gold = BalanceConfig.StartGold;
+                engine.Balance.ApplyStartingResources(city);
             }
             else
             {

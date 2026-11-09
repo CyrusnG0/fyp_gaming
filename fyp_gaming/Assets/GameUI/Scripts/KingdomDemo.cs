@@ -47,6 +47,7 @@ namespace LuanShi
 
         [Header("Game setup")]
         public int randomSeed = 12345;
+        public string balanceProfile = "standard";
 
         [Header("Fog of war")]
         [Tooltip("Height of the procedural, non-repeating fog shroud above each hex node.")]
@@ -235,7 +236,10 @@ namespace LuanShi
             // the scene), so it needs an identity independent of randomSeed. The same identity is then
             // carried by observation.GameId, which scopes the runner's durable seat memory; recreating
             // a runner for this engine therefore keeps this match's memories. There is no save/load.
-            engine = new GameEngine(randomSeed, GameIdentity.NewMatchId());
+            if (!BalanceProfile.TryGet(balanceProfile, out BalanceProfile profile))
+                throw new System.Exception("Unknown balance profile: " + balanceProfile);
+            engine = new GameEngine(randomSeed, GameIdentity.NewMatchId(), profile);
+            Debug.Log("BalanceProfile " + engine.Balance.ToJson());
             engine.CombatDebugLogger = message => Debug.Log(message);
             engine.State.Map = map;
             InitializeFogOverlays(nodes, w, h);

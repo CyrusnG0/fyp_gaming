@@ -70,6 +70,7 @@ namespace LuanShi.Engine
             Field(sb, "run_id", runId, config, false);
             sb.Append(",\"run_ids\":[").Append(Str(runId, config)).Append(']');
             sb.Append(",\"seed\":").Append(session.Seed.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"balance_profile\":").Append(session.Balance.ToJson());
             sb.Append(",\"seasons_planned\":")
               .Append(session.SeasonsPlanned.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"seasons_played\":")
@@ -78,8 +79,11 @@ namespace LuanShi.Engine
             Field(sb, "state", session.State.ToString(), config, true);
             Field(sb, "provider", provider, config, true);
             Field(sb, "model", model, config, true);
-            Field(sb, "prompt_version", PromptBuilder.ActivePromptVersion, config, true);
-            Field(sb, "schema_hash", PromptBuilder.SchemaHash(), config, true);
+            Field(sb, "prompt_version", config != null && config.EnablePersonas
+                ? PromptBuilder.PersonaPromptVersion : PromptBuilder.VersionFor(true, config != null && config.EnableManualLookup), config, true);
+            // Persona text changes by faction, so a single hash would misrepresent the run.
+            Field(sb, "schema_hash", config != null && config.EnablePersonas
+                ? "per-request" : PromptBuilder.SchemaHashFor(true, config != null && config.EnableManualLookup), config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);
             Field(sb, "end_utc", Utc(end), config, true);

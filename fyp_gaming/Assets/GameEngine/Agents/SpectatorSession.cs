@@ -103,6 +103,7 @@ namespace LuanShi.Engine
 
         public SpectatorState State { get; private set; } = SpectatorState.NotStarted;
         public int Seed => _seed;
+        public BalanceProfile Balance => _engine.Balance;
         public int CurrentSeason => _currentSeason;
         public int SeasonsPlanned => _seasonsPlanned;
         public int SeasonsPlayed => _seasonsPlayed;

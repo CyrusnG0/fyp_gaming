@@ -85,7 +85,7 @@ namespace LuanShi.Engine
                     result.Fail("context_mismatch", ContextMismatchMessage);
                     return result;
                 }
-                result = InvestigationManual.Lookup(topic, _options);
+                result = InvestigationManual.Lookup(topic, _options, _observation.Balance);
                 return result;
             }
             finally
