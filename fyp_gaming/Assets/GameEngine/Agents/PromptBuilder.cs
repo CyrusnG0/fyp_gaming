@@ -200,15 +200,16 @@ namespace LuanShi.Engine
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft,
             MovementView movement, IReadOnlyList<LlmMemory> memories = null,
             string inquiryResult = null, bool inquiryEnabled = false, LlmPersona persona = null,
-            bool attackEnabled = false)
+            bool attackEnabled = false, AttackView attacks = null)
         {
+            string attackNotice = attackEnabled ? ActionCatalogue.AttackNotice(attacks) : null;
             string version = VersionFor(true, inquiryEnabled, persona, attackEnabled);
             if (movement == null)
                 return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                    version, null, memories, inquiryResult, persona);
+                    version, null, memories, inquiryResult, persona, attackNotice);
 
             string full = BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                version, MovementOptionsText(movement), memories, inquiryResult, persona);
+                version, MovementOptionsText(movement), memories, inquiryResult, persona, attackNotice);
             int sysLen = SystemPromptFor(true, inquiryEnabled, persona, attackEnabled).Length;
             if (sysLen + full.Length <= MaxPromptChars)
                 return full;
@@ -223,7 +224,7 @@ namespace LuanShi.Engine
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, limit), memories,
-                    inquiryResult, persona);
+                    inquiryResult, persona, attackNotice);
                 if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
@@ -235,7 +236,7 @@ namespace LuanShi.Engine
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, 1, armies), memories,
-                    inquiryResult, persona);
+                    inquiryResult, persona, attackNotice);
                 if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
@@ -243,18 +244,19 @@ namespace LuanShi.Engine
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, 0, armies), memories,
-                    inquiryResult, persona);
+                    inquiryResult, persona, attackNotice);
                 if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
             return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                version, MovementOptionsText(movement, 0, 0), memories, inquiryResult, persona);
+                version, MovementOptionsText(movement, 0, 0), memories, inquiryResult, persona,
+                attackNotice);
         }
 
         private static string BuildUserPrompt(Observation observation, IReadOnlyList<ActionOption> options,
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft, string version,
             string movementSection, IReadOnlyList<LlmMemory> memories, string inquiryResult,
-            LlmPersona persona = null)
+            LlmPersona persona = null, string attackNotice = null)
         {
             var sb = new StringBuilder(2048);
             sb.Append("TURN CONTEXT\n");
@@ -307,6 +309,7 @@ namespace LuanShi.Engine
 
             sb.Append("\nCANDIDATE OPTIONS (the engine revalidates every order):\n");
             sb.Append(ActionCatalogue.ToPromptText(options)).Append('\n');
+            if (attackNotice != null) sb.Append("ATTACK TARGETS: ").Append(attackNotice).Append('\n');
 
             if (movementSection != null) sb.Append(movementSection);
 

@@ -16,6 +16,7 @@ namespace LuanShi.Engine
         public string ArmyId;
         public string Kind;                 // "attack_army" | "attack_city"
         public int X, Z;                    // target hex: param_a / param_b of the command
+        public int Distance;                // hex steps from the attacker (1 = adjacent); the ordering key
         public int CommandPointCost;
 
         public string TargetArmyId;         // attack_army only (the army is in sight)
@@ -45,7 +46,7 @@ namespace LuanShi.Engine
         public string BlockedReason;        // "army morale is broken" | "no orders left" | null
         public int TotalAvailable;          // all valid candidates before the cap
         public bool Truncated;
-        public IReadOnlyList<AttackOption> Options;   // capped, stable order: assaults, then field, z, x
+        public IReadOnlyList<AttackOption> Options;   // this army's share of the seat-wide advertised set, nearest first
     }
 
     /// <summary>
@@ -58,6 +59,8 @@ namespace LuanShi.Engine
         public int Season;
         public int CommandPoints;
         public IReadOnlyList<ArmyAttackPlan> Armies;   // own armies only, ordered by army id
+        public int TotalAvailable;                     // all legal candidates across every army, before the cap
+        public bool Truncated;                         // true when the seat-wide cap dropped legal candidates
 
         /// <summary>Total advertised options across all armies.</summary>
         public int OptionCount
@@ -85,6 +88,8 @@ namespace LuanShi.Engine
             sb.Append("\"seat_id\":").Append(MiniJson.Str(SeatId));
             sb.Append(",\"season\":").Append(MiniJson.Num(Season));
             sb.Append(",\"command_points\":").Append(MiniJson.Num(CommandPoints));
+            sb.Append(",\"total_available\":").Append(MiniJson.Num(TotalAvailable));
+            sb.Append(",\"truncated\":").Append(Truncated ? "true" : "false");
             sb.Append(",\"armies\":").Append(MiniJson.Array(armies));
             sb.Append('}');
             return sb.ToString();
@@ -124,6 +129,7 @@ namespace LuanShi.Engine
             sb.Append(",\"kind\":").Append(MiniJson.Str(option.Kind));
             sb.Append(",\"x\":").Append(MiniJson.Num(option.X));
             sb.Append(",\"z\":").Append(MiniJson.Num(option.Z));
+            sb.Append(",\"distance\":").Append(MiniJson.Num(option.Distance));
             sb.Append(",\"cost\":").Append(MiniJson.Num(option.CommandPointCost));
             sb.Append(",\"target_army_id\":").Append(MiniJson.Str(option.TargetArmyId));
             sb.Append(",\"target_city_id\":").Append(MiniJson.Str(option.TargetCityId));
@@ -154,16 +160,24 @@ namespace LuanShi.Engine
     /// </summary>
     public static class AttackPlanner
     {
-        public const int DefaultMaxOptionsPerArmy = 8;
+        /// <summary>
+        /// Seat-wide bound on advertised options (all attackers together, not per army): the nearest
+        /// N by distance from each option's own attacker. Callers may ask for fewer, never more.
+        /// </summary>
+        public const int MaxAdvertisedOptions = 10;
 
-        private const int MaxOptionsCap = 20;
+        /// <summary>The line shown to the model when the cap dropped legal candidates.</summary>
+        public static readonly string TruncationNotice = "nearest "
+            + MaxAdvertisedOptions.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + " targets shown; other legal targets exist";
+
         public const string KindArmy = ActionType.AttackArmy;
         public const string KindCity = ActionType.AttackCity;
 
         public static AttackView Build(GameEngine engine, string seatId,
-            int maxOptionsPerArmy = DefaultMaxOptionsPerArmy)
+            int maxOptions = MaxAdvertisedOptions)
         {
-            int cap = ClampCap(maxOptionsPerArmy);
+            int cap = ClampCap(maxOptions);
             var view = new AttackView
             {
                 SeatId = null,
@@ -186,12 +200,34 @@ namespace LuanShi.Engine
             own.Sort((a, b) => string.CompareOrdinal(a.Id ?? string.Empty, b.Id ?? string.Empty));
 
             var plans = new List<ArmyAttackPlan>(own.Count);
-            foreach (var army in own) plans.Add(BuildPlan(engine, fac, army, cap));
+            // Each plan first holds every legal candidate for its army; the seat-wide cap is then
+            // applied once, over all armies, so the prompt bound does not scale with army count.
+            var pool = new List<AttackOption>();
+            foreach (var army in own)
+            {
+                var plan = BuildPlan(engine, fac, army);
+                plans.Add(plan);
+                pool.AddRange(plan.Options);
+            }
+            pool.Sort(CompareOptions);
+            int take = Math.Min(cap, pool.Count);
+            var kept = new HashSet<AttackOption>();
+            for (int i = 0; i < take; i++) kept.Add(pool[i]);
+            foreach (var plan in plans)
+            {
+                var shown = new List<AttackOption>();
+                foreach (var option in plan.Options)
+                    if (kept.Contains(option)) shown.Add(option);
+                plan.Truncated = shown.Count < plan.TotalAvailable;
+                plan.Options = shown;
+            }
             view.Armies = plans;
+            view.TotalAvailable = pool.Count;
+            view.Truncated = pool.Count > take;
             return view;
         }
 
-        private static ArmyAttackPlan BuildPlan(GameEngine engine, FactionState fac, ArmyState army, int cap)
+        private static ArmyAttackPlan BuildPlan(GameEngine engine, FactionState fac, ArmyState army)
         {
             int fieldCost = BalanceConfig.CommandPointCost(ActionType.AttackArmy);
             int cityCost = BalanceConfig.CommandPointCost(ActionType.AttackCity);
@@ -230,29 +266,30 @@ namespace LuanShi.Engine
                     // Fail closed: nothing outside the seat's sight is ever read or advertised.
                     if (!GameEngine.InSight(engine.State, fac.SeatId, x, z)) continue;
 
-                    if (fac.CommandPoints >= fieldCost
-                        && map.HexDistance(army.X, army.Z, x, z, range) >= 0)
+                    int distance = fac.CommandPoints >= fieldCost
+                        ? map.HexDistance(army.X, army.Z, x, z, range) : -1;
+                    if (distance >= 0)
                     {
                         var target = engine.State.ArmyAt(x, z);
                         if (target != null && target.OwnerSeatId != fac.SeatId)
-                            all.Add(FieldOption(engine, fac, army, ArmyView.From(target), fieldCost));
+                        {
+                            var field = FieldOption(engine, fac, army, ArmyView.From(target), fieldCost);
+                            field.Distance = distance;
+                            all.Add(field);
+                        }
                     }
 
                     if (fac.CommandPoints >= cityCost && map.AreAdjacent(army.X, army.Z, x, z))
                     {
                         var option = CityOption(engine, fac, army, x, z, cityCost);
-                        if (option != null) all.Add(option);
+                        if (option != null) { option.Distance = 1; all.Add(option); }
                     }
                 }
             }
 
             all.Sort(CompareOptions);
             plan.TotalAvailable = all.Count;
-            int take = Math.Min(cap, all.Count);
-            var options = new List<AttackOption>(take);
-            for (int i = 0; i < take; i++) options.Add(all[i]);
-            plan.Options = options;
-            plan.Truncated = all.Count > take;
+            plan.Options = all;
             return plan;
         }
 
@@ -328,12 +365,17 @@ namespace LuanShi.Engine
             return null;
         }
 
-        // Assaults (captures) first, then field battles; z then x within a kind. Stable and total
-        // (a hex holds at most one army and one city per kind), so truncation is deterministic.
-        private static int CompareOptions(AttackOption a, AttackOption b)
+        /// <summary>
+        /// Nearest first; ties go to assaults (captures), then army id, then z, then x. Total over
+        /// distinct options (a hex holds at most one army and one city), so the cap is deterministic.
+        /// </summary>
+        public static int CompareOptions(AttackOption a, AttackOption b)
         {
+            if (a.Distance != b.Distance) return a.Distance.CompareTo(b.Distance);
             bool aCity = a.Kind == KindCity, bCity = b.Kind == KindCity;
             if (aCity != bCity) return aCity ? -1 : 1;
+            int byArmy = string.CompareOrdinal(a.ArmyId ?? string.Empty, b.ArmyId ?? string.Empty);
+            if (byArmy != 0) return byArmy;
             if (a.Z != b.Z) return a.Z.CompareTo(b.Z);
             return a.X.CompareTo(b.X);
         }
@@ -341,7 +383,7 @@ namespace LuanShi.Engine
         private static int ClampCap(int value)
         {
             if (value < 1) return 1;
-            return value > MaxOptionsCap ? MaxOptionsCap : value;
+            return value > MaxAdvertisedOptions ? MaxAdvertisedOptions : value;
         }
     }
 }

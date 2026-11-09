@@ -343,7 +343,7 @@ namespace LuanShi.Engine
             string user = planning
                 ? PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), movement, relevantMemories,
-                    inquiryResult, inquiry, persona, attackOn)
+                    inquiryResult, inquiry, persona, attackOn, attacks)
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), relevantMemories, inquiryResult,
                     inquiry, persona);

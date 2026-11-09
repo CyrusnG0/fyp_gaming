@@ -220,6 +220,9 @@ namespace LuanShi.Engine
             if (attacks == null || attacks.Armies == null) return;
             if (!string.Equals(attacks.SeatId, observation.SeatId, StringComparison.Ordinal)) return;
 
+            // Entries that survive the observation cross-check compete for the seat-wide cap in the
+            // planner's nearest-first order, so even a hand-built oversized view cannot enlarge the prompt.
+            var built = new List<KeyValuePair<AttackOption, ActionOption>>();
             foreach (AttackArmyPair pair in AttackPairs(observation, attacks))
             {
                 AttackOption a = pair.Option;
@@ -251,7 +254,7 @@ namespace LuanShi.Engine
                         + NameOf(pair.Army.Name, pair.Army.Id);
                 }
 
-                options.Add(new ActionOption
+                built.Add(new KeyValuePair<AttackOption, ActionOption>(a, new ActionOption
                 {
                     Type = a.Kind,
                     TargetId = a.ArmyId,
@@ -261,8 +264,22 @@ namespace LuanShi.Engine
                     Note = string.IsNullOrEmpty(a.Note) ? CandidateNote : CandidateNote + "; " + a.Note,
                     ParamA = a.X,
                     ParamB = a.Z,
-                });
+                }));
             }
+            built.Sort((l, r) => AttackPlanner.CompareOptions(l.Key, r.Key));
+            int take = Math.Min(built.Count, AttackPlanner.MaxAdvertisedOptions);
+            for (int i = 0; i < take; i++) options.Add(built[i].Value);
+        }
+
+        /// <summary>
+        /// The truncation line for the prompt, or null when every legal target is already listed.
+        /// Depends only on the seat's own attack view.
+        /// </summary>
+        public static string AttackNotice(AttackView attacks)
+        {
+            if (attacks == null) return null;
+            return attacks.Truncated || attacks.OptionCount > AttackPlanner.MaxAdvertisedOptions
+                ? AttackPlanner.TruncationNotice : null;
         }
 
         private struct AttackArmyPair

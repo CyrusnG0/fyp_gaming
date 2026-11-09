@@ -24,6 +24,7 @@ internal static partial class Harness
         AttackCatalogueEntries();
         AttackParserVocabulary();
         AttackConfigAndPromptIdentity();
+        AttackCapTests();   // [ATK-3], Harness.AttackCap.cs
     }
 
     private static void AtkCheck(bool ok, string name) => Check(ok, "[ATK-1] " + name);
