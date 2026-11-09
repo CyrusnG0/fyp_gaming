@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -26,6 +27,13 @@ namespace LuanShi.Engine
         /// </summary>
         public bool EnableManualLookup;
 
+        /// <summary>
+        /// Opt-in per-country strategic personas, default OFF. When true, the prompt appends the
+        /// advisory persona for the acting seat's trusted faction and uses prompt version
+        /// <see cref="PromptBuilder.PersonaPromptVersion"/>. Rules, observations and validation are unchanged.
+        /// </summary>
+        public bool EnablePersonas;
+
         public int MaxRequestsPerTurn = 6;
         public int MaxActionsPerTurn = 5;
         public int MaxInvalidPerTurn = 2;
@@ -49,6 +57,28 @@ namespace LuanShi.Engine
         /// </summary>
         public double? MaxUsd;
 
+        private readonly Dictionary<string, string> _personaOverrides =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        public IReadOnlyDictionary<string, string> PersonaOverrides => _personaOverrides;
+
+        public void SetPersonaOverride(string factionOrSeatKey, string personaId)
+        {
+            if (string.IsNullOrWhiteSpace(factionOrSeatKey)) return;
+            string key = factionOrSeatKey.Trim();
+            if (string.IsNullOrWhiteSpace(personaId))
+                _personaOverrides.Remove(key);
+            else
+                _personaOverrides[key] = personaId.Trim();
+        }
+
+        public bool TryGetPersonaOverride(string factionOrSeatKey, out string personaId)
+        {
+            personaId = null;
+            if (string.IsNullOrWhiteSpace(factionOrSeatKey)) return false;
+            return _personaOverrides.TryGetValue(factionOrSeatKey.Trim(), out personaId);
+        }
+
         private string _apiKey;
 
         /// <summary>True when a key came from the file or an environment variable; the key is not exposed.</summary>
@@ -66,7 +96,8 @@ namespace LuanShi.Engine
         /// File first, then environment override. Recognised snake_case keys are provider, base_url,
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
-        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup.
+        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
+        /// enable_personas, personas.
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
         {
@@ -114,6 +145,7 @@ namespace LuanShi.Engine
             sb.Append("; max_usd=").Append(Number(MaxUsd));
             // Appending only when enabled keeps the legacy disabled diagnostic byte-for-byte unchanged.
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
+            if (EnablePersonas) sb.Append("; personas=true");
             return sb.ToString();
         }
 
@@ -145,6 +177,18 @@ namespace LuanShi.Engine
                     case "max_usd": MaxUsd = Number(field.Value, MaxUsd); break;
                     case "enable_manual_lookup":
                         EnableManualLookup = Bool(field.Value, EnableManualLookup); break;
+                    case "enable_personas":
+                        EnablePersonas = Bool(field.Value, EnablePersonas); break;
+                    case "personas":
+                        if (field.Value is JsonObject personasObj)
+                        {
+                            foreach (var item in personasObj.Items)
+                            {
+                                if (item.Value is JsonString str && !string.IsNullOrWhiteSpace(str.Value))
+                                    SetPersonaOverride(item.Key, str.Value);
+                            }
+                        }
+                        break;
                 }
             }
         }

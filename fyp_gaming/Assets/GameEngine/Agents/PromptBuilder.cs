@@ -142,7 +142,7 @@ namespace LuanShi.Engine
         {
             error = null;
             if (version == PromptVersion || version == DomesticPromptVersion
-                || version == LegacyPromptVersion)
+                || version == LegacyPromptVersion || version == PersonaPromptVersion)
             {
                 _activeVersion = version;
                 return true;
@@ -186,9 +186,9 @@ namespace LuanShi.Engine
         public static string UserPrompt(Observation observation, IReadOnlyList<ActionOption> options,
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft,
             IReadOnlyList<LlmMemory> memories = null, string inquiryResult = null,
-            bool inquiryEnabled = false)
+            bool inquiryEnabled = false, LlmPersona persona = null)
             => BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                VersionFor(false, inquiryEnabled), null, memories, inquiryResult);
+                VersionFor(false, inquiryEnabled, persona), null, memories, inquiryResult, persona);
 
         /// <summary>
         /// Planning prompt: the domestic body plus the bounded MOVEMENT OPTIONS section and the same
@@ -199,16 +199,17 @@ namespace LuanShi.Engine
         public static string UserPrompt(Observation observation, IReadOnlyList<ActionOption> options,
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft,
             MovementView movement, IReadOnlyList<LlmMemory> memories = null,
-            string inquiryResult = null, bool inquiryEnabled = false)
+            string inquiryResult = null, bool inquiryEnabled = false, LlmPersona persona = null)
         {
             if (movement == null)
                 return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                    VersionFor(true, inquiryEnabled), null, memories, inquiryResult);
+                    VersionFor(true, inquiryEnabled, persona), null, memories, inquiryResult, persona);
 
-            string version = VersionFor(true, inquiryEnabled);
+            string version = VersionFor(true, inquiryEnabled, persona);
             string full = BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                version, MovementOptionsText(movement), memories, inquiryResult);
-            if (SystemPromptFor(true, inquiryEnabled).Length + full.Length <= MaxPromptChars)
+                version, MovementOptionsText(movement), memories, inquiryResult, persona);
+            int sysLen = SystemPromptFor(true, inquiryEnabled, persona).Length;
+            if (sysLen + full.Length <= MaxPromptChars)
                 return full;
 
             int max = 0;
@@ -221,8 +222,8 @@ namespace LuanShi.Engine
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, limit), memories,
-                    inquiryResult);
-                if (SystemPromptFor(true, inquiryEnabled).Length + candidate.Length <= MaxPromptChars)
+                    inquiryResult, persona);
+                if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
             // Even zero options per army can overflow with a very large own army list: drop armies
@@ -233,29 +234,32 @@ namespace LuanShi.Engine
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, 1, armies), memories,
-                    inquiryResult);
-                if (SystemPromptFor(true, inquiryEnabled).Length + candidate.Length <= MaxPromptChars)
+                    inquiryResult, persona);
+                if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
             for (int armies = totalArmies - 1; armies >= 0; armies--)
             {
                 string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, MovementOptionsText(movement, 0, armies), memories,
-                    inquiryResult);
-                if (SystemPromptFor(true, inquiryEnabled).Length + candidate.Length <= MaxPromptChars)
+                    inquiryResult, persona);
+                if (sysLen + candidate.Length <= MaxPromptChars)
                     return candidate;
             }
             return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                version, MovementOptionsText(movement, 0, 0), memories, inquiryResult);
+                version, MovementOptionsText(movement, 0, 0), memories, inquiryResult, persona);
         }
 
         private static string BuildUserPrompt(Observation observation, IReadOnlyList<ActionOption> options,
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft, string version,
-            string movementSection, IReadOnlyList<LlmMemory> memories, string inquiryResult)
+            string movementSection, IReadOnlyList<LlmMemory> memories, string inquiryResult,
+            LlmPersona persona = null)
         {
             var sb = new StringBuilder(2048);
             sb.Append("TURN CONTEXT\n");
             sb.Append("Prompt version: ").Append(version).Append('\n');
+            if (persona != null)
+                sb.Append("Persona ID: ").Append(CleanLine(persona.Id)).Append('\n');
             sb.Append("Requests left this turn: ")
               .Append(requestsLeft.ToString(CultureInfo.InvariantCulture)).Append('\n');
             sb.Append("Actions left this turn: ")
