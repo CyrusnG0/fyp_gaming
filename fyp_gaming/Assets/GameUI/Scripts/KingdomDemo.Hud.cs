@@ -37,7 +37,12 @@ namespace LuanShi
 
             string header;
             string detail;
-            if (spectatorMode)
+            if (replayMode)
+            {
+                header = ReplayHeaderLine();
+                detail = ReplayDetailLine();
+            }
+            else if (spectatorMode)
             {
                 header = SpectatorHeaderLine();
                 detail = $"Domestic management only  |  Orders {orders}/{BalanceConfig.CommandPointsPerSeason}";
@@ -105,7 +110,7 @@ namespace LuanShi
         {
             PrepareUiTheme();
             // A spectator may browse every tab (read-only); order buttons inside stay locked by uiInputLocked.
-            bool interactive = spectatorMode ? !reportShowing : (!uiInputLocked && !reportShowing);
+            bool interactive = (spectatorMode || replayMode) ? !reportShowing : (!uiInputLocked && !reportShowing);
 
             for (int i = 0; i < Tabs.GetLength(0); i++)
             {
@@ -124,6 +129,7 @@ namespace LuanShi
         void DrawEndTurnButton(FactionState fac, bool hotseat)
         {
             PrepareUiTheme();
+            if (replayMode) { DrawReplayTurnControl(); return; }
             if (spectatorMode) { DrawSpectatorTurnControl(); return; }
             var rect = new Rect(EndTurnX, EndTurnY, EndTurnWidth, EndTurnHeight);
             uiRects.Add(rect);
