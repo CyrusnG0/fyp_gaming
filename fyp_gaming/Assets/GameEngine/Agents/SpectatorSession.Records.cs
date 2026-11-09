@@ -17,6 +17,7 @@ namespace LuanShi.Engine
         public int Season { get; internal set; }
         public string SeatId { get; internal set; }
         public string FactionName { get; internal set; }
+        public string PersonaId { get; internal set; }
         public int Requests { get; internal set; }
         public int Actions { get; internal set; }
         public int Accepted { get; internal set; }

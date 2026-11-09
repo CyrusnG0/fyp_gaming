@@ -167,6 +167,7 @@ namespace LuanShi.Engine
                 Rejected = host.Rejected,
                 Invalid = _runner.InvalidThisTurn,
                 LastSummary = _runner.LastSummary,
+                PersonaId = _runner.CurrentPersonaId,
                 LastCommandJson = _runner.LastCommandJson,
                 LastResult = _runner.LastResult,
                 EndedBy = endedBy,

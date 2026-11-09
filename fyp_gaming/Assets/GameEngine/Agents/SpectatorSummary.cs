@@ -71,6 +71,7 @@ namespace LuanShi.Engine
             sb.Append(",\"run_ids\":[").Append(Str(runId, config)).Append(']');
             sb.Append(",\"seed\":").Append(session.Seed.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"balance_profile\":").Append(session.Balance.ToJson());
+            sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
             sb.Append(",\"seasons_planned\":")
               .Append(session.SeasonsPlanned.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"seasons_played\":")
@@ -235,6 +236,7 @@ namespace LuanShi.Engine
                 sb.Append(",\"rejected\":").Append(record.Rejected.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"invalid\":").Append(record.Invalid.ToString(CultureInfo.InvariantCulture));
                 Field(sb, "last_summary", record.LastSummary, config, true);
+                Field(sb, "persona_id", record.PersonaId, config, true);
                 Field(sb, "last_command_json", record.LastCommandJson, config, true);
                 Field(sb, "last_result", record.LastResult, config, true);
                 Field(sb, "ended_by", record.EndedBy, config, true);

@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : IPlanningHost
+        private sealed class TurnHost : IPlanningHost, IPersonaHost
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -34,6 +34,7 @@ namespace LuanShi.Engine
 
             public string SeatId => _seatId;
             public string FactionName => _factionName;
+            public string FactionKey => _factionName;
             public int Season => _season;
 
             public TurnHost(SpectatorSession session, GameEngine engine, string seatId, int token,

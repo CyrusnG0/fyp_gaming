@@ -262,6 +262,9 @@ internal static partial class Harness
         cfg.SetPersonaOverride("seat-b", "wei-mild");
         PCheck(LlmPersona.ResolveForTurn(cfg, personaHost, obsB, "seat-b") == LlmPersona.WeiMild,
             "explicit seat override in config takes priority over host and observation");
+        cfg.SetPersonaOverride("seat-b", "typo");
+        PCheck(LlmPersona.ResolveForTurn(cfg, personaHost, obsB, "seat-b") == LlmPersona.ShuAggressive,
+            "invalid seat override falls back to the authoritative faction");
     }
 
     // ---- 6. Invariance of observation, candidates, movement & fog validation -

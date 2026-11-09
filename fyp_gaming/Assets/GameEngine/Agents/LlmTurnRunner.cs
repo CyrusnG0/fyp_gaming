@@ -84,6 +84,7 @@ namespace LuanShi.Engine
         public RunnerState State { get; private set; } = RunnerState.Idle;
         public string Status { get; private set; } = "idle";
         public string LastSummary { get; private set; }
+        public string CurrentPersonaId { get; private set; }
         public string LastCommandJson { get; private set; }
         public string LastResult { get; private set; }
         public string FailureReason { get; private set; }
@@ -153,6 +154,7 @@ namespace LuanShi.Engine
             ActionsThisTurn = 0;
             InvalidThisTurn = 0;
             LastSummary = null;
+            CurrentPersonaId = null;
             LastCommandJson = null;
             LastResult = null;
             FailureReason = null;
@@ -327,6 +329,7 @@ namespace LuanShi.Engine
             string inquiryResult = TakePendingInquiryResult();
             bool inquiry = _config.EnableManualLookup;
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
+            CurrentPersonaId = persona?.Id;
             string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona);
             List<ActionOption> options = ActionCatalogue.Build(observation);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(

@@ -378,11 +378,12 @@ namespace LuanShi
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
-        private sealed class AgentTurnHost : IPlanningHost
+        private sealed class AgentTurnHost : IPlanningHost, IPersonaHost
         {
             private readonly KingdomDemo _owner;
             private readonly string _seatId;
             public AgentTurnHost(KingdomDemo owner, string seatId) { _owner = owner; _seatId = seatId; }
+            public string FactionKey => _owner.engine?.State?.FindFaction(_seatId)?.Name;
             public Observation Observe() => _owner.ObserveAgentSeat(_seatId);
             public ValidationResult Submit(ActionCommand cmd) => _owner.SubmitAgentCommand(_seatId, cmd);
             public void EndTurn() => _owner.AgentEndTurnRequested();

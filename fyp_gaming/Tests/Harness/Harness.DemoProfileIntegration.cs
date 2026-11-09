@@ -61,6 +61,10 @@ internal static partial class Harness
             Check(json.Contains("\"balance_profile\":{\"profile\":\"easy-research\"")
                   && json.Contains("\"starting_food\":1500") && json.Contains("\"starting_gold\":900"),
                 "[integration] spectator summary records the selected match profile");
+            Check(json.Contains("\"manual_lookup_enabled\":true")
+                  && json.Contains("\"persona_id\":\"wei-mild\"")
+                  && json.Contains("\"persona_id\":\"shu-aggressive\""),
+                "[integration] spectator summary records the actual personas and manual setting");
             string[] records = Directory.GetFiles(dir, "*.jsonl");
             string lines = records.Length == 1 ? File.ReadAllText(records[0]) : "";
             Check(lines.Contains("\"balance_profile\":{\"profile\":\"easy-research\""),

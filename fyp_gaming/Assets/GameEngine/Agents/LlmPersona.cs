@@ -143,7 +143,9 @@ namespace LuanShi.Engine
                 && config.TryGetPersonaOverride(trustedSeatId, out string seatOverride)
                 && !string.IsNullOrWhiteSpace(seatOverride))
             {
-                return ForKey(seatOverride);
+                LlmPersona selected = ForKey(seatOverride);
+                if (!selected.IsDefault || IsExplicitDefaultKey(seatOverride))
+                    return selected;
             }
 
             string factionKey = null;
