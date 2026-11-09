@@ -460,5 +460,31 @@ internal static partial class Harness
         AtkCheck(PromptBuilder.SystemPromptFor(false, false, null, true) == PromptBuilder.SystemPromptFor(false)
            && PromptBuilder.VersionFor(false, false, null, true) == PromptBuilder.DomesticPromptVersion,
             "a non-planning (domestic) prompt never gains attack text");
+
+        const string oldVersion = "demo-slice-6-attack";
+        const string cat1 = "army morale broken", cat2 = "assault ratio too low";
+        AtkCheck(PromptBuilder.AttackPromptVersion == "demo-slice-6-attack-1"
+           && PromptBuilder.VersionFor(true, false, null, true) == "demo-slice-6-attack-1"
+           && PromptBuilder.VersionFor(true, false, null, true) != oldVersion
+           && PromptBuilder.VersionFor(true, true, null, true) == "demo-slice-6-attack-1",
+            "the attack-enabled prompt version is demo-slice-6-attack-1, not the old string");
+        AtkCheck(system.Contains("\"" + cat1 + "\"") && system.Contains("\"" + cat2 + "\"")
+           && FeedbackPolicy.ArmyMoraleBroken == cat1 && FeedbackPolicy.AssaultRatioTooLow == cat2,
+            "the attack rules name both feedback categories exactly as the policy emits them");
+        string rule = system.Substring(system.IndexOf("A rejected attack may be reported", StringComparison.Ordinal));
+        rule = rule.Substring(0, rule.IndexOf('\n'));
+        bool noDigits = true;
+        foreach (char c in rule) if (char.IsDigit(c)) noDigits = false;
+        AtkCheck(noDigits && !system.Contains(oldVersion + "\n") && !system.Contains(oldVersion + "\""),
+            "the category line adds names only (no numbers) and no old version string appears in the rules");
+        string hashOn = PromptBuilder.SchemaHashFor(true, false, null, true);
+        AtkCheck(hashOn.Length == 16 && hashOn != PromptBuilder.SchemaHash()
+           && hashOn == PromptBuilder.SchemaHashFor(true, false, null, true),
+            "the attack schema hash follows from the new text deterministically");
+        string off = PromptBuilder.SystemPromptFor(true, false, null, false);
+        AtkCheck(!off.Contains(cat1) && !off.Contains(cat2) && !off.Contains("ATTACK AND CAPTURE")
+           && PromptBuilder.VersionFor(true, false, null, false) == "demo-slice-4"
+           && off == PromptBuilder.SystemPromptFor(true),
+            "the attack-disabled prompt carries no category names and keeps its version and text");
     }
 }
