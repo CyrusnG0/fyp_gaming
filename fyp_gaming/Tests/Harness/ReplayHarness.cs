@@ -453,8 +453,8 @@ internal static partial class Harness
     private static void RunValidationDisplayTests(ReplayComparisonReport rpt, ReplaySession session)
     {
         string fullReport = rpt.FormatReport();
-        Check(fullReport.Contains("Wei:  Food 243 (exp 243, delta 0) | Gold 1742 (exp 1741, delta 1)"), "report displays verbatim .NET +1 gold delta for Wei");
-        Check(fullReport.Contains("Shu:  Food 71 (exp 71, delta 0) | Gold 1249 (exp 1248, delta 1)"), "report displays verbatim .NET +1 gold delta for Shu");
+        Check(fullReport.Contains("Wei:  Food 243 (exp 243, delta 0) | Gold 1742 (exp 1741, delta 1) | Pop 11291 (exp 11291, delta 0) | Garrison 1000 (exp 1000, delta 0)"), "report displays verbatim .NET +1 gold delta for Wei");
+        Check(fullReport.Contains("Shu:  Food 71 (exp 71, delta 0) | Gold 1249 (exp 1248, delta 1) | Pop 10304 (exp 10304, delta 0) | Garrison 2000 (exp 2000, delta 0)"), "report displays verbatim .NET +1 gold delta for Shu");
         Check(fullReport.Contains("OVERALL RAW VERIFICATION: FAIL (RAW MISMATCHES REPORTED HONESTLY)"), "report discloses raw mismatch without smoothing over");
         Check(fullReport.Contains("89 in Unity Mono (F64 CIL evaluation stack) vs 90 in .NET CoreCLR (F32 native single precision)"), "report contains verbatim float truncation explanation");
         Check(fullReport.Contains("A separate standalone Unity Mono CLI executable (MonoBleedingEdge/bin/mono.exe against unityjit-win32) matched this run (44/44 hashes, 0 resource deltas)"), "report notes standalone Mono CLI vs Unity Editor difference");
@@ -467,6 +467,55 @@ internal static partial class Harness
         string snapshot = session.GetDisplayedSummarySnapshot();
         Check(snapshot.Contains("Wei Summary G:1741 (+1)") && snapshot.Contains("Shu Summary G:1248 (+1)"), "snapshot shows verbatim +1 gold deltas");
         Check(snapshot.Contains("Obs: 10/44") && snapshot.Contains("Positions: 9/9 obs, 1/1 cmd-inferred, 2 unverified"), "snapshot displays observation and position breakdown");
+
+        // Integrity tests: a mismatching or incomplete report cannot display PASS
+        Check(!rpt.ExactVerificationPassed, "actual replay report has ExactVerificationPassed == false due to +1 gold delta");
+        Check(!fullReport.Contains("OVERALL RAW VERIFICATION: PASS"), "actual replay report with deltas cannot display PASS");
+
+        var hashMismatchRpt = new ReplayComparisonReport { ObservationHashMismatches = 1, TotalRequests = 44, RawExactMatch = false };
+        Check(!hashMismatchRpt.ExactVerificationPassed, "report with hash mismatch has ExactVerificationPassed == false");
+        Check(!hashMismatchRpt.FormatReport().Contains("OVERALL RAW VERIFICATION: PASS"), "report with hash mismatch cannot display PASS");
+
+        var incompleteRpt = new ReplayComparisonReport
+        {
+            ObservationHashMismatches = 0,
+            TotalRequests = 44,
+            AllSeasonsScoreboardExactMatch = false,
+            RawExactMatch = false,
+            WeiExpectedScore = new ReplaySeatScore { MissingFields = new[] { "gold" } }
+        };
+        Check(!incompleteRpt.ExactVerificationPassed, "report with incomplete scoreboard has ExactVerificationPassed == false");
+        string incompleteStr = incompleteRpt.FormatReport();
+        Check(!incompleteStr.Contains("OVERALL RAW VERIFICATION: PASS"), "incomplete report cannot display PASS");
+        Check(incompleteStr.Contains("Gold 0 (exp unknown, delta unknown)"), "incomplete report displays exp unknown, delta unknown for missing gold field");
+
+        var missingSeasonRpt = new ReplayComparisonReport
+        {
+            ObservationHashMismatches = 0,
+            AllSeasonsScoreboardExactMatch = false,
+            RawExactMatch = false,
+            RawScoreboardMismatches = new[] { "Season 5: missing expected summary season scoreboard" }
+        };
+        Check(!missingSeasonRpt.ExactVerificationPassed, "report with missing season scoreboard has ExactVerificationPassed == false");
+        Check(!missingSeasonRpt.FormatReport().Contains("OVERALL RAW VERIFICATION: PASS"), "missing season report cannot display PASS");
+
+        // FormatDiffField helper unit tests: never fabricate 0 delta or pass on missing field
+        Check(FormatDiffFieldTest(100, 100, new ReplaySeatScore { MissingFields = new[] { "gold" } }, "gold") == "100 (exp unknown, delta unknown)", "missing field in FormatDiffField returns unknown, never 0 delta");
+        Check(FormatDiffFieldTest(100, 100, new ReplaySeatScore(), "gold") == "100 (exp 100, delta 0)", "exact match in FormatDiffField returns delta 0");
+    }
+
+    private static string FormatDiffFieldTest(int actual, int expected, ReplaySeatScore expScore, string field)
+    {
+        if (expScore == null) return $"{actual} (exp unknown, delta unknown)";
+        if (expScore.MissingFields != null)
+        {
+            for (int i = 0; i < expScore.MissingFields.Count; i++)
+                if (string.Equals(expScore.MissingFields[i], field, StringComparison.Ordinal))
+                    return $"{actual} (exp unknown, delta unknown)";
+        }
+        int delta = actual - expected;
+        string dStr = delta == 0 ? "0" : (delta > 0 ? $"+{delta}" : delta.ToString());
+        return $"{actual} (exp {expected}, delta {dStr})";
     }
 
     private static string FormatScoreFieldTest(ReplaySeatScore sc, string field, int val)

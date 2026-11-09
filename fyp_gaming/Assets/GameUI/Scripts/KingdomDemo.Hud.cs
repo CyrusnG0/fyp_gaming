@@ -166,7 +166,7 @@ namespace LuanShi
             if (uiInputLocked)
                 GUI.Label(new Rect(hintLeft, bar.y + StatusMessageRowY,
                                    StatusHintWidth, StatusMessageRowHeight),
-                          EllipsizeToWidth(uiReasonRight, replayMode ? "Replay: Space=Play/Pause, Right=Step, S=Season, R=Reset" : "Orders locked: " + LockedReason(), StatusHintWidth),
+                          EllipsizeToWidth(uiReasonRight, replayMode ? "Replay: Space=Play/Pause, Right=Step Request, S=Season, R=Reset" : "Orders locked: " + LockedReason(), StatusHintWidth),
                           uiReasonRight);
             else
                 GUI.Label(new Rect(hintLeft, bar.y + StatusMessageRowY,

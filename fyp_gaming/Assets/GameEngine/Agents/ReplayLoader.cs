@@ -53,6 +53,7 @@ namespace LuanShi.Engine
                 searchDirs.Add(cur);
                 searchDirs.Add(Path.Combine(cur, "..", "runs"));
                 searchDirs.Add(Path.Combine(cur, "..", "..", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", "..", "..", "runs"));
                 searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "offline-replay", "runs"));
                 searchDirs.Add(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs"));
             }

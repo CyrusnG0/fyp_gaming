@@ -215,6 +215,12 @@ namespace LuanShi.Engine
         public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
         public bool RawExactMatch;
+        public bool ExactVerificationPassed => RawExactMatch;
+
+        public ReplaySeatScore WeiExpectedScore;
+        public ReplaySeatScore ShuExpectedScore;
+        public ReplaySeatScore WeiFinalScore;
+        public ReplaySeatScore ShuFinalScore;
 
         public string FormatReport()
         {
@@ -229,8 +235,17 @@ namespace LuanShi.Engine
             sb.AppendLine($"Action Outcome Mismatches: {ActionOutcomeMismatches}");
             sb.AppendLine();
             sb.AppendLine($"--- SCOREBOARD COMPARISON (Season {SeasonsVerified} Final) ---");
-            sb.AppendLine($"Wei:  Food {WeiFinalFood} (exp {WeiExpectedFood}, delta {WeiFinalFood - WeiExpectedFood}) | Gold {WeiFinalGold} (exp {WeiExpectedGold}, delta {WeiFinalGold - WeiExpectedGold}) | Pop {WeiFinalPop} (exp {WeiExpectedPop}) | Garrison {WeiFinalGarrison} (exp {WeiExpectedGarrison})");
-            sb.AppendLine($"Shu:  Food {ShuFinalFood} (exp {ShuExpectedFood}, delta {ShuFinalFood - ShuExpectedFood}) | Gold {ShuFinalGold} (exp {ShuExpectedGold}, delta {ShuFinalGold - ShuExpectedGold}) | Pop {ShuFinalPop} (exp {ShuExpectedPop}) | Garrison {ShuFinalGarrison} (exp {ShuExpectedGarrison})");
+            string weiF = FormatReportScoreField(WeiFinalFood, WeiExpectedFood, WeiExpectedScore, "food");
+            string weiG = FormatReportScoreField(WeiFinalGold, WeiExpectedGold, WeiExpectedScore, "gold");
+            string weiP = FormatReportScoreField(WeiFinalPop, WeiExpectedPop, WeiExpectedScore, "population");
+            string weiGar = FormatReportScoreField(WeiFinalGarrison, WeiExpectedGarrison, WeiExpectedScore, "garrison");
+            sb.AppendLine($"Wei:  Food {weiF} | Gold {weiG} | Pop {weiP} | Garrison {weiGar}");
+
+            string shuF = FormatReportScoreField(ShuFinalFood, ShuExpectedFood, ShuExpectedScore, "food");
+            string shuG = FormatReportScoreField(ShuFinalGold, ShuExpectedGold, ShuExpectedScore, "gold");
+            string shuP = FormatReportScoreField(ShuFinalPop, ShuExpectedPop, ShuExpectedScore, "population");
+            string shuGar = FormatReportScoreField(ShuFinalGarrison, ShuExpectedGarrison, ShuExpectedScore, "garrison");
+            sb.AppendLine($"Shu:  Food {shuF} | Gold {shuG} | Pop {shuP} | Garrison {shuGar}");
             sb.AppendLine($"Final Scoreboard Match: {(FinalScoreboardExactMatch ? "MATCH (all deltas 0)" : "MISMATCH (raw deltas present)")}");
             sb.AppendLine($"All Seasons Scoreboard Match: {(AllSeasonsScoreboardExactMatch ? "MATCH" : "MISMATCH")}");
             if (RawScoreboardMismatches != null && RawScoreboardMismatches.Count > 0)
@@ -275,6 +290,19 @@ namespace LuanShi.Engine
             sb.AppendLine($"OVERALL RAW VERIFICATION: {(RawExactMatch ? "PASS" : "FAIL (RAW MISMATCHES REPORTED HONESTLY)")}");
             sb.AppendLine("================================================");
             return sb.ToString();
+        }
+
+        private static string FormatReportScoreField(int act, int exp, ReplaySeatScore expScore, string field)
+        {
+            if (expScore == null) return $"{act} (exp unknown, delta unknown)";
+            if (expScore.MissingFields != null)
+            {
+                for (int i = 0; i < expScore.MissingFields.Count; i++)
+                    if (string.Equals(expScore.MissingFields[i], field, StringComparison.Ordinal))
+                        return $"{act} (exp unknown, delta unknown)";
+            }
+            int d = act - exp;
+            return $"{act} (exp {exp}, delta {d})";
         }
     }
 }

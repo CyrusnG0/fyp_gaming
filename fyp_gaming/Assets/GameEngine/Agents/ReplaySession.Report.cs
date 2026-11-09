@@ -67,6 +67,8 @@ namespace LuanShi.Engine
             int weiExpFood = 0, weiExpGold = 0, weiExpPop = 0, weiExpGar = 0;
             int shuFinalFood = 0, shuFinalGold = 0, shuFinalPop = 0, shuFinalGar = 0;
             int shuExpFood = 0, shuExpGold = 0, shuExpPop = 0, shuExpGar = 0;
+            ReplaySeatScore weiExpScoreObj = null, shuExpScoreObj = null;
+            ReplaySeatScore weiActScoreObj = null, shuActScoreObj = null;
 
             var seasonsSet = new SortedSet<int>();
             int played = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
@@ -155,11 +157,13 @@ namespace LuanShi.Engine
                         {
                             weiFinalFood = actScore.Food; weiFinalGold = actScore.Gold; weiFinalPop = actScore.Population; weiFinalGar = actScore.Garrison;
                             weiExpFood = expScore.Food; weiExpGold = expScore.Gold; weiExpPop = expScore.Population; weiExpGar = expScore.Garrison;
+                            weiExpScoreObj = expScore; weiActScoreObj = actScore;
                         }
                         else if (actScore.SeatId == "seat-1")
                         {
                             shuFinalFood = actScore.Food; shuFinalGold = actScore.Gold; shuFinalPop = actScore.Population; shuFinalGar = actScore.Garrison;
                             shuExpFood = expScore.Food; shuExpGold = expScore.Gold; shuExpPop = expScore.Population; shuExpGar = expScore.Garrison;
+                            shuExpScoreObj = expScore; shuActScoreObj = actScore;
                         }
                     }
                 }
@@ -247,10 +251,12 @@ namespace LuanShi.Engine
                 WeiExpectedFood = weiExpFood, WeiExpectedGold = weiExpGold,
                 WeiFinalPop = weiFinalPop, WeiExpectedPop = weiExpPop,
                 WeiFinalGarrison = weiFinalGar, WeiExpectedGarrison = weiExpGar,
+                WeiExpectedScore = weiExpScoreObj, WeiFinalScore = weiActScoreObj,
                 ShuFinalFood = shuFinalFood, ShuFinalGold = shuFinalGold,
                 ShuExpectedFood = shuExpFood, ShuExpectedGold = shuExpGold,
                 ShuFinalPop = shuFinalPop, ShuExpectedPop = shuExpPop,
                 ShuFinalGarrison = shuFinalGar, ShuExpectedGarrison = shuExpGar,
+                ShuExpectedScore = shuExpScoreObj, ShuFinalScore = shuActScoreObj,
                 FinalScoreboardExactMatch = finalSeasonExact,
                 AllSeasonsScoreboardExactMatch = allSeasonsExact,
                 RawScoreboardMismatches = rawMismatches,
