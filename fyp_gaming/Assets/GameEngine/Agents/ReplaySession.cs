@@ -33,6 +33,7 @@ namespace LuanShi.Engine
 
         private readonly List<ReplaySeasonScoreboard> _replayedScores = new List<ReplaySeasonScoreboard>();
         private readonly List<ReplayFeedEvent> _eventFeed = new List<ReplayFeedEvent>();
+        private List<ReplaySeasonSummaryItem> _seasonSummaries;
         private ReplayComparisonReport _finalReport;
         public event Action<ReplayFeedEvent> OnEventReplayed;
 
@@ -65,6 +66,7 @@ namespace LuanShi.Engine
         public ReplayComparisonReport FinalReport => _finalReport;
         public IReadOnlyList<ReplaySeasonScoreboard> ReplayedScores => _replayedScores;
         public IReadOnlyList<ReplayFeedEvent> EventFeed => _eventFeed;
+        public IReadOnlyList<ReplaySeasonSummaryItem> SeasonSummaries => _seasonSummaries ?? (_seasonSummaries = ReplaySeasonSummaryBuilder.Build(_bundle));
 
         public ReplayRequestRecord CurrentRequestRecord
             => _currentRequestIndex >= 0 && _currentRequestIndex < _bundle.Requests.Count
@@ -115,7 +117,7 @@ namespace LuanShi.Engine
             _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
             _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
             _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
-            _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null;
+            _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null; _seasonSummaries = null;
 
             int seed = _bundle.Summary != null && _bundle.Summary.Seed != 0 ? _bundle.Summary.Seed : 12345;
             string profileKey = _bundle.Summary?.BalanceProfileKey ?? "easy-research";

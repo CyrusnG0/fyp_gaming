@@ -178,7 +178,10 @@ internal static partial class Harness
         // 10. Validation display tests (verbatim Mono vs .NET results)
         RunValidationDisplayTests(rpt, session);
 
-        // 11. Snapshot verification & printout
+        // 11. Season-by-season summary tests
+        RunSeasonSummaryTests(bundle, session);
+
+        // 12. Snapshot verification & printout
         string snapshot = session.GetDisplayedSummarySnapshot();
         Check(!string.IsNullOrEmpty(snapshot) && snapshot.Contains("OFFLINE REPLAY") && snapshot.Contains("Zero API calls"),
             "GetDisplayedSummarySnapshot() returns non-empty formatted summary snapshot");
@@ -542,6 +545,75 @@ internal static partial class Harness
             Requests = new List<ReplayRequestRecord> { req }
         };
         return new ReplaySession(bundle);
+    }
+
+    private static void RunSeasonSummaryTests(ReplayBundle bundle, ReplaySession session)
+    {
+        Console.WriteLine("\n--- Running Season Summary Tests ---");
+        var list = session.SeasonSummaries;
+        Check(list != null, "SeasonSummaries is not null");
+        Check(list.Count == 5, $"SeasonSummaries has 5 seasons (got {list.Count})");
+
+        // Season 1
+        var s1 = list[0];
+        Check(s1.Season == 1, "S1 Season == 1");
+        Check(s1.Wei.BeforeFood == "1500" && s1.Wei.BeforeGold == "900" && s1.Wei.BeforeGarrison == "0",
+            $"S1 Wei starting resources 1500/900/0 (got {s1.Wei.BeforeFood}/{s1.Wei.BeforeGold}/{s1.Wei.BeforeGarrison})");
+        Check(s1.Wei.AfterFood == "1112" && s1.Wei.AfterGold == "939" && s1.Wei.AfterGarrison == "1000",
+            $"S1 Wei after resources 1112/939/1000 (got {s1.Wei.AfterFood}/{s1.Wei.AfterGold}/{s1.Wei.AfterGarrison})");
+        Check(s1.Wei.ActionCountsSummary == "fortify: 2, reclaim: 1, recruit: 1, train: 1",
+            $"S1 Wei actions: fortify: 2, reclaim: 1, recruit: 1, train: 1 (got '{s1.Wei.ActionCountsSummary}')");
+        Check(s1.Wei.Lookups == 0, "S1 Wei lookups == 0");
+        Check(s1.Wei.TroopSummary.Contains("Garrison 0 -> 1000") && s1.Wei.TroopSummary.Contains("Field: unknown"),
+            "S1 Wei troop summary notes unknown field armies");
+
+        Check(s1.Shu.BeforeFood == "1500" && s1.Shu.BeforeGold == "900" && s1.Shu.BeforeGarrison == "0",
+            $"S1 Shu starting resources 1500/900/0 (got {s1.Shu.BeforeFood}/{s1.Shu.BeforeGold}/{s1.Shu.BeforeGarrison})");
+        Check(s1.Shu.AfterFood == "1080" && s1.Shu.AfterGold == "939" && s1.Shu.AfterGarrison == "1000",
+            $"S1 Shu after resources 1080/939/1000 (got {s1.Shu.AfterFood}/{s1.Shu.AfterGold}/{s1.Shu.AfterGarrison})");
+        Check(s1.Shu.ActionCountsSummary == "march: 4, recruit: 1",
+            $"S1 Shu actions: march: 4, recruit: 1 (got '{s1.Shu.ActionCountsSummary}')");
+        Check(s1.Shu.Lookups == 0, "S1 Shu lookups == 0");
+
+        // Season 4 (voluntary end turn for Wei)
+        var s4 = list[3];
+        Check(s4.Wei.ActionCountsSummary == "end_turn: 1, reclaim: 1",
+            $"S4 Wei actions: end_turn: 1, reclaim: 1 (got '{s4.Wei.ActionCountsSummary}')");
+        Check(s4.Shu.ActionCountsSummary == "march: 4, reclaim: 1",
+            $"S4 Shu actions: march: 4, reclaim: 1 (got '{s4.Shu.ActionCountsSummary}')");
+
+        // Season 5
+        var s5 = list[4];
+        Check(s5.Wei.ActionCountsSummary == "end_turn: 1, levy_tax: 1",
+            $"S5 Wei actions: end_turn: 1, levy_tax: 1 (got '{s5.Wei.ActionCountsSummary}')");
+        Check(s5.Wei.AfterFood == "243" && s5.Wei.AfterGold == "1741" && s5.Wei.AfterGarrison == "1000",
+            $"S5 Wei final resources 243/1741/1000 (got {s5.Wei.AfterFood}/{s5.Wei.AfterGold}/{s5.Wei.AfterGarrison})");
+        Check(s5.Shu.AfterFood == "71" && s5.Shu.AfterGold == "1248" && s5.Shu.AfterGarrison == "2000",
+            $"S5 Shu final resources 71/1248/2000 (got {s5.Shu.AfterFood}/{s5.Shu.AfterGold}/{s5.Shu.AfterGarrison})");
+
+        // Synthetic missing test: bundle with missing fields returns "unknown"
+        var corruptedBundle = new ReplayBundle
+        {
+            Summary = new ReplaySummaryData
+            {
+                RunId = bundle.Summary.RunId,
+                SeasonsPlayed = 1,
+                Scoreboards = new List<ReplaySeasonScoreboard>
+                {
+                    new ReplaySeasonScoreboard
+                    {
+                        Season = 1,
+                        Scores = new List<ReplaySeatScore>
+                        {
+                            new ReplaySeatScore { SeatId = "seat-0", MissingFields = new List<string> { "food", "gold" } }
+                        }
+                    }
+                }
+            }
+        };
+        var corruptList = ReplaySeasonSummaryBuilder.Build(corruptedBundle);
+        Check(corruptList[0].Wei.AfterFood == "unknown", "corrupt scoreboard food returns 'unknown'");
+        Check(corruptList[0].Wei.AfterGold == "unknown", "corrupt scoreboard gold returns 'unknown'");
     }
 }
 

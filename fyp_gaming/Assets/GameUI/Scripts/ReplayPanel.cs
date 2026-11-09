@@ -16,6 +16,7 @@ namespace LuanShi
         private Vector2 _replayResponseScroll;
         private Vector2 _replayFeedScroll;
         private Vector2 _replayComparisonScroll;
+        private Vector2 _replaySeasonsScroll;
         private string _replaySubTab = "feed";
 
         static Rect ReplayPanelArea()
@@ -102,16 +103,22 @@ namespace LuanShi
             DrawReplayScoreboards(x, y, width);
             y += _replaySession.IsCompleted ? 78f : 66f;
 
-            // Sub-navigation: Event Feed vs Exchanges vs Comparison
-            float tabW = (width - 8f) / 3f;
+            // Sub-navigation: Event Feed vs Exchanges vs Seasons vs Comparison
+            float tabW = (width - 12f) / 4f;
             if (GUI.Button(new Rect(x, y, tabW, 20f), "Event Feed", _replaySubTab == "feed" ? uiTabActive : uiButton)) _replaySubTab = "feed";
             if (GUI.Button(new Rect(x + tabW + 4f, y, tabW, 20f), "Exchanges", _replaySubTab == "details" ? uiTabActive : uiButton)) _replaySubTab = "details";
-            if (GUI.Button(new Rect(x + (tabW + 4f) * 2f, y, tabW, 20f), "Comparison", _replaySubTab == "comparison" ? uiTabActive : uiButton)) _replaySubTab = "comparison";
+            if (GUI.Button(new Rect(x + (tabW + 4f) * 2f, y, tabW, 20f), "Seasons", _replaySubTab == "seasons" ? uiTabActive : uiButton)) _replaySubTab = "seasons";
+            if (GUI.Button(new Rect(x + (tabW + 4f) * 3f, y, tabW, 20f), "Comparison", _replaySubTab == "comparison" ? uiTabActive : uiButton)) _replaySubTab = "comparison";
             y += 24f;
 
             if (_replaySubTab == "feed")
             {
                 DrawReplayEventFeed(x, y, width, 180f);
+                y += 184f;
+            }
+            else if (_replaySubTab == "seasons")
+            {
+                DrawReplaySeasonSummaries(x, y, width, 180f);
                 y += 184f;
             }
             else if (_replaySubTab == "comparison")

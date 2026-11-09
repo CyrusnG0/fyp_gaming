@@ -102,5 +102,58 @@ namespace LuanShi
             string dStr = delta == 0 ? "0" : (delta > 0 ? $"+{delta}" : delta.ToString());
             return $"{actual} (exp {expected}, delta {dStr})";
         }
+
+        void DrawReplaySeasonSummaries(float x, float y, float width, float height)
+        {
+            GUI.Label(new Rect(x, y, width, 16f), "SEASON-BY-SEASON SUMMARY:", uiPanelTitle);
+            y += 18f;
+            float viewH = height - 18f;
+
+            var summaries = _replaySession != null ? _replaySession.SeasonSummaries : null;
+            if (summaries == null || summaries.Count == 0)
+            {
+                GUI.Label(new Rect(x, y, width, 40f), "No season summaries available.", uiHint);
+                return;
+            }
+
+            float contentHeight = summaries.Count * 85f + 10f;
+            Rect viewRect = new Rect(x, y, width, viewH);
+            _replaySeasonsScroll = GUI.BeginScrollView(viewRect, _replaySeasonsScroll, new Rect(0, 0, width - 20f, contentHeight));
+
+            float rowY = 0f;
+            float innerW = width - 20f;
+
+            for (int i = 0; i < summaries.Count; i++)
+            {
+                var s = summaries[i];
+                DrawSolidColor(new Rect(0, rowY, innerW, 16f), new Color(0.2f, 0.2f, 0.25f, 0.8f));
+                GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), $"[SEASON {s.Season} SUMMARY]", uiPanelTitle);
+                rowY += 18f;
+
+                if (s.Wei != null)
+                {
+                    GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f),
+                        $"Wei: Food {s.Wei.BeforeFood}->{s.Wei.AfterFood}, Gold {s.Wei.BeforeGold}->{s.Wei.AfterGold} | Actions: {s.Wei.ActionCountsSummary} | Lookups: {s.Wei.Lookups}", uiSmall);
+                    rowY += 15f;
+                    GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f),
+                        $"Troops: {s.Wei.TroopSummary}", uiHint);
+                    rowY += 15f;
+                }
+
+                if (s.Shu != null)
+                {
+                    GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f),
+                        $"Shu: Food {s.Shu.BeforeFood}->{s.Shu.AfterFood}, Gold {s.Shu.BeforeGold}->{s.Shu.AfterGold} | Actions: {s.Shu.ActionCountsSummary} | Lookups: {s.Shu.Lookups}", uiSmall);
+                    rowY += 15f;
+                    GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f),
+                        $"Troops: {s.Shu.TroopSummary}", uiHint);
+                    rowY += 15f;
+                }
+
+                rowY += 6f;
+            }
+
+            GUI.EndScrollView();
+        }
     }
 }
