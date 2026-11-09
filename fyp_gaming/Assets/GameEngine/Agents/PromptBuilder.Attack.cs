@@ -38,12 +38,20 @@ namespace LuanShi.Engine
                    "- For attack_army and attack_city, param_a and param_b are required integers copied from a listed option.";
         }
 
+        /// <summary>Attack wins the planning identity; otherwise the persona-aware selection applies.</summary>
         public static string VersionFor(bool planning, bool inquiry, LlmPersona persona, bool attack)
+            => VersionFor(planning, inquiry, persona != null, attack);
+
+        /// <summary>
+        /// Run-level version for a summary, where the acting persona differs per seat: the version
+        /// depends only on whether any persona is active, never on which one.
+        /// </summary>
+        public static string VersionFor(bool planning, bool inquiry, bool personaEnabled, bool attack)
         {
             if (_activeVersion == LegacyPromptVersion) return LegacyPromptVersion;
             if (_activeVersion == DomesticPromptVersion) return DomesticPromptVersion;
             if (attack && planning) return AttackPromptVersion;
-            return VersionFor(planning, inquiry, persona);
+            return VersionFor(planning, inquiry, personaEnabled);
         }
 
         /// <summary>

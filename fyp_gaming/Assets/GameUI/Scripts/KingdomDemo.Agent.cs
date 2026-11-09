@@ -341,8 +341,17 @@ namespace LuanShi
             ValidationResult result = engine.SubmitAs(seatId, agentSeatToken, cmd);
             agentLastActionType = cmd != null ? cmd.Type : null;
             // A model march must move the same banner and refresh the same fog/tint view a human
-            // march does. Presentation only: the engine already executed the order above.
-            if (result.Ok && cmd != null && cmd.Type == ActionType.March)
+            // march does, and a model battle must leave the same map a human battle does: destroyed
+            // armies lose their banner, routed survivors and the occupying winner are re-placed, and
+            // the fog/tint view is re-read from the display seat's own observation. Presentation
+            // only: the engine already executed the order above.
+            if (result.Ok && cmd != null && IsBattle(cmd.Type))
+            {
+                SafeClearArmyMoveTargets();
+                SyncBattleVisuals();
+                RefreshObservation();
+            }
+            else if (result.Ok && cmd != null && cmd.Type == ActionType.March)
             {
                 SafeClearArmyMoveTargets();
                 SyncArmyVisual(cmd.TargetId);
