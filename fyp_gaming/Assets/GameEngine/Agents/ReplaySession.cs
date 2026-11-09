@@ -5,13 +5,7 @@ using System.Text;
 
 namespace LuanShi.Engine
 {
-    public enum ReplayState
-    {
-        NotStarted,
-        Playing,
-        Paused,
-        Completed
-    }
+    public enum ReplayState { NotStarted, Playing, Paused, Completed }
 
     public sealed partial class ReplaySession
     {
@@ -23,17 +17,19 @@ namespace LuanShi.Engine
         private float _stepTimer;
         private const float BaseStepInterval = 0.8f;
 
-        private int _currentRequestIndex;
-        private int _currentSeason;
-        private int _currentTurnToken;
+        private int _totalSeasons, _totalRequests;
+        private int _expectedAcceptedActions, _expectedRejectedActions, _expectedVoluntaryEndTurns;
+        private int _currentRequestIndex, _currentSeason, _currentTurnToken;
         private string _currentSeatId;
-        private bool _turnOpen;
-        private bool _isCompleted;
+        private bool _turnOpen, _isCompleted;
 
-        private int _observationHashesMatched;
-        private int _normalizedObservationsMatched;
-        private int _acceptedActionsMatched;
-        private int _voluntaryEndTurnsMatched;
+        private int _observationHashesMatched, _observationHashMismatches;
+        private readonly List<string> _observationHashDiscrepancies = new List<string>();
+
+        private int _acceptedActionsReplayed, _rejectedActionsReplayed, _unexpectedRejections, _unexpectedAcceptances, _actionOutcomeMismatches;
+        private readonly List<string> _actionDiscrepancies = new List<string>();
+        private int _voluntaryEndTurnsReplayed;
+
         private readonly List<ReplaySeasonScoreboard> _replayedScores = new List<ReplaySeasonScoreboard>();
         private ReplayComparisonReport _finalReport;
 
@@ -43,14 +39,25 @@ namespace LuanShi.Engine
         public float Speed => _speed;
         public bool IsPlaying => _state == ReplayState.Playing;
         public bool IsCompleted => _isCompleted;
+        public int TotalSeasons => _totalSeasons;
+        public int TotalRequests => _totalRequests;
         public int CurrentRequestIndex => _currentRequestIndex;
         public int CurrentSeason => _currentSeason;
         public int CurrentTurnToken => _currentTurnToken;
         public string CurrentSeatId => _currentSeatId;
+        public int ExpectedAcceptedActions => _expectedAcceptedActions;
+        public int ExpectedRejectedActions => _expectedRejectedActions;
+        public int ExpectedVoluntaryEndTurns => _expectedVoluntaryEndTurns;
+        public int AcceptedActionsReplayed => _acceptedActionsReplayed;
+        public int RejectedActionsReplayed => _rejectedActionsReplayed;
+        public int UnexpectedRejections => _unexpectedRejections;
+        public int UnexpectedAcceptances => _unexpectedAcceptances;
+        public int ActionOutcomeMismatches => _actionOutcomeMismatches;
+        public IReadOnlyList<string> ActionDiscrepancies => _actionDiscrepancies;
         public int ObservationHashesMatched => _observationHashesMatched;
-        public int NormalizedObservationsMatched => _normalizedObservationsMatched;
-        public int AcceptedActionsMatched => _acceptedActionsMatched;
-        public int VoluntaryEndTurnsMatched => _voluntaryEndTurnsMatched;
+        public int ObservationHashMismatches => _observationHashMismatches;
+        public IReadOnlyList<string> ObservationHashDiscrepancies => _observationHashDiscrepancies;
+        public int VoluntaryEndTurnsReplayed => _voluntaryEndTurnsReplayed;
         public ReplayComparisonReport FinalReport => _finalReport;
         public IReadOnlyList<ReplaySeasonScoreboard> ReplayedScores => _replayedScores;
 
@@ -66,42 +73,48 @@ namespace LuanShi.Engine
                 if (_bundle.Summary?.Turns != null)
                 {
                     foreach (var t in _bundle.Summary.Turns)
-                    {
                         if (t.Season == _currentSeason && string.Equals(t.SeatId, _currentSeatId, StringComparison.Ordinal))
                             return t.PersonaId;
-                    }
+                    foreach (var t in _bundle.Summary.Turns)
+                        if (string.Equals(t.SeatId, _currentSeatId, StringComparison.Ordinal) && !string.IsNullOrEmpty(t.PersonaId))
+                            return t.PersonaId;
                 }
-                return string.Equals(_currentSeatId, "seat-0", StringComparison.Ordinal) ? "wei-mild" : "shu-aggressive";
+                return "unrecorded";
             }
         }
 
         public ReplaySession(ReplayBundle bundle, MapData hostMap = null)
         {
             _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
+            if (_bundle.Summary == null || !string.Equals(_bundle.Summary.RunId, ReplayLoader.VerifiedDemoRunId, StringComparison.Ordinal))
+                throw new InvalidOperationException($"ReplaySession requires verified demo run '{ReplayLoader.VerifiedDemoRunId}'; got '{_bundle.Summary?.RunId}'.");
             _hostMap = hostMap;
             Reset();
         }
 
         public void Reset()
         {
-            _state = ReplayState.NotStarted;
-            _stepTimer = 0f;
-            _currentRequestIndex = 0;
-            _currentTurnToken = 0;
-            _currentSeatId = null;
-            _turnOpen = false;
-            _isCompleted = false;
-            _observationHashesMatched = 0;
-            _normalizedObservationsMatched = 0;
-            _acceptedActionsMatched = 0;
-            _voluntaryEndTurnsMatched = 0;
-            _replayedScores.Clear();
-            _finalReport = null;
+            _state = ReplayState.NotStarted; _stepTimer = 0f; _currentRequestIndex = 0;
+            _currentTurnToken = 0; _currentSeatId = null; _turnOpen = false; _isCompleted = false;
+
+            _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 5;
+            _totalRequests = _bundle.Requests.Count;
+            _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedVoluntaryEndTurns = 0;
+            for (int i = 0; i < _bundle.Requests.Count; i++)
+            {
+                var req = _bundle.Requests[i];
+                if (IsEndTurnRecord(req)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
+                else { if (req.ResultOk) _expectedAcceptedActions++; else _expectedRejectedActions++; }
+            }
+
+            _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
+            _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
+            _unexpectedAcceptances = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
+            _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _finalReport = null;
 
             int seed = _bundle.Summary != null && _bundle.Summary.Seed != 0 ? _bundle.Summary.Seed : 12345;
             string profileKey = _bundle.Summary?.BalanceProfileKey ?? "easy-research";
-            if (!BalanceProfile.TryGet(profileKey, out BalanceProfile profile))
-                profile = BalanceProfile.EasyResearch;
+            if (!BalanceProfile.TryGet(profileKey, out BalanceProfile profile)) profile = BalanceProfile.EasyResearch;
 
             string gameId = "match-20261109T082434772-7e66ac10ae8c46fcbc94eea45d66cb53";
             _engine = new GameEngine(seed, gameId, profile);
@@ -121,36 +134,21 @@ namespace LuanShi.Engine
             _engine.State.Cities.Add(new CityState { Id = "city-south", Name = "Southern City", X = 12, Z = 2, OwnerSeatId = null, Population = 3000, Food = 200, Gold = 100 });
             _engine.State.WatchTowers.Add(new WatchTowerState { Id = "watch-tower-1", Name = "Watch Tower", X = 6, Z = 2, OwnerSeatId = null });
 
-            _engine.State.Armies.Add(new ArmyState { Id = "army-wei-1", Name = "Wei Army", OwnerSeatId = "seat-0", Troops = BalanceConfig.StartFieldArmyTroops, X = 2, Z = 6 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-wei-2", Name = "Wei Army", OwnerSeatId = "seat-0", Troops = BalanceConfig.StartFieldArmyTroops, X = 2, Z = 8 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-wei-3", Name = "Wei Army", OwnerSeatId = "seat-0", Troops = BalanceConfig.StartFieldArmyTroops, X = 2, Z = 10 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-wei-4", Name = "Wei Army", OwnerSeatId = "seat-0", Troops = BalanceConfig.StartFieldArmyTroops, X = 4, Z = 12 });
-
-            _engine.State.Armies.Add(new ArmyState { Id = "army-shu-1", Name = "Shu Army", OwnerSeatId = "seat-1", Troops = BalanceConfig.StartFieldArmyTroops, X = 23, Z = 6 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-shu-2", Name = "Shu Army", OwnerSeatId = "seat-1", Troops = BalanceConfig.StartFieldArmyTroops, X = 23, Z = 8 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-shu-3", Name = "Shu Army", OwnerSeatId = "seat-1", Troops = BalanceConfig.StartFieldArmyTroops, X = 23, Z = 10 });
-            _engine.State.Armies.Add(new ArmyState { Id = "army-shu-4", Name = "Shu Army", OwnerSeatId = "seat-1", Troops = BalanceConfig.StartFieldArmyTroops, X = 21, Z = 4 });
+            void AddArmy(string id, string seat, int x, int z) => _engine.State.Armies.Add(new ArmyState {
+                Id = id, Name = seat == "seat-0" ? "Wei Army" : "Shu Army", OwnerSeatId = seat, Troops = BalanceConfig.StartFieldArmyTroops, X = x, Z = z
+            });
+            AddArmy("army-wei-1", "seat-0", 2, 6); AddArmy("army-wei-2", "seat-0", 2, 8);
+            AddArmy("army-wei-3", "seat-0", 2, 10); AddArmy("army-wei-4", "seat-0", 4, 12);
+            AddArmy("army-shu-1", "seat-1", 23, 6); AddArmy("army-shu-2", "seat-1", 23, 8);
+            AddArmy("army-shu-3", "seat-1", 23, 10); AddArmy("army-shu-4", "seat-1", 21, 4);
 
             _engine.BeginSeason();
             _currentSeason = _engine.State.Season;
         }
 
-        public void Play()
-        {
-            if (_isCompleted) return;
-            _state = ReplayState.Playing;
-        }
-
-        public void Pause()
-        {
-            if (_state == ReplayState.Playing)
-                _state = ReplayState.Paused;
-        }
-
-        public void SetSpeed(float multiplier)
-        {
-            if (multiplier > 0.05f) _speed = multiplier;
-        }
+        public void Play() { if (!_isCompleted) _state = ReplayState.Playing; }
+        public void Pause() { if (_state == ReplayState.Playing) _state = ReplayState.Paused; }
+        public void SetSpeed(float multiplier) { if (multiplier > 0.05f) _speed = multiplier; }
 
         public void Tick(float deltaTime)
         {
@@ -183,14 +181,15 @@ namespace LuanShi.Engine
             Observation obs = _engine.Observe(req.SeatId);
             string obsJson = PromptBuilder.BoundedObservationJson(obs);
             string obsHash = Hash(obsJson);
-            if (string.Equals(obsHash, req.ObservationHash, StringComparison.Ordinal))
+            if (string.Equals(obsHash, req.ObservationHash, StringComparison.Ordinal)) _observationHashesMatched++;
+            else
             {
-                _observationHashesMatched++;
-                _normalizedObservationsMatched++;
-            }
-            else if (MatchesMonoNormalizedObservation(obsJson, req.ObservationHash))
-            {
-                _normalizedObservationsMatched++;
+                _observationHashMismatches++;
+                if (_observationHashDiscrepancies.Count < 20)
+                {
+                    string expShort = string.IsNullOrEmpty(req.ObservationHash) ? "none" : (req.ObservationHash.Length >= 8 ? req.ObservationHash.Substring(0, 8) : req.ObservationHash);
+                    _observationHashDiscrepancies.Add($"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...");
+                }
             }
 
             ParseResult parsed = LlmActionParser.Parse(req.RawModelText);
@@ -198,20 +197,54 @@ namespace LuanShi.Engine
 
             if (isEndTurn)
             {
-                if (_turnOpen && _currentTurnToken != 0) _engine.EndSeatTurn(_currentTurnToken);
-                _turnOpen = false;
-                _voluntaryEndTurnsMatched++;
+                bool endResOk = false;
+                if (_turnOpen && _currentTurnToken != 0)
+                {
+                    _engine.EndSeatTurn(_currentTurnToken);
+                    _turnOpen = false;
+                    endResOk = true;
+                }
+
+                if (req.ParseOk && req.ResultOk && endResOk) _voluntaryEndTurnsReplayed++;
+                else
+                {
+                    _actionOutcomeMismatches++;
+                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): voluntary end_turn outcome mismatch (req.ParseOk={req.ParseOk}, req.ResultOk={req.ResultOk}, endResOk={endResOk})");
+                }
             }
-            else if (parsed.Ok && parsed.Action != null)
+            else
             {
-                ActionCommand cmd = LlmActionParser.ToCommand(parsed.Action);
-                cmd.ControllerType = ControllerType.Llm;
-                ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
-                if (res.Ok == req.ResultOk) _acceptedActionsMatched++;
+                bool replayedOk = false;
+                string failReason = null;
+                if (!parsed.Ok || parsed.Action == null)
+                {
+                    replayedOk = false;
+                    failReason = "Parse failure: " + parsed.Error;
+                }
+                else
+                {
+                    ActionCommand cmd = LlmActionParser.ToCommand(parsed.Action);
+                    cmd.ControllerType = ControllerType.Llm;
+                    ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
+                    replayedOk = res.Ok;
+                    if (!res.Ok) failReason = "Validation error: " + res.Error;
+                }
+
+                if (req.ParseOk && req.ResultOk && replayedOk) _acceptedActionsReplayed++;
+                else if ((!req.ParseOk || !req.ResultOk) && !replayedOk) _rejectedActionsReplayed++;
+                else if (req.ParseOk && req.ResultOk && !replayedOk)
+                {
+                    _unexpectedRejections++; _actionOutcomeMismatches++;
+                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected rejection ({failReason})");
+                }
+                else if ((!req.ParseOk || !req.ResultOk) && replayedOk)
+                {
+                    _unexpectedAcceptances++; _actionOutcomeMismatches++;
+                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected acceptance");
+                }
             }
 
             _currentRequestIndex++;
-
             if (_currentRequestIndex >= _bundle.Requests.Count)
             {
                 FinishReplay();
@@ -245,10 +278,7 @@ namespace LuanShi.Engine
         {
             if (_isCompleted) return;
             int targetSeason = _currentSeason;
-            while (!_isCompleted && _currentSeason == targetSeason)
-            {
-                StepRequest();
-            }
+            while (!_isCompleted && _currentSeason == targetSeason) StepRequest();
         }
 
         public void RunToCompletion()
@@ -264,12 +294,8 @@ namespace LuanShi.Engine
             {
                 var s = new ReplaySeatScore { SeatId = f.SeatId, Faction = f.Name };
                 foreach (var c in _engine.State.Cities)
-                {
                     if (string.Equals(c.OwnerSeatId, f.SeatId, StringComparison.Ordinal))
-                    {
-                        s.Cities++; s.Gold += c.Gold; s.Food += c.Food; s.Population += c.Population; s.Garrison += c.Garrison;
-                    }
-                }
+                    { s.Cities++; s.Gold += c.Gold; s.Food += c.Food; s.Population += c.Population; s.Garrison += c.Garrison; }
                 list.Add(s);
             }
             return list;
@@ -285,9 +311,13 @@ namespace LuanShi.Engine
             GenerateComparisonReport();
         }
 
-        private void RecordScoreboard(int season)
+        private void RecordScoreboard(int season) => _replayedScores.Add(new ReplaySeasonScoreboard { Season = season, Scores = CurrentScores() });
+
+        private static bool IsEndTurnRecord(ReplayRequestRecord req)
         {
-            _replayedScores.Add(new ReplaySeasonScoreboard { Season = season, Scores = CurrentScores() });
+            if (req == null) return false;
+            ParseResult p = LlmActionParser.Parse(req.RawModelText);
+            return p.Ok && p.Action != null && p.Action.EndTurn;
         }
 
         private static string Hash(string text)

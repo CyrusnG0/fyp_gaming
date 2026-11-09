@@ -7,6 +7,8 @@ namespace LuanShi.Engine
 {
     public static class ReplayLoader
     {
+        public const string VerifiedDemoRunId = "run-20261109082434809-51b7ebd5";
+
         private sealed class ExchangeRecord
         {
             public string ExchangeId;
@@ -14,58 +16,62 @@ namespace LuanShi.Engine
             public string ContentText;
         }
 
-        public static bool TryResolveRunFiles(string runIdOrDir, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
+        public static bool TryResolveRunFiles(string runId, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
+            => TryResolveRunFiles(runId, null, out summaryPath, out jsonlPath, out exchangesPath, out error);
+
+        public static bool TryResolveRunFiles(string runId, string searchRoot, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
         {
             summaryPath = null; jsonlPath = null; exchangesPath = null; error = null;
-            string target = string.IsNullOrEmpty(runIdOrDir) ? "51b7ebd5" : runIdOrDir.Trim();
-            if (target.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
-                target.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
-                target.EndsWith(".ndjson", StringComparison.OrdinalIgnoreCase))
+
+            if (string.IsNullOrWhiteSpace(runId))
             {
-                string dir = Path.GetDirectoryName(target);
-                target = string.IsNullOrEmpty(dir) ? Directory.GetCurrentDirectory() : dir;
+                error = "Run ID is required.";
+                return false;
+            }
+
+            string cleanRunId = runId.Trim();
+            if (!string.Equals(cleanRunId, VerifiedDemoRunId, StringComparison.Ordinal))
+            {
+                error = $"Offline replay is restricted to verified demo run '{VerifiedDemoRunId}'; got '{cleanRunId}'.";
+                return false;
             }
 
             var searchDirs = new List<string>();
-            if (Directory.Exists(target)) searchDirs.Add(Path.GetFullPath(target));
-            string cur = Directory.GetCurrentDirectory();
-            searchDirs.Add(Path.Combine(cur, "runs"));
-            searchDirs.Add(cur);
-            searchDirs.Add(Path.Combine(cur, "..", "runs"));
-            searchDirs.Add(Path.Combine(cur, "..", "..", "runs"));
-            searchDirs.Add(Path.Combine(cur, "..", "..", "..", "runs"));
-            searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "offline-replay", "runs"));
-            searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "demo-integration-prep", "runs"));
-            searchDirs.Add(Path.Combine(cur, "..", "demo-integration-prep", "runs"));
-            searchDirs.Add(Path.Combine(cur, "..", "..", "demo-integration-prep", "runs"));
-            searchDirs.Add(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs"));
+            bool rootSpecified = !string.IsNullOrEmpty(searchRoot);
+            if (rootSpecified)
+            {
+                string fullRoot = Path.GetFullPath(searchRoot);
+                if (Directory.Exists(fullRoot)) searchDirs.Add(fullRoot);
+                string rootRuns = Path.Combine(fullRoot, "runs");
+                if (Directory.Exists(rootRuns)) searchDirs.Add(rootRuns);
+            }
+            else
+            {
+                string cur = Directory.GetCurrentDirectory();
+                searchDirs.Add(Path.Combine(cur, "runs"));
+                searchDirs.Add(cur);
+                searchDirs.Add(Path.Combine(cur, "..", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", "..", "runs"));
+                searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "offline-replay", "runs"));
+                searchDirs.Add(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs"));
+            }
 
             foreach (string dir in searchDirs)
             {
                 if (!Directory.Exists(dir)) continue;
-                string s = null, j = null, e = null;
-                string[] files = Directory.GetFiles(dir);
 
-                foreach (string f in files)
-                {
-                    string name = Path.GetFileName(f);
-                    bool match = target.Length < 3 || name.IndexOf(target, StringComparison.OrdinalIgnoreCase) >= 0;
-                    if (name.EndsWith("-summary.json", StringComparison.OrdinalIgnoreCase) && match) s = f;
-                    else if (name.EndsWith("-exchanges.ndjson", StringComparison.OrdinalIgnoreCase) && match) e = f;
-                    else if (name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) &&
-                             !name.EndsWith("-exchanges.ndjson", StringComparison.OrdinalIgnoreCase) && match) j = f;
-                }
-                if (s == null || j == null || e == null)
-                {
-                    foreach (string f in files)
-                    {
-                        string name = Path.GetFileName(f);
-                        if (name.EndsWith("-summary.json", StringComparison.OrdinalIgnoreCase)) s = f;
-                        else if (name.EndsWith("-exchanges.ndjson", StringComparison.OrdinalIgnoreCase)) e = f;
-                        else if (name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) &&
-                                 !name.EndsWith("-exchanges.ndjson", StringComparison.OrdinalIgnoreCase)) j = f;
-                    }
-                }
+                string s = null, j = null, e = null;
+                string sum1 = Path.Combine(dir, $"pilot-{cleanRunId}-summary.json");
+                string sum2 = Path.Combine(dir, $"{cleanRunId}-summary.json");
+                if (File.Exists(sum1)) s = sum1;
+                else if (File.Exists(sum2)) s = sum2;
+
+                string jsonFile = Path.Combine(dir, $"{cleanRunId}.jsonl");
+                if (File.Exists(jsonFile)) j = jsonFile;
+
+                string exchFile = Path.Combine(dir, $"{cleanRunId}-exchanges.ndjson");
+                if (File.Exists(exchFile)) e = exchFile;
+
                 if (s != null && j != null && e != null)
                 {
                     summaryPath = Path.GetFullPath(s);
@@ -73,52 +79,80 @@ namespace LuanShi.Engine
                     exchangesPath = Path.GetFullPath(e);
                     return true;
                 }
+
+                if (s != null || j != null || e != null || rootSpecified)
+                {
+                    var missing = new List<string>();
+                    if (s == null) missing.Add("missing summary");
+                    if (j == null) missing.Add("missing jsonl");
+                    if (e == null) missing.Add("missing exchanges");
+                    error = $"Directory '{dir}' has incomplete files for run '{cleanRunId}': {string.Join(", ", missing)}.";
+                    return false;
+                }
             }
-            error = $"Could not resolve replay files for '{runIdOrDir}' in searched paths.";
+
+            error = $"Could not resolve verified run files for '{cleanRunId}' in searched paths.";
             return false;
         }
 
         public static ReplayBundle LoadByRunId(string runId, string searchRoot = null)
         {
-            string start = string.IsNullOrEmpty(searchRoot) ? runId : searchRoot;
-            if (!TryResolveRunFiles(start, out string s, out string j, out string e, out string err))
+            if (!TryResolveRunFiles(runId, searchRoot, out string s, out string j, out string e, out string err))
                 throw new FileNotFoundException(err);
-            return Load(s, j, e);
+            return Load(s, j, e, runId);
         }
 
-        public static ReplayBundle Load(string summaryPath, string jsonlPath, string exchangesPath)
+        public static ReplayBundle Load(string summaryPath, string jsonlPath, string exchangesPath, string expectedRunId = VerifiedDemoRunId)
         {
-            if (!File.Exists(summaryPath)) throw new FileNotFoundException("summary file missing", summaryPath);
-            if (!File.Exists(jsonlPath)) throw new FileNotFoundException("jsonl file missing", jsonlPath);
-            if (!File.Exists(exchangesPath)) throw new FileNotFoundException("exchanges file missing", exchangesPath);
+            if (!File.Exists(summaryPath)) throw new FileNotFoundException("summary file missing: " + summaryPath);
+            if (!File.Exists(jsonlPath)) throw new FileNotFoundException("jsonl file missing: " + jsonlPath);
+            if (!File.Exists(exchangesPath)) throw new FileNotFoundException("exchanges file missing: " + exchangesPath);
 
-            var exchanges = LoadExchanges(exchangesPath);
             var summary = LoadSummary(summaryPath);
-            var requests = LoadRequests(jsonlPath, exchanges);
+            if (string.IsNullOrEmpty(summary.RunId) || !string.Equals(summary.RunId, VerifiedDemoRunId, StringComparison.Ordinal))
+                throw new InvalidDataException($"Summary run_id '{summary.RunId}' does not match verified demo run '{VerifiedDemoRunId}'.");
+            if (expectedRunId != null && !string.Equals(summary.RunId, expectedRunId, StringComparison.Ordinal))
+                throw new InvalidDataException($"Summary run_id '{summary.RunId}' does not match expected run_id '{expectedRunId}'.");
 
-            return new ReplayBundle
+            var exchanges = LoadExchanges(exchangesPath, summary.RunId);
+            var requests = LoadRequests(jsonlPath, exchanges, summary.RunId, summary.Seed);
+
+            if (summary.TotalRequests <= 0 || requests.Count != summary.TotalRequests)
+                throw new InvalidDataException($"Total requests mismatch: summary specifies {summary.TotalRequests}, but jsonl loaded {requests.Count}.");
+
+            for (int i = 0; i < requests.Count; i++)
             {
+                var req = requests[i];
+                string key = $"{req.RunId}:{req.TurnToken}:{req.RequestIndex}";
+                if (!exchanges.TryGetValue(key, out ExchangeRecord ex) || string.IsNullOrEmpty(ex.UserPrompt) || string.IsNullOrEmpty(ex.ContentText))
+                    throw new InvalidDataException($"Missing or incomplete exchange record for request {key}.");
+            }
+
+            return new ReplayBundle {
                 Summary = summary, Requests = requests,
                 SummaryPath = summaryPath, JsonlPath = jsonlPath, ExchangesPath = exchangesPath
             };
         }
 
-        private static Dictionary<string, ExchangeRecord> LoadExchanges(string path)
+        private static Dictionary<string, ExchangeRecord> LoadExchanges(string path, string expectedRunId)
         {
             var map = new Dictionary<string, ExchangeRecord>(StringComparer.Ordinal);
             using (var reader = new StreamReader(path))
             {
                 string line;
+                int lineNum = 0;
                 while ((line = reader.ReadLine()) != null)
                 {
+                    lineNum++;
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    if (!StrictJson.TryParseLenientNumbers(line, out JsonNode root, out _) || !(root is JsonObject obj)) continue;
+                    if (!StrictJson.TryParseLenientNumbers(line, out JsonNode root, out string err) || !(root is JsonObject obj))
+                        throw new InvalidDataException($"Failed to parse exchange JSON line {lineNum}: {err}");
 
                     string runId = GetString(obj, "run_id");
-                    int turnToken = GetInt(obj, "turn_token");
-                    int reqIndex = GetInt(obj, "request_index");
-                    string key = $"{runId}:{turnToken}:{reqIndex}";
+                    if (!string.Equals(runId, expectedRunId, StringComparison.Ordinal))
+                        throw new InvalidDataException($"Exchange record at line {lineNum} has run_id '{runId}' (expected '{expectedRunId}').");
 
+                    string key = $"{runId}:{GetInt(obj, "turn_token")}:{GetInt(obj, "request_index")}";
                     if (!map.TryGetValue(key, out ExchangeRecord rec)) { rec = new ExchangeRecord(); map[key] = rec; }
                     string exId = GetString(obj, "exchange_id");
                     if (!string.IsNullOrEmpty(exId)) rec.ExchangeId = exId;
@@ -137,10 +171,9 @@ namespace LuanShi.Engine
         {
             string text = File.ReadAllText(path);
             if (!StrictJson.TryParseLenientNumbers(text, out JsonNode root, out string err) || !(root is JsonObject obj))
-                throw new FormatException("Invalid summary JSON: " + err);
+                throw new InvalidDataException("Invalid summary JSON: " + err);
 
-            var data = new ReplaySummaryData
-            {
+            var data = new ReplaySummaryData {
                 RunId = GetString(obj, "run_id"), Seed = GetInt(obj, "seed"),
                 ManualLookupEnabled = GetBool(obj, "manual_lookup_enabled"),
                 SeasonsPlanned = GetInt(obj, "seasons_planned"), SeasonsPlayed = GetInt(obj, "seasons_played"),
@@ -207,28 +240,46 @@ namespace LuanShi.Engine
             return data;
         }
 
-        private static List<ReplayRequestRecord> LoadRequests(string path, Dictionary<string, ExchangeRecord> exchanges)
+        private static List<ReplayRequestRecord> LoadRequests(string path, Dictionary<string, ExchangeRecord> exchanges, string expectedRunId, int expectedSeed)
         {
             var list = new List<ReplayRequestRecord>();
             using (var reader = new StreamReader(path))
             {
                 string line;
+                int lineNum = 0;
                 while ((line = reader.ReadLine()) != null)
                 {
+                    lineNum++;
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    if (!StrictJson.TryParseLenientNumbers(line, out JsonNode root, out _) || !(root is JsonObject obj)) continue;
+                    if (!StrictJson.TryParseLenientNumbers(line, out JsonNode root, out string err) || !(root is JsonObject obj))
+                        throw new InvalidDataException($"Failed to parse request JSON line {lineNum}: {err}");
 
-                    var rec = new ReplayRequestRecord
+                    string runId = GetString(obj, "run_id");
+                    if (!string.Equals(runId, expectedRunId, StringComparison.Ordinal))
+                        throw new InvalidDataException($"Request record at line {lineNum} has run_id '{runId}' (expected '{expectedRunId}').");
+
+                    int seed = GetInt(obj, "seed", GetInt(obj, "game_seed"));
+                    if (seed != expectedSeed)
+                        throw new InvalidDataException($"Request record at line {lineNum} has seed {seed} (expected {expectedSeed}).");
+
+                    bool parseOk = GetBool(obj, "parse_ok");
+                    string raw = GetString(obj, "raw_model_text");
+                    bool isEnd = false;
+                    if (parseOk && !string.IsNullOrEmpty(raw))
                     {
-                        RunId = GetString(obj, "run_id"),
-                        Seed = GetInt(obj, "seed", GetInt(obj, "game_seed")),
-                        Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
+                        var p = LlmActionParser.Parse(raw);
+                        isEnd = p.Ok && p.Action != null && p.Action.EndTurn;
+                    }
+                    bool resultOk = obj.TryGet("result_ok", out JsonNode roNode) && roNode is JsonBool rob ? rob.Value : (isEnd && parseOk);
+
+                    var rec = new ReplayRequestRecord {
+                        RunId = runId, Seed = seed, Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
                         PromptVersion = GetString(obj, "prompt_version"), SchemaHash = GetString(obj, "schema_hash"),
                         SeatId = GetString(obj, "seat_id"), TurnToken = GetInt(obj, "turn_token"), Season = GetInt(obj, "season"),
                         ObservationHash = GetString(obj, "observation_hash"), ObservationJson = GetRawOrString(obj, "observation_json"),
                         RequestIndex = GetInt(obj, "request_index"), TotalRequests = GetInt(obj, "total_requests"),
-                        RawModelText = GetString(obj, "raw_model_text"), ParseOk = GetBool(obj, "parse_ok"),
-                        CommandJson = GetRawOrString(obj, "command_json"), ResultOk = GetBool(obj, "result_ok"),
+                        RawModelText = raw, ParseOk = parseOk,
+                        CommandJson = GetRawOrString(obj, "command_json"), ResultOk = resultOk,
                         ResultError = GetString(obj, "result_error"), StateAfter = GetString(obj, "state_after"),
                         FinishReason = GetString(obj, "finish_reason"), InputTokens = GetInt(obj, "input_tokens"),
                         OutputTokens = GetInt(obj, "output_tokens"), ReasoningTokens = GetInt(obj, "reasoning_tokens"),
@@ -261,26 +312,10 @@ namespace LuanShi.Engine
             return excerpt;
         }
 
-        private static string GetString(JsonObject obj, string key, string fallback = "")
-            => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonString s ? s.Value : fallback;
-
-        private static string GetRawOrString(JsonObject obj, string key)
-        {
-            if (obj != null && obj.TryGet(key, out JsonNode n))
-            {
-                if (n is JsonString s) return s.Value;
-                if (n is JsonObject o) return o.ToString();
-            }
-            return "";
-        }
-
-        private static int GetInt(JsonObject obj, string key, int fallback = 0)
-            => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? (int)i.Value : fallback;
-
-        private static long GetLong(JsonObject obj, string key, long fallback = 0)
-            => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? i.Value : fallback;
-
-        private static bool GetBool(JsonObject obj, string key, bool fallback = false)
-            => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonBool b ? b.Value : fallback;
+        private static string GetString(JsonObject obj, string key, string fallback = "") => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonString s ? s.Value : fallback;
+        private static string GetRawOrString(JsonObject obj, string key) => obj != null && obj.TryGet(key, out JsonNode n) ? (n is JsonString s ? s.Value : n.ToString()) : "";
+        private static int GetInt(JsonObject obj, string key, int fallback = 0) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? (int)i.Value : fallback;
+        private static long GetLong(JsonObject obj, string key, long fallback = 0) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? i.Value : fallback;
+        private static bool GetBool(JsonObject obj, string key, bool fallback = false) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonBool b ? b.Value : fallback;
     }
 }

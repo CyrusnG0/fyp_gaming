@@ -4,6 +4,7 @@
 // saved prompt excerpts, and bit-exact verification metrics with ZERO live model calls.
 
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using LuanShi.Engine;
 
@@ -32,7 +33,7 @@ namespace LuanShi
             y += 22f;
 
             ReplaySummaryData sum = _replayBundle != null ? _replayBundle.Summary : null;
-            string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : "run-20261109082434809-51b7ebd5";
+            string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : ReplayLoader.VerifiedDemoRunId;
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Run: " + runId, width), uiSmall);
             y += 15f;
 
@@ -41,7 +42,16 @@ namespace LuanShi
             string lookupStr = sum != null && sum.ManualLookupEnabled ? "on (historical)" : "off";
             GUI.Label(new Rect(x, y, width, 14f), $"seed: {seedVal}  |  profile: {profKey}  |  lookup: {lookupStr}", uiSmall);
             y += 15f;
-            GUI.Label(new Rect(x, y, width, 14f), "historical personas: wei-mild  |  shu-aggressive", uiSmall);
+
+            string personaInfo = "";
+            if (sum != null && sum.Turns != null)
+            {
+                var personas = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var t in sum.Turns) if (!string.IsNullOrEmpty(t.PersonaId)) personas.Add(t.PersonaId);
+                personaInfo = string.Join("  |  ", personas);
+            }
+            if (string.IsNullOrEmpty(personaInfo)) personaInfo = "unrecorded";
+            GUI.Label(new Rect(x, y, width, 14f), "historical personas: " + personaInfo, uiSmall);
             y += 18f;
 
             if (_replaySession == null)
@@ -53,13 +63,14 @@ namespace LuanShi
             // Season & Request Progress
             int curSeason = _replaySession.CurrentSeason;
             int reqIdx = _replaySession.CurrentRequestIndex;
-            int totalReq = _replayBundle != null ? _replayBundle.Requests.Count : 44;
+            int totalSeasons = _replaySession.TotalSeasons;
+            int totalReq = _replaySession.TotalRequests;
             string stateText = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
-            GUI.Label(new Rect(x, y, width, 18f), $"Season {curSeason} of 5  |  Req {reqIdx} of {totalReq} ({stateText})", uiBody);
+            GUI.Label(new Rect(x, y, width, 18f), $"Season {curSeason} of {totalSeasons}  |  Req {reqIdx} of {totalReq} ({stateText})", uiBody);
             y += 20f;
 
             // Progress Pips
-            DrawReplayPips(x, y, width, curSeason);
+            DrawReplayPips(x, y, width, curSeason, totalSeasons);
             y += 18f;
 
             // Playback controls row 1
@@ -82,7 +93,7 @@ namespace LuanShi
 
             // Faction Scoreboards
             DrawReplayScoreboards(x, y, width);
-            y += 66f;
+            y += _replaySession.IsCompleted ? 78f : 66f;
 
             // Current request & Persona
             ReplayRequestRecord rec = _replaySession.CurrentRequestRecord;
@@ -99,43 +110,55 @@ namespace LuanShi
             GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
             y += 15f;
             string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
-            Rect promptRect = new Rect(x, y, width, 60f);
+            Rect promptRect = new Rect(x, y, width, 55f);
             _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, width - 20f, 180f));
             GUI.TextArea(new Rect(0, 0, width - 20f, 180f), promptText, uiMono);
             GUI.EndScrollView();
-            y += 66f;
+            y += 60f;
 
             // Saved Model Response
             GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
             y += 15f;
             string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
-            Rect respRect = new Rect(x, y, width, 45f);
+            Rect respRect = new Rect(x, y, width, 40f);
             _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
             GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);
             GUI.EndScrollView();
-            y += 50f;
+            y += 45f;
 
             // Verification status
-            int normObs = _replaySession.NormalizedObservationsMatched;
-            int actions = _replaySession.AcceptedActionsMatched;
+            int obs = _replaySession.ObservationHashesMatched;
+            int acts = _replaySession.AcceptedActionsReplayed;
+            int expActs = _replaySession.ExpectedAcceptedActions;
+            int rejs = _replaySession.RejectedActionsReplayed;
+            int expRejs = _replaySession.ExpectedRejectedActions;
+            int mismatches = _replaySession.ActionOutcomeMismatches;
             if (_replaySession.IsCompleted)
             {
-                bool allPass = _replaySession.FinalReport != null && _replaySession.FinalReport.AllVerifiedMatched;
-                string status = allPass ? "VERIFICATION: PASS (Wei 243/1741, Shu 71/1248)" : "VERIFICATION: COMPLETED WITH DISCREPANCIES";
-                GUI.Label(new Rect(x, y, width, 16f), status, allPass ? uiPanelTitle : uiReason);
+                bool rawPass = _replaySession.FinalReport != null && _replaySession.FinalReport.RawExactMatch;
+                string status = rawPass ? "VERIFICATION: PASS (RAW EXACT)" : "VERIFICATION: COMPLETED WITH DISCREPANCIES";
+                GUI.Label(new Rect(x, y, width, 16f), status, rawPass ? uiPanelTitle : uiReason);
                 y += 16f;
-                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {normObs}/44  |  Actions: {actions}/42  |  Positions: 10 verified, 2 fog", uiSmall);
+                int dirObs = _replaySession.FinalReport != null ? _replaySession.FinalReport.DirectObservationMatched : 0;
+                int dirCount = _replaySession.FinalReport != null ? _replaySession.FinalReport.DirectObservationCount : 0;
+                int cmdInf = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredMatched : 0;
+                int cmdCount = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredCount : 0;
+                int unverified = _replaySession.FinalReport != null ? _replaySession.FinalReport.UnverifiedSceneSetupCount : 0;
+                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{totalReq}  |  Accepted: {acts}/{expActs} (Rej: {rejs}/{expRejs}, Mismatch: {mismatches})", uiSmall);
+                y += 14f;
+                GUI.Label(new Rect(x, y, width, 14f), $"Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)", uiSmall);
             }
             else
             {
-                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {normObs}/{reqIdx}  |  Actions: {actions}/{reqIdx}", uiSmall);
+                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{reqIdx}  |  Accepted: {acts}/{reqIdx} (Rej: {rejs}, Mismatch: {mismatches})", uiSmall);
             }
         }
 
-        void DrawReplayPips(float x, float y, float width, int currentSeason)
+        void DrawReplayPips(float x, float y, float width, int currentSeason, int totalSeasons)
         {
-            float pipW = (width - 16f) / 5f;
-            for (int s = 1; s <= 5; s++)
+            int count = Math.Max(1, totalSeasons);
+            float pipW = (width - (count - 1) * 4f) / count;
+            for (int s = 1; s <= count; s++)
             {
                 Rect r = new Rect(x + (s - 1) * (pipW + 4f), y, pipW, 10f);
                 Color c = s <= currentSeason ? new Color(0.2f, 0.7f, 0.3f, 0.9f) : new Color(0.3f, 0.3f, 0.3f, 0.5f);
@@ -168,6 +191,20 @@ namespace LuanShi
             GUI.Label(new Rect(col2X, y, colW, 16f), "Shu (Chengdu)", uiPanelTitle);
             GUI.Label(new Rect(col2X, y + 16f, colW, 14f), $"Gold {shuG}  Food {shuF}", uiSmall);
             GUI.Label(new Rect(col2X, y + 30f, colW, 14f), $"Pop {shuP}  Gar {shuGar}", uiSmall);
+
+            if (_replaySession != null && _replaySession.IsCompleted && _replaySession.FinalReport != null)
+            {
+                var rpt = _replaySession.FinalReport;
+                int dWeiG = rpt.WeiFinalGold - rpt.WeiExpectedGold;
+                int dWeiF = rpt.WeiFinalFood - rpt.WeiExpectedFood;
+                string weiComp = $"Summary G:{rpt.WeiExpectedGold} ({(dWeiG >= 0 ? "+" : "")}{dWeiG}) F:{rpt.WeiExpectedFood} ({(dWeiF >= 0 ? "+" : "")}{dWeiF})";
+                GUI.Label(new Rect(x, y + 44f, colW, 14f), weiComp, uiSmall);
+
+                int dShuG = rpt.ShuFinalGold - rpt.ShuExpectedGold;
+                int dShuF = rpt.ShuFinalFood - rpt.ShuExpectedFood;
+                string shuComp = $"Summary G:{rpt.ShuExpectedGold} ({(dShuG >= 0 ? "+" : "")}{dShuG}) F:{rpt.ShuExpectedFood} ({(dShuF >= 0 ? "+" : "")}{dShuF})";
+                GUI.Label(new Rect(col2X, y + 44f, colW, 14f), shuComp, uiSmall);
+            }
         }
 
         void DrawReplayTurnControl()

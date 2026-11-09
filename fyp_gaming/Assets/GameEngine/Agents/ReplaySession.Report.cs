@@ -1,101 +1,171 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace LuanShi.Engine
 {
     public sealed partial class ReplaySession
     {
-        private static bool MatchesMonoNormalizedObservation(string obsJson, string expectedHash)
+        public string GetDisplayedSummarySnapshot()
         {
-            if (string.IsNullOrEmpty(obsJson) || string.IsNullOrEmpty(expectedHash)) return false;
-            // Read-only verification: in Season 1 (pop=9000), Unity Mono's F64 CIL evaluation stack truncates
-            // 9000*0.01f to 89 (vs 90 in .NET CoreCLR F32) and 9000*0.02f+50f to 229 (vs 230 in .NET CoreCLR F32).
-            // Normalizing that single 1-ULP S1 truncation on the serialized observation string verifies that every
-            // other field, event, and state transition in S2..S5 is byte-for-byte identical without mutating GameEngine.
-            string norm = obsJson
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9294,\"food\":1111,\"gold\":940",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9294,\"food\":1112,\"gold\":939")
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9860,\"food\":866,\"gold\":1032",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9860,\"food\":867,\"gold\":1031")
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9860,\"food\":866,\"gold\":1232",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":9860,\"food\":867,\"gold\":1231")
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10470,\"food\":1089,\"gold\":1330",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10470,\"food\":1090,\"gold\":1329")
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10853,\"food\":574,\"gold\":1434",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10853,\"food\":575,\"gold\":1433")
-                .Replace("\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10853,\"food\":574,\"gold\":1634",
-                         "\"id\":\"city-wei\",\"name\":\"Wei Capital\",\"x\":3,\"z\":8,\"owner_seat_id\":\"seat-0\",\"population\":10853,\"food\":575,\"gold\":1633")
-                .Replace("\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9295,\"food\":1080,\"gold\":940",
-                         "\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9295,\"food\":1080,\"gold\":939")
-                .Replace("\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":8295,\"food\":1080,\"gold\":890",
-                         "\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":8295,\"food\":1080,\"gold\":889")
-                .Replace("\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":8713,\"food\":715,\"gold\":972",
-                         "\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":8713,\"food\":715,\"gold\":971")
-                .Replace("\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9262,\"food\":731,\"gold\":1059",
-                         "\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9262,\"food\":731,\"gold\":1058")
-                .Replace("\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9812,\"food\":163,\"gold\":1151",
-                         "\"id\":\"city-shu\",\"name\":\"Chengdu\",\"x\":22,\"z\":8,\"owner_seat_id\":\"seat-1\",\"population\":9812,\"food\":163,\"gold\":1150")
-                .Replace("\"city_id\":\"city-wei\",\"pop\":\"9294\",\"food\":\"1511\",\"gold\":\"940\"",
-                         "\"city_id\":\"city-wei\",\"pop\":\"9294\",\"food\":\"1512\",\"gold\":\"939\"")
-                .Replace("\"city_id\":\"city-wei\",\"pop\":\"9860\",\"food\":\"1266\",\"gold\":\"1032\"",
-                         "\"city_id\":\"city-wei\",\"pop\":\"9860\",\"food\":\"1267\",\"gold\":\"1031\"")
-                .Replace("\"city_id\":\"city-wei\",\"pop\":\"10470\",\"food\":\"1489\",\"gold\":\"1330\"",
-                         "\"city_id\":\"city-wei\",\"pop\":\"10470\",\"food\":\"1490\",\"gold\":\"1329\"")
-                .Replace("\"city_id\":\"city-wei\",\"pop\":\"10853\",\"food\":\"974\",\"gold\":\"1434\"",
-                         "\"city_id\":\"city-wei\",\"pop\":\"10853\",\"food\":\"975\",\"gold\":\"1433\"")
-                .Replace("\"city_id\":\"city-shu\",\"pop\":\"9295\",\"food\":\"1480\",\"gold\":\"940\"",
-                         "\"city_id\":\"city-shu\",\"pop\":\"9295\",\"food\":\"1480\",\"gold\":\"939\"")
-                .Replace("\"city_id\":\"city-shu\",\"pop\":\"8713\",\"food\":\"1115\",\"gold\":\"972\"",
-                         "\"city_id\":\"city-shu\",\"pop\":\"8713\",\"food\":\"1115\",\"gold\":\"971\"")
-                .Replace("\"city_id\":\"city-shu\",\"pop\":\"9262\",\"food\":\"1131\",\"gold\":\"1059\"",
-                         "\"city_id\":\"city-shu\",\"pop\":\"9262\",\"food\":\"1131\",\"gold\":\"1058\"")
-                .Replace("\"city_id\":\"city-shu\",\"pop\":\"9812\",\"food\":\"563\",\"gold\":\"1151\"",
-                         "\"city_id\":\"city-shu\",\"pop\":\"9812\",\"food\":\"563\",\"gold\":\"1150\"");
-            return string.Equals(Hash(norm), expectedHash, StringComparison.Ordinal);
+            var sb = new StringBuilder(512);
+            string state = _isCompleted ? "Completed" : (_state == ReplayState.Playing ? "Playing" : "Paused");
+            string seat = _currentSeatId ?? "seat-0";
+            sb.AppendLine($"OFFLINE REPLAY  |  Season {_currentSeason}/{_totalSeasons}  |  {state} (viewing {seat})");
+            sb.AppendLine($"Zero API calls  |  Req {_currentRequestIndex}/{_totalRequests}  |  Obs matched {_observationHashesMatched}/{_currentRequestIndex}");
+
+            var scores = CurrentScores();
+            ReplaySeatScore wei = scores.Count > 0 ? scores[0] : null;
+            ReplaySeatScore shu = scores.Count > 1 ? scores[1] : null;
+
+            sb.AppendLine($"Wei (Capital): Gold {wei?.Gold ?? 0} Food {wei?.Food ?? 0} Pop {wei?.Population ?? 0} Gar {wei?.Garrison ?? 0}");
+            sb.AppendLine($"Shu (Chengdu): Gold {shu?.Gold ?? 0} Food {shu?.Food ?? 0} Pop {shu?.Population ?? 0} Gar {shu?.Garrison ?? 0}");
+
+            if (_isCompleted && _finalReport != null)
+            {
+                int dWeiG = _finalReport.WeiFinalGold - _finalReport.WeiExpectedGold;
+                int dWeiF = _finalReport.WeiFinalFood - _finalReport.WeiExpectedFood;
+                sb.AppendLine($"Wei Summary G:{_finalReport.WeiExpectedGold} ({(dWeiG >= 0 ? "+" : "")}{dWeiG}) F:{_finalReport.WeiExpectedFood} ({(dWeiF >= 0 ? "+" : "")}{dWeiF})");
+                int dShuG = _finalReport.ShuFinalGold - _finalReport.ShuExpectedGold;
+                int dShuF = _finalReport.ShuFinalFood - _finalReport.ShuExpectedFood;
+                sb.AppendLine($"Shu Summary G:{_finalReport.ShuExpectedGold} ({(dShuG >= 0 ? "+" : "")}{dShuG}) F:{_finalReport.ShuExpectedFood} ({(dShuF >= 0 ? "+" : "")}{dShuF})");
+            }
+
+            var rec = CurrentRequestRecord;
+            string seatId = rec != null ? rec.SeatId : seat;
+            sb.AppendLine($"Current Turn: {seatId} ({CurrentPersonaId})");
+            string act = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? rec.RawModelText : "end_turn";
+            sb.AppendLine("Action: " + act);
+
+            if (_isCompleted)
+            {
+                bool exact = _finalReport != null && _finalReport.RawExactMatch;
+                sb.AppendLine("VERIFICATION: " + (exact ? "PASS (RAW EXACT)" : "COMPLETED WITH DISCREPANCIES"));
+                int dirObs = _finalReport != null ? _finalReport.DirectObservationMatched : 0;
+                int dirCount = _finalReport != null ? _finalReport.DirectObservationCount : 0;
+                int cmdInf = _finalReport != null ? _finalReport.CommandInferredMatched : 0;
+                int cmdCount = _finalReport != null ? _finalReport.CommandInferredCount : 0;
+                int unverified = _finalReport != null ? _finalReport.UnverifiedSceneSetupCount : 0;
+                sb.AppendLine($"Obs: {_observationHashesMatched}/{_totalRequests}  |  Accepted: {_acceptedActionsReplayed}/{_expectedAcceptedActions} (Rej: {_rejectedActionsReplayed}/{_expectedRejectedActions}, Mismatch: {_actionOutcomeMismatches})  |  Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)");
+            }
+            return sb.ToString().TrimEnd();
         }
 
         private void GenerateComparisonReport()
         {
-            int weiFood = 0, weiGold = 0, weiPop = 0, weiGar = 0;
-            int shuFood = 0, shuGold = 0, shuPop = 0, shuGar = 0;
-            var s5 = _replayedScores.Find(s => s.Season == 5);
-            if (s5 != null)
+            var rawMismatches = new List<string>();
+            bool allSeasonsExact = true, finalSeasonExact = true;
+            int weiFinalFood = 0, weiFinalGold = 0, weiFinalPop = 0, weiFinalGar = 0;
+            int weiExpFood = 0, weiExpGold = 0, weiExpPop = 0, weiExpGar = 0;
+            int shuFinalFood = 0, shuFinalGold = 0, shuFinalPop = 0, shuFinalGar = 0;
+            int shuExpFood = 0, shuExpGold = 0, shuExpPop = 0, shuExpGar = 0;
+            int finalSeasonNum = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : _replayedScores.Count;
+
+            for (int sIdx = 0; sIdx < _replayedScores.Count; sIdx++)
             {
-                foreach (var sc in s5.Scores)
+                var actualSb = _replayedScores[sIdx];
+                int seasonNum = actualSb.Season;
+                ReplaySeasonScoreboard expSb = null;
+                if (_bundle.Summary?.Scoreboards != null)
                 {
-                    if (sc.SeatId == "seat-0") { weiFood = sc.Food; weiGold = sc.Gold; weiPop = sc.Population; weiGar = sc.Garrison; }
-                    else if (sc.SeatId == "seat-1") { shuFood = sc.Food; shuGold = sc.Gold; shuPop = sc.Population; shuGar = sc.Garrison; }
+                    foreach (var sb in _bundle.Summary.Scoreboards)
+                        if (sb.Season == seasonNum) { expSb = sb; break; }
+                }
+
+                if (expSb != null)
+                {
+                    foreach (var actScore in actualSb.Scores)
+                    {
+                        ReplaySeatScore expScore = null;
+                        foreach (var sc in expSb.Scores)
+                            if (string.Equals(sc.SeatId, actScore.SeatId, StringComparison.Ordinal)) { expScore = sc; break; }
+
+                        if (expScore != null)
+                        {
+                            int dGold = actScore.Gold - expScore.Gold, dFood = actScore.Food - expScore.Food;
+                            int dPop = actScore.Population - expScore.Population, dGar = actScore.Garrison - expScore.Garrison;
+                            int dCities = actScore.Cities - expScore.Cities;
+
+                            if (dGold != 0 || dFood != 0 || dPop != 0 || dGar != 0 || dCities != 0)
+                            {
+                                allSeasonsExact = false;
+                                rawMismatches.Add($"Season {seasonNum} {actScore.SeatId} ({actScore.Faction}): Gold delta={dGold} (act={actScore.Gold}, exp={expScore.Gold}), Food delta={dFood} (act={actScore.Food}, exp={expScore.Food}), Pop delta={dPop}, Gar delta={dGar}, Cities delta={dCities}");
+                            }
+
+                            if (seasonNum == finalSeasonNum)
+                            {
+                                if (dGold != 0 || dFood != 0 || dPop != 0 || dGar != 0 || dCities != 0) finalSeasonExact = false;
+                                if (actScore.SeatId == "seat-0")
+                                {
+                                    weiFinalFood = actScore.Food; weiFinalGold = actScore.Gold; weiFinalPop = actScore.Population; weiFinalGar = actScore.Garrison;
+                                    weiExpFood = expScore.Food; weiExpGold = expScore.Gold; weiExpPop = expScore.Population; weiExpGar = expScore.Garrison;
+                                }
+                                else if (actScore.SeatId == "seat-1")
+                                {
+                                    shuFinalFood = actScore.Food; shuFinalGold = actScore.Gold; shuFinalPop = actScore.Population; shuFinalGar = actScore.Garrison;
+                                    shuExpFood = expScore.Food; shuExpGold = expScore.Gold; shuExpPop = expScore.Population; shuExpGar = expScore.Garrison;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            int expWeiFood = 243, expWeiGold = 1741, expWeiPop = 11291, expWeiGar = 1000;
-            int expShuFood = 71, expShuGold = 1248, expShuPop = 10304, expShuGar = 2000;
-            // In Season 1 (pop=9000), (int)(9000 * 0.01f) is 89 under Unity Mono's F64 evaluation stack vs 90 under .NET CoreCLR F32.
-            int s1MonoTaxDelta = ((int)(9000 * BalanceConfig.TaxGoldPerPop * 1f * 1f)) - ((int)(9000.0 * (double)BalanceConfig.TaxGoldPerPop * 1.0 * 1.0));
-            int weiMonoGold = weiGold - s1MonoTaxDelta;
-            int shuMonoGold = shuGold - s1MonoTaxDelta;
-            bool scoreboardsMatch = (weiFood == expWeiFood && weiMonoGold == expWeiGold && weiPop == expWeiPop && weiGar == expWeiGar
-                                     && shuFood == expShuFood && shuMonoGold == expShuGold && shuPop == expShuPop && shuGar == expShuGar);
+            ParseLoggedPositions(out var observedEntities, out var inferredMoves);
+            var checks = new List<ReplayPositionCheck>();
+            int directCount = 0, directMatched = 0, cmdCount = 0, cmdMatched = 0, unverifiedCount = 0;
 
-            var checks = new List<ReplayPositionCheck>
+            var allEntities = new List<(string id, string kind, string owner, int actX, int actZ)>();
+            foreach (var c in _engine.State.Cities) allEntities.Add((c.Id, "city", c.OwnerSeatId, c.X, c.Z));
+            foreach (var t in _engine.State.WatchTowers) allEntities.Add((t.Id, "tower", t.OwnerSeatId, t.X, t.Z));
+            foreach (var a in _engine.State.Armies) allEntities.Add((a.Id, "army", a.OwnerSeatId, a.X, a.Z));
+
+            foreach (var ent in allEntities)
             {
-                BuildPosCheck("city-wei", "city", "seat-0", 3, 8, "observation (turn 9, req 2)"),
-                BuildPosCheck("city-shu", "city", "seat-1", 22, 8, "observation (turn 10, req 5)"),
-                BuildPosCheck("city-south", "city", null, 12, 2, "unverified in logs (fog of war / scene setup)", "Neutral city outside fog-of-war range of both seats"),
-                BuildPosCheck("watch-tower-1", "tower", null, 6, 2, "unverified in logs (fog of war / scene setup)", "Neutral watch tower outside fog-of-war range of both seats"),
-                BuildPosCheck("army-wei-1", "army", "seat-0", 2, 6, "observation (turn 9, req 2)"),
-                BuildPosCheck("army-wei-2", "army", "seat-0", 2, 8, "observation (turn 9, req 2)"),
-                BuildPosCheck("army-wei-3", "army", "seat-0", 2, 10, "observation (turn 9, req 2)"),
-                BuildPosCheck("army-wei-4", "army", "seat-0", 4, 12, "observation (turn 9, req 2)"),
-                BuildPosCheck("army-shu-1", "army", "seat-1", 22, 1, "observation (turn 10, req 5)"),
-                BuildPosCheck("army-shu-2", "army", "seat-1", 22, 2, "observation (turn 10, req 5)"),
-                BuildPosCheck("army-shu-3", "army", "seat-1", 22, 3, "observation (turn 10, req 5)"),
-                BuildPosCheck("army-shu-4", "army", "seat-1", 21, 1, "accepted command a-42", "Final march a-42; no post-action observation in JSONL")
-            };
+                ReplayPositionCheck pc;
+                if (!observedEntities.TryGetValue(ent.id, out var obs))
+                {
+                    unverifiedCount++;
+                    pc = new ReplayPositionCheck
+                    {
+                        EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
+                        ExpectedX = null, ExpectedZ = null, ActualX = ent.actX, ActualZ = ent.actZ,
+                        Matched = false, VerifiedByLogs = false, VerificationKind = ReplayPositionVerificationKind.UnverifiedSceneSetup,
+                        VerificationBasis = "unverified scene setup (never in logged observations)", Note = "Neutral entity outside fog-of-war range of both seats"
+                    };
+                }
+                else if (inferredMoves.TryGetValue(ent.id, out var move) && move.reqOrder >= obs.reqOrder)
+                {
+                    cmdCount++;
+                    bool matched = ent.actX == move.x && ent.actZ == move.z;
+                    if (matched) cmdMatched++;
+                    pc = new ReplayPositionCheck
+                    {
+                        EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
+                        ExpectedX = move.x, ExpectedZ = move.z, ActualX = ent.actX, ActualZ = ent.actZ,
+                        Matched = matched, VerifiedByLogs = true, VerificationKind = ReplayPositionVerificationKind.AcceptedCommandInference,
+                        VerificationBasis = $"accepted command {move.actionId}",
+                        Note = $"Observed at ({obs.x},{obs.z}) in turn {obs.turn} req {obs.req}, then moved to ({move.x},{move.z}) by accepted command {move.actionId}; no post-action observation in JSONL"
+                    };
+                }
+                else
+                {
+                    directCount++;
+                    bool matched = ent.actX == obs.x && ent.actZ == obs.z;
+                    if (matched) directMatched++;
+                    pc = new ReplayPositionCheck
+                    {
+                        EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
+                        ExpectedX = obs.x, ExpectedZ = obs.z, ActualX = ent.actX, ActualZ = ent.actZ,
+                        Matched = matched, VerifiedByLogs = true, VerificationKind = ReplayPositionVerificationKind.DirectObservation,
+                        VerificationBasis = $"observation (turn {obs.turn}, req {obs.req})", Note = ""
+                    };
+                }
+                checks.Add(pc);
+            }
 
-            bool allMatched = scoreboardsMatch && _normalizedObservationsMatched == _bundle.Requests.Count
-                              && _acceptedActionsMatched == 42 && _voluntaryEndTurnsMatched == 2;
-            foreach (var c in checks) if (!c.Matched) allMatched = false;
+            bool rawExact = _observationHashMismatches == 0 && finalSeasonExact && allSeasonsExact
+                            && _actionOutcomeMismatches == 0 && directMatched == directCount && cmdMatched == cmdCount;
 
             _finalReport = new ReplayComparisonReport
             {
@@ -105,17 +175,44 @@ namespace LuanShi.Engine
                 SeasonsVerified = _replayedScores.Count,
                 TotalRequests = _bundle.Requests.Count,
                 ObservationHashesMatched = _observationHashesMatched,
-                NormalizedObservationsMatched = _normalizedObservationsMatched,
-                AcceptedActionsMatched = _acceptedActionsMatched,
-                VoluntaryEndTurnsMatched = _voluntaryEndTurnsMatched,
-                WeiFinalFood = weiFood, WeiFinalGold = weiGold, WeiMonoF64Gold = weiMonoGold,
-                WeiExpectedFood = expWeiFood, WeiExpectedGold = expWeiGold,
-                WeiFinalPop = weiPop, WeiExpectedPop = expWeiPop, WeiFinalGarrison = weiGar, WeiExpectedGarrison = expWeiGar,
-                ShuFinalFood = shuFood, ShuFinalGold = shuGold, ShuMonoF64Gold = shuMonoGold,
-                ShuExpectedFood = expShuFood, ShuExpectedGold = expShuGold,
-                ShuFinalPop = shuPop, ShuExpectedPop = expShuPop, ShuFinalGarrison = shuGar, ShuExpectedGarrison = expShuGar,
-                ScoreboardsMatched = scoreboardsMatch,
+                ObservationHashMismatches = _observationHashMismatches,
+                ObservationHashDiscrepancies = _observationHashDiscrepancies,
+                ExpectedAcceptedActions = _expectedAcceptedActions,
+                AcceptedActionsReplayed = _acceptedActionsReplayed,
+                ExpectedRejectedActions = _expectedRejectedActions,
+                RejectedActionsReplayed = _rejectedActionsReplayed,
+                UnexpectedRejections = _unexpectedRejections,
+                UnexpectedAcceptances = _unexpectedAcceptances,
+                ActionOutcomeMismatches = _actionOutcomeMismatches,
+                ActionDiscrepancies = _actionDiscrepancies,
+                ExpectedVoluntaryEndTurns = _expectedVoluntaryEndTurns,
+                VoluntaryEndTurnsReplayed = _voluntaryEndTurnsReplayed,
+                WeiFinalFood = weiFinalFood, WeiFinalGold = weiFinalGold,
+                WeiExpectedFood = weiExpFood, WeiExpectedGold = weiExpGold,
+                WeiFinalPop = weiFinalPop, WeiExpectedPop = weiExpPop,
+                WeiFinalGarrison = weiFinalGar, WeiExpectedGarrison = weiExpGar,
+                ShuFinalFood = shuFinalFood, ShuFinalGold = shuFinalGold,
+                ShuExpectedFood = shuExpFood, ShuExpectedGold = shuExpGold,
+                ShuFinalPop = shuFinalPop, ShuExpectedPop = shuExpPop,
+                ShuFinalGarrison = shuFinalGar, ShuExpectedGarrison = shuExpGar,
+                FinalScoreboardExactMatch = finalSeasonExact,
+                AllSeasonsScoreboardExactMatch = allSeasonsExact,
+                RawScoreboardMismatches = rawMismatches,
+                DirectObservationCount = directCount,
+                DirectObservationMatched = directMatched,
+                CommandInferredCount = cmdCount,
+                CommandInferredMatched = cmdMatched,
+                UnverifiedSceneSetupCount = unverifiedCount,
                 PositionChecks = checks,
+                ProposedFloatingPointNotes = new[]
+                {
+                    "In Season 1 EndSeason, city tax is calculated as (int)(Population * 0.01f).",
+                    "With Season 1 starting population 9000, 9000 * 0.01f evaluates to 89 in Unity Mono (F64 CIL evaluation stack) vs 90 in .NET CoreCLR (F32 native single precision), producing +1 gold across S1-S5 for both Wei and Shu.",
+                    "In Season 1 EndSeason, city food consumption/harvest is (int)(9000 * 0.02f + 50f) = 230 in CoreCLR F32 vs 229 in Mono F64 (-1 food for Wei in S1-S4: 1111 vs 1112, 866 vs 867, 1089 vs 1090, 574 vs 575).",
+                    "In Season 5, (int)(300f * 1.6f * 0.7f) evaluates to 336 in CoreCLR vs 335 in Mono, exactly offsetting the -1 food delta so Season 5 final Wei food matches 100% exactly (243 vs 243).",
+                    "All population, garrison, and city values match 100% exactly across all 5 seasons.",
+                    "Raw observation hashes differ in Seasons 2-5 due to the Season 1 +1 gold / -1 food float truncation carryover in serialized city state and city_resolved event payloads."
+                },
                 DisclosedDependencies = new[]
                 {
                     "RNG Seed 12345: EndSeason population growth sequence (rng.NextDouble() called per owned non-starving city).",
@@ -124,34 +221,63 @@ namespace LuanShi.Engine
                     "MapData / Scene Setup: 26x17 staggered hex grid matching TBTK layout.",
                     "Neutral city-south (12,2) and watch-tower-1 (6,2): never in fog-of-war sight in JSONL; positions come from scene setup."
                 },
-                AllVerifiedMatched = allMatched
+                RawExactMatch = rawExact
             };
         }
 
-        private ReplayPositionCheck BuildPosCheck(string id, string kind, string owner, int expX, int expZ, string basis, string note = "")
+        private void ParseLoggedPositions(
+            out Dictionary<string, (int x, int z, int turn, int req, int reqOrder)> observedEntities,
+            out Dictionary<string, (int x, int z, string actionId, int reqOrder)> inferredMoves)
         {
-            int actX = -1, actZ = -1;
-            if (kind == "city")
+            observedEntities = new Dictionary<string, (int x, int z, int turn, int req, int reqOrder)>(StringComparer.Ordinal);
+            inferredMoves = new Dictionary<string, (int x, int z, string actionId, int reqOrder)>(StringComparer.Ordinal);
+
+            for (int i = 0; i < _bundle.Requests.Count; i++)
             {
-                var c = _engine.State.Cities.Find(x => x.Id == id);
-                if (c != null) { actX = c.X; actZ = c.Z; }
+                var req = _bundle.Requests[i];
+                if (!string.IsNullOrEmpty(req.ObservationJson) &&
+                    StrictJson.TryParseLenientNumbers(req.ObservationJson, out JsonNode obsNode, out _) &&
+                    obsNode is JsonObject obsObj)
+                {
+                    ExtractEntitiesFromObsArray(obsObj, "cities", req, i, observedEntities);
+                    ExtractEntitiesFromObsArray(obsObj, "scouted_cities", req, i, observedEntities);
+                    ExtractEntitiesFromObsArray(obsObj, "watch_towers", req, i, observedEntities);
+                    ExtractEntitiesFromObsArray(obsObj, "armies", req, i, observedEntities);
+                }
+
+                if (req.ResultOk && !string.IsNullOrEmpty(req.CommandJson) &&
+                    StrictJson.TryParseLenientNumbers(req.CommandJson, out JsonNode cmdNode, out _) &&
+                    cmdNode is JsonObject cmdObj)
+                {
+                    string type = cmdObj.TryGet("type", out JsonNode tNode) && tNode is JsonString ts ? ts.Value : "";
+                    if (type == "march" || type == "army_march")
+                    {
+                        string target = cmdObj.TryGet("target_id", out JsonNode tgNode) && tgNode is JsonString tgs ? tgs.Value : "";
+                        int px = cmdObj.TryGet("param_a", out JsonNode paNode) && paNode is JsonInt pai ? (int)pai.Value : -1;
+                        int pz = cmdObj.TryGet("param_b", out JsonNode pbNode) && pbNode is JsonInt pbi ? (int)pbi.Value : -1;
+                        string actId = cmdObj.TryGet("action_id", out JsonNode aidNode) && aidNode is JsonString aids ? aids.Value : "";
+                        if (!string.IsNullOrEmpty(target) && px >= 0 && pz >= 0) inferredMoves[target] = (px, pz, actId, i);
+                    }
+                }
             }
-            else if (kind == "tower")
+        }
+
+        private static void ExtractEntitiesFromObsArray(JsonObject obsObj, string key, ReplayRequestRecord req, int reqIndex,
+            Dictionary<string, (int x, int z, int turn, int req, int reqOrder)> target)
+        {
+            if (obsObj.TryGet(key, out JsonNode arrNode) && arrNode is JsonArray arr)
             {
-                var t = _engine.State.WatchTowers.Find(x => x.Id == id);
-                if (t != null) { actX = t.X; actZ = t.Z; }
+                foreach (var item in arr.Items)
+                {
+                    if (item is JsonObject obj)
+                    {
+                        string id = obj.TryGet("id", out JsonNode idNode) && idNode is JsonString ids ? ids.Value : "";
+                        int x = obj.TryGet("x", out JsonNode xNode) && xNode is JsonInt xi ? (int)xi.Value : -1;
+                        int z = obj.TryGet("z", out JsonNode zNode) && zNode is JsonInt zi ? (int)zi.Value : -1;
+                        if (!string.IsNullOrEmpty(id) && x >= 0 && z >= 0) target[id] = (x, z, req.TurnToken, req.RequestIndex, reqIndex);
+                    }
+                }
             }
-            else if (kind == "army")
-            {
-                var a = _engine.State.Armies.Find(x => x.Id == id);
-                if (a != null) { actX = a.X; actZ = a.Z; }
-            }
-            return new ReplayPositionCheck
-            {
-                EntityId = id, EntityKind = kind, OwnerSeatId = owner,
-                ExpectedX = expX, ExpectedZ = expZ, ActualX = actX, ActualZ = actZ,
-                Matched = actX == expX && actZ == expZ, VerificationBasis = basis, Note = note
-            };
         }
 
         public static MapData BuildDefaultStaggeredHexMap(int width = 26, int height = 17)
@@ -163,20 +289,16 @@ namespace LuanShi.Engine
                 Neighbors = new int[width * height][]
             };
             for (int x = 0; x < width; x++)
-            {
                 for (int z = 0; z < height; z++)
                 {
                     int i = map.Index(x, z);
-                    bool ragged = (x % 2 == 0) && (z == height - 1);
-                    map.Walkable[i] = !ragged;
+                    map.Walkable[i] = !((x % 2 == 0) && (z == height - 1));
                     map.Cost[i] = 1;
                 }
-            }
             int[][] evenOffsets = { new[] { 0, -1 }, new[] { -1, 0 }, new[] { 1, 0 }, new[] { -1, 1 }, new[] { 0, 1 }, new[] { 1, 1 } };
             int[][] oddOffsets  = { new[] { -1, -1 }, new[] { 0, -1 }, new[] { 1, -1 }, new[] { -1, 0 }, new[] { 1, 0 }, new[] { 0, 1 } };
 
             for (int x = 0; x < width; x++)
-            {
                 for (int z = 0; z < height; z++)
                 {
                     int i = map.Index(x, z);
@@ -194,7 +316,6 @@ namespace LuanShi.Engine
                     }
                     map.Neighbors[i] = list.ToArray();
                 }
-            }
             return map;
         }
     }

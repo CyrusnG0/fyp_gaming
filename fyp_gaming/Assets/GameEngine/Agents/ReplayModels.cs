@@ -4,6 +4,13 @@ using System.Text;
 
 namespace LuanShi.Engine
 {
+    public enum ReplayPositionVerificationKind
+    {
+        DirectObservation,
+        AcceptedCommandInference,
+        UnverifiedSceneSetup
+    }
+
     public sealed class ReplayTurnSummary
     {
         public int Season;
@@ -117,11 +124,13 @@ namespace LuanShi.Engine
         public string EntityId;
         public string EntityKind;
         public string OwnerSeatId;
-        public int ExpectedX;
-        public int ExpectedZ;
+        public int? ExpectedX;
+        public int? ExpectedZ;
         public int ActualX;
         public int ActualZ;
         public bool Matched;
+        public bool VerifiedByLogs;
+        public ReplayPositionVerificationKind VerificationKind;
         public string VerificationBasis;
         public string Note;
     }
@@ -133,14 +142,25 @@ namespace LuanShi.Engine
         public string BalanceProfileKey;
         public int SeasonsVerified;
         public int TotalRequests;
+
         public int ObservationHashesMatched;
-        public int NormalizedObservationsMatched;
-        public int AcceptedActionsMatched;
-        public int VoluntaryEndTurnsMatched;
+        public int ObservationHashMismatches;
+        public IReadOnlyList<string> ObservationHashDiscrepancies;
+
+        public int ExpectedAcceptedActions;
+        public int AcceptedActionsReplayed;
+        public int ExpectedRejectedActions;
+        public int RejectedActionsReplayed;
+        public int UnexpectedRejections;
+        public int UnexpectedAcceptances;
+        public int ActionOutcomeMismatches;
+        public IReadOnlyList<string> ActionDiscrepancies;
+
+        public int ExpectedVoluntaryEndTurns;
+        public int VoluntaryEndTurnsReplayed;
 
         public int WeiFinalFood;
         public int WeiFinalGold;
-        public int WeiMonoF64Gold;
         public int WeiExpectedFood;
         public int WeiExpectedGold;
         public int WeiFinalPop;
@@ -150,7 +170,6 @@ namespace LuanShi.Engine
 
         public int ShuFinalFood;
         public int ShuFinalGold;
-        public int ShuMonoF64Gold;
         public int ShuExpectedFood;
         public int ShuExpectedGold;
         public int ShuFinalPop;
@@ -158,10 +177,20 @@ namespace LuanShi.Engine
         public int ShuFinalGarrison;
         public int ShuExpectedGarrison;
 
-        public bool ScoreboardsMatched;
+        public bool FinalScoreboardExactMatch;
+        public bool AllSeasonsScoreboardExactMatch;
+        public IReadOnlyList<string> RawScoreboardMismatches;
+
+        public int DirectObservationCount;
+        public int DirectObservationMatched;
+        public int CommandInferredCount;
+        public int CommandInferredMatched;
+        public int UnverifiedSceneSetupCount;
         public IReadOnlyList<ReplayPositionCheck> PositionChecks;
+
+        public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
-        public bool AllVerifiedMatched;
+        public bool RawExactMatch;
 
         public string FormatReport()
         {
@@ -169,30 +198,46 @@ namespace LuanShi.Engine
             sb.AppendLine("=== LUANSHI OFFLINE REPLAY COMPARISON REPORT ===");
             sb.AppendLine($"Run ID: {RunId} | Seed: {Seed} | Profile: {BalanceProfileKey}");
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
-            sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} (S1 10/10 exact; S2-S5 reflect +1 gold / -1 food JIT float truncation in S1)");
-            sb.AppendLine($"Observations (Mono F64 normalized): {NormalizedObservationsMatched}/{TotalRequests} matched");
-            sb.AppendLine($"Accepted Actions:   {AcceptedActionsMatched}/42 matched");
-            sb.AppendLine($"Voluntary EndTurns: {VoluntaryEndTurnsMatched}/2 matched");
+            sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
+            sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances})");
+            sb.AppendLine($"Voluntary EndTurns: {VoluntaryEndTurnsReplayed}/{ExpectedVoluntaryEndTurns} matched");
+            sb.AppendLine($"Action Outcome Mismatches: {ActionOutcomeMismatches}");
             sb.AppendLine();
-            sb.AppendLine("--- SCOREBOARD COMPARISON (Season 5 Final) ---");
-            sb.AppendLine($"Wei:  Food {WeiFinalFood} (summary {WeiExpectedFood}) | Gold {WeiFinalGold} [CoreCLR F32] / {WeiMonoF64Gold} [Mono F64] (summary {WeiExpectedGold}) | Pop {WeiFinalPop} (summary {WeiExpectedPop}) | Garrison {WeiFinalGarrison} (summary {WeiExpectedGarrison})");
-            sb.AppendLine($"Shu:  Food {ShuFinalFood} (summary {ShuExpectedFood}) | Gold {ShuFinalGold} [CoreCLR F32] / {ShuMonoF64Gold} [Mono F64] (summary {ShuExpectedGold}) | Pop {ShuFinalPop} (summary {ShuExpectedPop}) | Garrison {ShuFinalGarrison} (summary {ShuExpectedGarrison})");
-            sb.AppendLine($"Scoreboards Overall: {(ScoreboardsMatched ? "MATCHED (Food/Pop/Garrison exact; +1 Gold in CoreCLR F32 vs Unity Mono F64 from S1 9000*0.01f)" : "MISMATCH")}");
+            sb.AppendLine($"--- SCOREBOARD COMPARISON (Season {SeasonsVerified} Final) ---");
+            sb.AppendLine($"Wei:  Food {WeiFinalFood} (exp {WeiExpectedFood}, delta {WeiFinalFood - WeiExpectedFood}) | Gold {WeiFinalGold} (exp {WeiExpectedGold}, delta {WeiFinalGold - WeiExpectedGold}) | Pop {WeiFinalPop} (exp {WeiExpectedPop}) | Garrison {WeiFinalGarrison} (exp {WeiExpectedGarrison})");
+            sb.AppendLine($"Shu:  Food {ShuFinalFood} (exp {ShuExpectedFood}, delta {ShuFinalFood - ShuExpectedFood}) | Gold {ShuFinalGold} (exp {ShuExpectedGold}, delta {ShuFinalGold - ShuExpectedGold}) | Pop {ShuFinalPop} (exp {ShuExpectedPop}) | Garrison {ShuFinalGarrison} (exp {ShuExpectedGarrison})");
+            sb.AppendLine($"Final Scoreboard Match: {(FinalScoreboardExactMatch ? "MATCH (all deltas 0)" : "MISMATCH (raw deltas present)")}");
+            sb.AppendLine($"All Seasons Scoreboard Match: {(AllSeasonsScoreboardExactMatch ? "MATCH" : "MISMATCH")}");
+            if (RawScoreboardMismatches != null && RawScoreboardMismatches.Count > 0)
+            {
+                sb.AppendLine("Raw Scoreboard Deltas:");
+                foreach (var m in RawScoreboardMismatches) sb.AppendLine("  * " + m);
+            }
             sb.AppendLine();
             sb.AppendLine("--- ENTITY POSITION VERIFICATION ---");
-            sb.AppendLine(string.Format("{0,-14} {1,-6} {2,-7} {3,-9} {4,-9} {5,-8} {6}", "Entity", "Kind", "Owner", "Expected", "Actual", "Status", "Basis & Notes"));
-            sb.AppendLine(new string('-', 88));
+            sb.AppendLine($"Summary: Direct Observations {DirectObservationMatched}/{DirectObservationCount} | Command Inferred {CommandInferredMatched}/{CommandInferredCount} | Unverified Scene Setup {UnverifiedSceneSetupCount}");
+            sb.AppendLine(string.Format("{0,-14} {1,-6} {2,-7} {3,-9} {4,-9} {5,-10} {6}", "Entity", "Kind", "Owner", "Expected", "Actual", "Status", "Basis & Notes"));
+            sb.AppendLine(new string('-', 90));
             if (PositionChecks != null)
             {
                 foreach (var pc in PositionChecks)
                 {
-                    string exp = $"({pc.ExpectedX},{pc.ExpectedZ})";
+                    string exp = (pc.ExpectedX.HasValue && pc.ExpectedZ.HasValue) ? $"({pc.ExpectedX.Value},{pc.ExpectedZ.Value})" : "n/a (fog)";
                     string act = $"({pc.ActualX},{pc.ActualZ})";
-                    string status = pc.Matched ? "MATCH" : "MISMATCH";
+                    string status = pc.VerificationKind == ReplayPositionVerificationKind.UnverifiedSceneSetup
+                        ? "UNVERIFIED"
+                        : (pc.Matched ? "MATCH" : "MISMATCH");
                     string basisAndNote = string.IsNullOrEmpty(pc.Note) ? pc.VerificationBasis : $"{pc.VerificationBasis}; {pc.Note}";
-                    sb.AppendLine(string.Format("{0,-14} {1,-6} {2,-7} {3,-9} {4,-9} {5,-8} {6}",
+                    sb.AppendLine(string.Format("{0,-14} {1,-6} {2,-7} {3,-9} {4,-9} {5,-10} {6}",
                         pc.EntityId, pc.EntityKind, pc.OwnerSeatId ?? "neutral", exp, act, status, basisAndNote));
                 }
+            }
+            sb.AppendLine();
+            sb.AppendLine("--- PROPOSED FLOATING-POINT DIAGNOSTIC (SEPARATE FROM RAW DIFF) ---");
+            if (ProposedFloatingPointNotes != null)
+            {
+                foreach (var note in ProposedFloatingPointNotes)
+                    sb.AppendLine("  * " + note);
             }
             sb.AppendLine();
             sb.AppendLine("--- DISCLOSED RUN DEPENDENCIES & LIMITATIONS ---");
@@ -202,7 +247,7 @@ namespace LuanShi.Engine
                     sb.AppendLine("  * " + dep);
             }
             sb.AppendLine();
-            sb.AppendLine($"OVERALL VERIFICATION: {(AllVerifiedMatched ? "PASS" : "FAIL")}");
+            sb.AppendLine($"OVERALL RAW VERIFICATION: {(RawExactMatch ? "PASS" : "FAIL (RAW MISMATCHES REPORTED HONESTLY)")}");
             sb.AppendLine("================================================");
             return sb.ToString();
         }

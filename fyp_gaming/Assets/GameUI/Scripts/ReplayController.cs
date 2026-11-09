@@ -32,7 +32,7 @@ namespace LuanShi
             locationChoiceOpen = false;
             statusMsg = "Offline match replay — zero model calls; controls are docked on the right";
 
-            string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : "run-20261109082434809-51b7ebd5";
+            string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : ReplayLoader.VerifiedDemoRunId;
             if (!ReplayLoader.TryResolveRunFiles(runKey, out string sPath, out string jPath, out string ePath, out string err))
             {
                 _replayInitError = "Run files not found: " + err;
@@ -122,7 +122,7 @@ namespace LuanShi
             }
             string viewed = ViewedFactionNameFromObservation();
             int season = _replaySession.CurrentSeason;
-            int total = _replayBundle != null && _replayBundle.Summary != null ? _replayBundle.Summary.SeasonsPlayed : 5;
+            int total = _replaySession.TotalSeasons;
             string state = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
             return "OFFLINE REPLAY  |  Season " + season + "/" + total + "  |  " + state + " (viewing " + viewed + ")";
         }
@@ -131,10 +131,13 @@ namespace LuanShi
         {
             if (_replaySession == null) return "Zero API calls (offline verification)";
             int req = _replaySession.CurrentRequestIndex;
-            int totalReq = _replayBundle != null ? _replayBundle.Requests.Count : 44;
-            int norm = _replaySession.NormalizedObservationsMatched;
-            return "Zero API calls  |  Req " + req + "/" + totalReq + "  |  Obs verified " + norm + "/" + req;
+            int totalReq = _replaySession.TotalRequests;
+            int matched = _replaySession.ObservationHashesMatched;
+            return "Zero API calls  |  Req " + req + "/" + totalReq + "  |  Obs matched " + matched + "/" + req;
         }
+
+        public string GetDisplayedSummarySnapshot()
+            => _replaySession != null ? _replaySession.GetDisplayedSummarySnapshot() : ("OFFLINE REPLAY — " + (_replayInitError ?? "loading"));
 
         void ReplayPlay()
         {
