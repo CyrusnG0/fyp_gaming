@@ -664,6 +664,14 @@ namespace LuanShi.Engine
         public readonly Dictionary<string, int> Research = new Dictionary<string, int>();  // ResearchLine.* → 0..5
         public string WinnerSeatId;      // set once 一統天下 is reached; null while the game is live
 
+        /// <summary>
+        /// The match's balance rules (null means <see cref="BalanceProfile.Standard"/>). Carried so
+        /// seat-safe queries such as <see cref="ActionCatalogue"/> advertise the same domestic costs
+        /// the engine will charge. It is match configuration, not a seat fact, so it is deliberately
+        /// absent from <see cref="ToJson"/> and the standard observation text is unchanged.
+        /// </summary>
+        public BalanceProfile Balance;
+
         public int ResearchLevel(string line)
             => Research.TryGetValue(line, out int level) ? level : 0;
 

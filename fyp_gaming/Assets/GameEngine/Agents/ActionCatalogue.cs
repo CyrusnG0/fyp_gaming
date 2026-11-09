@@ -49,6 +49,8 @@ namespace LuanShi.Engine
             bool hasSeat = !string.IsNullOrEmpty(observation.SeatId);
             if (hasSeat)
             {
+                // The match's profile, so an opt-in reduced match advertises the gold it will charge.
+                BalanceProfile balance = observation.Balance ?? BalanceProfile.Standard;
                 foreach (CityView city in observation.CitiesOf(observation.SeatId))
                 {
                     foreach (string type in DomesticTypes)
@@ -56,7 +58,7 @@ namespace LuanShi.Engine
                         int cost = BalanceConfig.CommandPointCost(type);
                         bool affordable;
                         string reason;
-                        Evaluate(observation, city, type, cost, out affordable, out reason);
+                        Evaluate(observation, city, type, cost, balance, out affordable, out reason);
                         options.Add(new ActionOption
                         {
                             Type = type,
@@ -105,7 +107,7 @@ namespace LuanShi.Engine
         }
 
         private static void Evaluate(Observation observation, CityView city, string type, int cost,
-            out bool affordable, out string reason)
+            BalanceProfile balance, out bool affordable, out string reason)
         {
             affordable = true;
             reason = null;
@@ -120,7 +122,7 @@ namespace LuanShi.Engine
             switch (type)
             {
                 case ActionType.LightenLabor:
-                    if (city.Gold < BalanceConfig.LightenLaborGoldCost)
+                    if (city.Gold < balance.LightenLaborGoldCost)
                     {
                         affordable = false;
                         reason = "not enough gold";
@@ -142,8 +144,7 @@ namespace LuanShi.Engine
 
                 case ActionType.Recruit:
                 {
-                    int goldCost = (int)((long)BalanceConfig.RecruitGoldCostInfantry
-                                         * BalanceConfig.RecruitTroopGain / 1000);
+                    int goldCost = balance.RecruitGoldCost(UnitTypes.Infantry, BalanceConfig.RecruitTroopGain);
                     if (city.Gold < goldCost)
                     {
                         affordable = false;
