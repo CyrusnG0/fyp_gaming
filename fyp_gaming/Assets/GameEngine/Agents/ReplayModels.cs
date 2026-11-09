@@ -220,7 +220,8 @@ namespace LuanShi.Engine
         {
             var sb = new StringBuilder(2048);
             sb.AppendLine("=== LUANSHI OFFLINE REPLAY COMPARISON REPORT ===");
-            sb.AppendLine($"Run ID: {RunId} | Seed: {Seed} | Profile: {BalanceProfileKey}");
+            string sSeed = Seed != 0 ? Seed.ToString() : "unknown";
+            sb.AppendLine($"Run ID: {RunId} | Seed: {sSeed} | Profile: {BalanceProfileKey}");
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
             sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
             sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");

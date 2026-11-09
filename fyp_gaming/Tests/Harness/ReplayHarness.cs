@@ -175,7 +175,10 @@ internal static partial class Harness
         // 9. Numbers logging integrity tests (raw values or 'unknown')
         RunNumbersLoggingIntegrityTests();
 
-        // 10. Snapshot verification & printout
+        // 10. Validation display tests (verbatim Mono vs .NET results)
+        RunValidationDisplayTests(rpt, session);
+
+        // 11. Snapshot verification & printout
         string snapshot = session.GetDisplayedSummarySnapshot();
         Check(!string.IsNullOrEmpty(snapshot) && snapshot.Contains("OFFLINE REPLAY") && snapshot.Contains("Zero API calls"),
             "GetDisplayedSummarySnapshot() returns non-empty formatted summary snapshot");
@@ -445,6 +448,25 @@ internal static partial class Harness
         Check(FormatScoreFieldTest(scIncomplete, "gold", scIncomplete.Gold) == "100", "present score field formats number");
         Check(FormatScoreFieldTest(scIncomplete, "food", scIncomplete.Food) == "unknown", "missing score field formats as 'unknown'");
         Check(FormatScoreFieldTest(null, "gold", 0) == "unknown", "null score object formats as 'unknown'");
+    }
+
+    private static void RunValidationDisplayTests(ReplayComparisonReport rpt, ReplaySession session)
+    {
+        string fullReport = rpt.FormatReport();
+        Check(fullReport.Contains("Wei:  Food 243 (exp 243, delta 0) | Gold 1742 (exp 1741, delta 1)"), "report displays verbatim .NET +1 gold delta for Wei");
+        Check(fullReport.Contains("Shu:  Food 71 (exp 71, delta 0) | Gold 1249 (exp 1248, delta 1)"), "report displays verbatim .NET +1 gold delta for Shu");
+        Check(fullReport.Contains("OVERALL RAW VERIFICATION: FAIL (RAW MISMATCHES REPORTED HONESTLY)"), "report discloses raw mismatch without smoothing over");
+        Check(fullReport.Contains("89 in Unity Mono (F64 CIL evaluation stack) vs 90 in .NET CoreCLR (F32 native single precision)"), "report contains verbatim float truncation explanation");
+        Check(fullReport.Contains("A separate standalone Unity Mono CLI executable (MonoBleedingEdge/bin/mono.exe against unityjit-win32) matched this run (44/44 hashes, 0 resource deltas)"), "report notes standalone Mono CLI vs Unity Editor difference");
+        Check(fullReport.Contains("Direct Observations 9/9 | Command Inferred 1/1 | Unverified Scene Setup 2"), "report summarizes position verification categories");
+
+        var emptyRpt = new ReplayComparisonReport { RunId = "test-run", Seed = 0, BalanceProfileKey = "unknown" };
+        string emptyFormatted = emptyRpt.FormatReport();
+        Check(emptyFormatted.Contains("Seed: unknown") && emptyFormatted.Contains("Profile: unknown"), "empty rpt displays unknown for missing seed/profile");
+
+        string snapshot = session.GetDisplayedSummarySnapshot();
+        Check(snapshot.Contains("Wei Summary G:1741 (+1)") && snapshot.Contains("Shu Summary G:1248 (+1)"), "snapshot shows verbatim +1 gold deltas");
+        Check(snapshot.Contains("Obs: 10/44") && snapshot.Contains("Positions: 9/9 obs, 1/1 cmd-inferred, 2 unverified"), "snapshot displays observation and position breakdown");
     }
 
     private static string FormatScoreFieldTest(ReplaySeatScore sc, string field, int val)

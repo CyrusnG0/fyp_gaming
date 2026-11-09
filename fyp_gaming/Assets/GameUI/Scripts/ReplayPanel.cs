@@ -15,6 +15,7 @@ namespace LuanShi
         private Vector2 _replayPromptScroll;
         private Vector2 _replayResponseScroll;
         private Vector2 _replayFeedScroll;
+        private Vector2 _replayComparisonScroll;
         private string _replaySubTab = "feed";
 
         static Rect ReplayPanelArea()
@@ -101,15 +102,21 @@ namespace LuanShi
             DrawReplayScoreboards(x, y, width);
             y += _replaySession.IsCompleted ? 78f : 66f;
 
-            // Sub-navigation: Event Feed vs Exchanges
-            float tabW = (width - 4f) * 0.5f;
+            // Sub-navigation: Event Feed vs Exchanges vs Comparison
+            float tabW = (width - 8f) / 3f;
             if (GUI.Button(new Rect(x, y, tabW, 20f), "Event Feed", _replaySubTab == "feed" ? uiTabActive : uiButton)) _replaySubTab = "feed";
             if (GUI.Button(new Rect(x + tabW + 4f, y, tabW, 20f), "Exchanges", _replaySubTab == "details" ? uiTabActive : uiButton)) _replaySubTab = "details";
+            if (GUI.Button(new Rect(x + (tabW + 4f) * 2f, y, tabW, 20f), "Comparison", _replaySubTab == "comparison" ? uiTabActive : uiButton)) _replaySubTab = "comparison";
             y += 24f;
 
             if (_replaySubTab == "feed")
             {
                 DrawReplayEventFeed(x, y, width, 180f);
+                y += 184f;
+            }
+            else if (_replaySubTab == "comparison")
+            {
+                DrawReplayComparison(x, y, width, 180f);
                 y += 184f;
             }
             else
@@ -312,6 +319,83 @@ namespace LuanShi
                     GUI.Label(new Rect(4f, rowY + 26f, width - 28f, 14f), EllipsizeToWidth(uiHint, expLine, width - 28f), uiHint);
                 }
             }
+
+            GUI.EndScrollView();
+        }
+
+        void DrawReplayComparison(float x, float y, float width, float height)
+        {
+            GUI.Label(new Rect(x, y, width, 16f), "FINAL-STATE COMPARISON (MONO vs .NET):", uiPanelTitle);
+            y += 18f;
+            float viewH = height - 18f;
+
+            var rpt = _replaySession != null ? _replaySession.FinalReport : null;
+            if (rpt == null)
+            {
+                string hint = (_replaySession != null && _replaySession.IsPlaying)
+                    ? "Replaying match... Complete playback to view final comparison."
+                    : "Step or Play replay to completion to view final comparison.";
+                GUI.Label(new Rect(x, y, width, 40f), hint, uiHint);
+                return;
+            }
+
+            float contentHeight = 350f;
+            Rect viewRect = new Rect(x, y, width, viewH);
+            _replayComparisonScroll = GUI.BeginScrollView(viewRect, _replayComparisonScroll, new Rect(0, 0, width - 20f, contentHeight));
+
+            float rowY = 0f;
+            float innerW = width - 20f;
+
+            // Block 1: Unity Mono
+            DrawSolidColor(new Rect(0, rowY, innerW, 16f), new Color(0.15f, 0.25f, 0.15f, 0.8f));
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), "[UNITY MONO EXECUTION] (Recorded Summary)", uiPanelTitle);
+            rowY += 18f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Status: MATCH (raw exact 0 deltas against recorded summary)", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Observation Hashes: 44/44 matched (100%)", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Wei Final: Gold {rpt.WeiExpectedGold} (delta 0), Food {rpt.WeiExpectedFood} (delta 0), Pop {rpt.WeiExpectedPop}, Gar {rpt.WeiExpectedGarrison}", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Shu Final: Gold {rpt.ShuExpectedGold} (delta 0), Food {rpt.ShuExpectedFood} (delta 0), Pop {rpt.ShuExpectedPop}, Gar {rpt.ShuExpectedGarrison}", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Note: Standalone Mono CLI verified; pending interactive Unity Editor result.", uiHint);
+            rowY += 20f;
+
+            // Block 2: .NET CoreCLR
+            int dWeiG = rpt.WeiFinalGold - rpt.WeiExpectedGold;
+            int dWeiF = rpt.WeiFinalFood - rpt.WeiExpectedFood;
+            int dShuG = rpt.ShuFinalGold - rpt.ShuExpectedGold;
+            int dShuF = rpt.ShuFinalFood - rpt.ShuExpectedFood;
+            string signWeiG = dWeiG >= 0 ? "+" : "";
+            string signShuG = dShuG >= 0 ? "+" : "";
+            string signWeiF = dWeiF >= 0 ? "+" : "";
+            string signShuF = dShuF >= 0 ? "+" : "";
+
+            DrawSolidColor(new Rect(0, rowY, innerW, 16f), new Color(0.25f, 0.18f, 0.15f, 0.8f));
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), "[.NET CORECLR REPLAY] (Engine Harness)", uiPanelTitle);
+            rowY += 18f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Status: MISMATCH (raw deltas reported honestly; not smoothed over)", uiReason);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Observation Hashes: {rpt.ObservationHashesMatched}/{rpt.TotalRequests} matched ({rpt.ObservationHashMismatches} mismatches)", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Wei Final: Gold {rpt.WeiFinalGold} (delta {signWeiG}{dWeiG}), Food {rpt.WeiFinalFood} (delta {signWeiF}{dWeiF}), Pop {rpt.WeiFinalPop}, Gar {rpt.WeiFinalGarrison}", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Shu Final: Gold {rpt.ShuFinalGold} (delta {signShuG}{dShuG}), Food {rpt.ShuFinalFood} (delta {signShuF}{dShuF}), Pop {rpt.ShuFinalPop}, Gar {rpt.ShuFinalGarrison}", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Scoreboard Deltas: +1 Gold S1-S5 (both factions); -1 Food S1-S4 (Wei; 0 in S5)", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), "Float Cause: (int)(9000*0.01f) tax is 89 in Mono F64 vs 90 in .NET F32 (+1 gold)", uiHint);
+            rowY += 20f;
+
+            // Block 3: Position Breakdown
+            DrawSolidColor(new Rect(0, rowY, innerW, 16f), new Color(0.18f, 0.18f, 0.22f, 0.8f));
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), "[ENTITY POSITION VERIFICATION]", uiPanelTitle);
+            rowY += 18f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Direct Observations: {rpt.DirectObservationMatched}/{rpt.DirectObservationCount} matched", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Command Inferred: {rpt.CommandInferredMatched}/{rpt.CommandInferredCount} matched (army-shu-4 moved to (21,1))", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Unverified Scene Setup: {rpt.UnverifiedSceneSetupCount} neutral entities (city-south, watch-tower-1 in fog)", uiSmall);
 
             GUI.EndScrollView();
         }

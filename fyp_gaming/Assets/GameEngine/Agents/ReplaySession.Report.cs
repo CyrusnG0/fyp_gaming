@@ -18,8 +18,18 @@ namespace LuanShi.Engine
             ReplaySeatScore wei = scores.Count > 0 ? scores[0] : null;
             ReplaySeatScore shu = scores.Count > 1 ? scores[1] : null;
 
-            sb.AppendLine($"Wei (Capital): Gold {wei?.Gold ?? 0} Food {wei?.Food ?? 0} Pop {wei?.Population ?? 0} Gar {wei?.Garrison ?? 0}");
-            sb.AppendLine($"Shu (Chengdu): Gold {shu?.Gold ?? 0} Food {shu?.Food ?? 0} Pop {shu?.Population ?? 0} Gar {shu?.Garrison ?? 0}");
+            string weiG = FormatScoreField(wei, "gold", wei?.Gold ?? 0);
+            string weiF = FormatScoreField(wei, "food", wei?.Food ?? 0);
+            string weiP = FormatScoreField(wei, "population", wei?.Population ?? 0);
+            string weiGar = FormatScoreField(wei, "garrison", wei?.Garrison ?? 0);
+
+            string shuG = FormatScoreField(shu, "gold", shu?.Gold ?? 0);
+            string shuF = FormatScoreField(shu, "food", shu?.Food ?? 0);
+            string shuP = FormatScoreField(shu, "population", shu?.Population ?? 0);
+            string shuGar = FormatScoreField(shu, "garrison", shu?.Garrison ?? 0);
+
+            sb.AppendLine($"Wei (Capital): Gold {weiG} Food {weiF} Pop {weiP} Gar {weiGar}");
+            sb.AppendLine($"Shu (Chengdu): Gold {shuG} Food {shuF} Pop {shuP} Gar {shuGar}");
 
             if (_isCompleted && _finalReport != null)
             {
@@ -79,7 +89,7 @@ namespace LuanShi.Engine
 
             int finalSeasonNum = expectedSeasons.Count > 0
                 ? expectedSeasons[expectedSeasons.Count - 1]
-                : (played > 0 ? played : 5);
+                : (played > 0 ? played : 0);
 
             if (_bundle.Summary == null || _bundle.Summary.Scoreboards == null || expectedSeasons.Count == 0)
             { allSeasonsExact = false; finalSeasonExact = false; rawMismatches.Add("Missing summary scoreboards"); }
@@ -215,8 +225,8 @@ namespace LuanShi.Engine
             _finalReport = new ReplayComparisonReport
             {
                 RunId = _bundle.Summary?.RunId ?? "unknown",
-                Seed = _bundle.Summary != null ? _bundle.Summary.Seed : 12345,
-                BalanceProfileKey = _bundle.Summary?.BalanceProfileKey ?? "easy-research",
+                Seed = _bundle.Summary != null ? _bundle.Summary.Seed : 0,
+                BalanceProfileKey = _bundle.Summary?.BalanceProfileKey ?? "unknown",
                 SeasonsVerified = _replayedScores.Count,
                 TotalRequests = _bundle.Requests.Count,
                 ObservationHashesMatched = _observationHashesMatched,
@@ -357,6 +367,20 @@ namespace LuanShi.Engine
                     map.Neighbors[i] = list.ToArray();
                 }
             return map;
+        }
+
+        private static string FormatScoreField(ReplaySeatScore sc, string field, int val)
+        {
+            if (sc == null) return "unknown";
+            if (sc.MissingFields != null)
+            {
+                for (int i = 0; i < sc.MissingFields.Count; i++)
+                {
+                    if (string.Equals(sc.MissingFields[i], field, StringComparison.Ordinal))
+                        return "unknown";
+                }
+            }
+            return val.ToString();
         }
     }
 }
