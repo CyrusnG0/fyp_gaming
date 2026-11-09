@@ -184,7 +184,7 @@ namespace LuanShi.Engine
             var parts = new List<string>(22);
             parts.Add(Bool("ok", response.Ok));
             parts.Add(nullableInt("http_status", response.HttpStatus));
-            parts.Add(Str("finish_reason", response.FinishReason));
+            parts.Add(Str("finish_reason", CaptureText(response.FinishReason)));
             parts.Add(nullableInt("input_tokens", response.InputTokens));
             parts.Add(nullableInt("output_tokens", response.OutputTokens));
             parts.Add(nullableInt("reasoning_tokens", response.ReasoningTokens));
@@ -197,7 +197,7 @@ namespace LuanShi.Engine
             parts.Add(Str("raw_body", CaptureText(response.RawResponse)));
             parts.Add(Str("error_kind", response.Error.ToString()));
             parts.Add(Str("error_detail", CaptureText(response.ErrorDetail)));
-            parts.Add(Str("provider_request_id", response.ProviderRequestId));
+            parts.Add(Str("provider_request_id", CaptureText(response.ProviderRequestId)));
             parts.Add(Num("latency_ms", response.LatencyMs));
             return "{" + string.Join(",", parts) + "}";
         }

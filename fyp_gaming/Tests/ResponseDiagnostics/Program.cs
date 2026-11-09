@@ -34,6 +34,7 @@ internal static partial class DiagnosticsTests
         RunDispatchFailureCapture();
         RunTimeoutAndCancelRecords();
         RunSecretRedaction();
+        RunProviderMetadataRedaction();
 
         Console.WriteLine("\n" + passed + " passed, " + failed + " failed");
         return failed == 0 ? 0 : 1;

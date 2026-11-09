@@ -39,4 +39,7 @@ echo "  suite  : recovered assertions first, then sections named [new]"
 echo
 
 dotnet build "$project" -c Release --nologo -v q || exit $?
-dotnet run --project "$project" -c Release --no-build
+dotnet run --project "$project" -c Release --no-build || exit $?
+echo
+echo "LuanShi response diagnostics"
+dotnet run --project "$here/ResponseDiagnostics/ResponseDiagnostics.csproj" -c Release

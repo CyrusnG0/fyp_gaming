@@ -14,6 +14,14 @@ for LS-001 and LS-002, and Unity-editor verification stays a separate step.
 bash fyp_gaming/Tests/run-tests.sh
 ```
 
+This runs both the engine harness and response-diagnostics project. The diagnostics use a
+local loopback HTTP listener and may require a sandbox that permits localhost networking.
+They make no paid provider calls. To run diagnostics separately:
+
+```bash
+dotnet run --project fyp_gaming/Tests/ResponseDiagnostics/ResponseDiagnostics.csproj -c Release
+```
+
 Exit code `0` means every assertion passed. Invoking through `bash` works on every platform and does
 not depend on the executable bit surviving checkout (`chmod +x` is optional if you prefer
 `fyp_gaming/Tests/run-tests.sh` directly). The script finds the Unity project from its own location

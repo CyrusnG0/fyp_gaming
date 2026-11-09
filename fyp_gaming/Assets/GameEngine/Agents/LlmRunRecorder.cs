@@ -240,11 +240,11 @@ namespace LuanShi.Engine
                 parts.Add(Str("error_kind", response == null
                     ? LlmErrorKind.Network.ToString() : response.Error.ToString()));
                 parts.Add(Str("error_detail", Redact(response?.ErrorDetail)));
-                parts.Add(Str("provider_request_id", response?.ProviderRequestId));
+                parts.Add(Str("provider_request_id", Redact(response?.ProviderRequestId)));
                 // Provider accounting. Every one of these is explicitly null when the provider did
                 // not supply it; null never means zero. content_chars/trimmed state distinguish an
                 // empty answer from a whitespace-only one under JSON mode.
-                parts.Add(Str("finish_reason", response?.FinishReason));
+                parts.Add(Str("finish_reason", Redact(response?.FinishReason)));
                 parts.Add(nullableInt("reasoning_tokens", response?.ReasoningTokens));
                 parts.Add(nullableInt("total_tokens", response?.TotalTokens));
                 parts.Add(nullableInt("http_status", response?.HttpStatus));
@@ -254,7 +254,7 @@ namespace LuanShi.Engine
                     response?.Text != null && response.Text.Trim().Length == 0));
                 parts.Add(Num("max_output_tokens", flight.MaxOutputTokens));
                 parts.Add(Str("response_diagnostic",
-                    LlmResponseDiagnostics.Describe(response, flight.MaxOutputTokens)));
+                    Redact(LlmResponseDiagnostics.Describe(response, flight.MaxOutputTokens))));
                 parts.Add(nullableDouble("cost_usd", CostUsd));
                 parts.Add(Num("requests_this_turn", RequestsThisTurn));
                 parts.Add(Num("actions_this_turn", ActionsThisTurn));

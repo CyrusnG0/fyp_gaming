@@ -98,7 +98,12 @@ namespace LuanShi.Engine
             }
 
             sb.Append(" (finish_reason=");
-            sb.Append(string.IsNullOrEmpty(response.FinishReason) ? "unknown" : SafeField(response.FinishReason));
+            // Do not truncate arbitrary provider text into a diagnostic: truncating before
+            // redaction could leave an unrecognisable fragment of a credential.
+            sb.Append(string.IsNullOrEmpty(response.FinishReason) ? "unknown"
+                : FinishReasonIsLength(response) ? "length"
+                : string.Equals(response.FinishReason, "stop", StringComparison.OrdinalIgnoreCase)
+                    ? "stop" : "other");
             sb.Append(", completion_tokens=");
             if (response.OutputTokens.HasValue)
             {
@@ -131,7 +136,6 @@ namespace LuanShi.Engine
                 redacted = redacted.Replace(apiKey, "[redacted]");
             redacted = RedactToken(redacted, "sk-", false);
             redacted = RedactToken(redacted, "Bearer", true);
-            redacted = RedactToken(redacted, "bearer", true);
             return redacted;
         }
 
@@ -148,7 +152,7 @@ namespace LuanShi.Engine
 
         private static string RedactToken(string text, string marker, bool skipWhitespace)
         {
-            int index = text.IndexOf(marker, StringComparison.Ordinal);
+            int index = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
             while (index >= 0)
             {
                 int end = index + marker.Length;
@@ -159,7 +163,7 @@ namespace LuanShi.Engine
                 while (end < text.Length && IsSecretTokenChar(text[end])) end++;
                 const string replacement = "[redacted]";
                 text = text.Substring(0, index) + replacement + text.Substring(end);
-                index = text.IndexOf(marker, index + replacement.Length, StringComparison.Ordinal);
+                index = text.IndexOf(marker, index + replacement.Length, StringComparison.OrdinalIgnoreCase);
             }
             return text;
         }
