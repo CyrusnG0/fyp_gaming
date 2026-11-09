@@ -378,7 +378,7 @@ namespace LuanShi
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
-        private sealed class AgentTurnHost : IPlanningHost, IPersonaHost
+        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost
         {
             private readonly KingdomDemo _owner;
             private readonly string _seatId;
@@ -389,6 +389,11 @@ namespace LuanShi
             public void EndTurn() => _owner.AgentEndTurnRequested();
             /// <summary>Read-only, seat-filtered candidates for this agent seat.</summary>
             public MovementView PlanMovement() => MovementPlanner.Build(_owner.engine, _seatId);
+            /// <summary>
+            /// Read-only, seat-filtered attack/assault candidates. Only consulted when the config
+            /// opts in (<see cref="LlmConfig.EnableAttack"/>), so the default prompt is unchanged.
+            /// </summary>
+            public AttackView PlanAttacks() => AttackPlanner.Build(_owner.engine, _seatId);
             /// <summary>Authoritative terminal signal from the engine, not a cached observation.</summary>
             public bool IsGameOver => _owner.engine != null && _owner.engine.State.WinnerSeatId != null;
         }
