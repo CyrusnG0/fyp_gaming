@@ -68,6 +68,8 @@ namespace LuanShi
         {
             if (!replayMode || _replaySession == null) return;
 
+            HandleReplayKeyboardControls();
+
             if (_replaySession.IsPlaying)
             {
                 _replaySession.Tick(Time.deltaTime);
@@ -88,6 +90,33 @@ namespace LuanShi
                     Debug.Log(_replaySession.FinalReport.FormatReport());
                 }
             }
+        }
+
+        void HandleReplayKeyboardControls()
+        {
+            if (pauseMenuOpen || reportShowing || battleResultShowing || handoverShowing) return;
+
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                if (_replaySession.IsPlaying) ReplayPause();
+                else ReplayPlay();
+            }
+            else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.Period))
+            {
+                ReplayStepRequest();
+            }
+            else if (Input.GetKeyDown(KeyCode.S))
+            {
+                ReplayStepSeason();
+            }
+            else if (Input.GetKeyDown(KeyCode.R))
+            {
+                ReplayReset();
+            }
+            else if (Input.GetKeyDown(KeyCode.Alpha1)) ReplaySetSpeed(0.5f);
+            else if (Input.GetKeyDown(KeyCode.Alpha2)) ReplaySetSpeed(1.0f);
+            else if (Input.GetKeyDown(KeyCode.Alpha3)) ReplaySetSpeed(2.0f);
+            else if (Input.GetKeyDown(KeyCode.Alpha4)) ReplaySetSpeed(4.0f);
         }
 
         void RefreshReplayView()

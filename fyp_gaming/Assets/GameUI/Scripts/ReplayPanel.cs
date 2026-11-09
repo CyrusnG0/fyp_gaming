@@ -77,8 +77,10 @@ namespace LuanShi
 
             // Playback controls row 1
             float btnW = (width - 16f) / 5f;
-            if (GUI.Button(new Rect(x, y, btnW, 22f), "Play", uiButton)) ReplayPlay();
-            if (GUI.Button(new Rect(x + btnW + 4f, y, btnW, 22f), "Pause", uiButton)) ReplayPause();
+            GUIStyle playStyle = _replaySession.IsPlaying ? uiTabActive : uiButton;
+            GUIStyle pauseStyle = (!_replaySession.IsPlaying && !_replaySession.IsCompleted && _replaySession.State == ReplayState.Paused) ? uiTabActive : uiButton;
+            if (GUI.Button(new Rect(x, y, btnW, 22f), "Play", playStyle)) ReplayPlay();
+            if (GUI.Button(new Rect(x + btnW + 4f, y, btnW, 22f), "Pause", pauseStyle)) ReplayPause();
             if (GUI.Button(new Rect(x + (btnW + 4f) * 2f, y, btnW, 22f), "Season", uiButton)) ReplayStepSeason();
             if (GUI.Button(new Rect(x + (btnW + 4f) * 3f, y, btnW, 22f), "Step", uiButton)) ReplayStepRequest();
             if (GUI.Button(new Rect(x + (btnW + 4f) * 4f, y, btnW, 22f), "Reset", uiButton)) ReplayReset();

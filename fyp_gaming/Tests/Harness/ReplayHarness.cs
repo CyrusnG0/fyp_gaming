@@ -74,15 +74,27 @@ internal static partial class Harness
         session.Pause();
         Check(!session.IsPlaying && session.State == ReplayState.Paused, "Pause() sets IsPlaying == false");
 
+        session.SetSpeed(0.5f);
+        Check(Math.Abs(session.Speed - 0.5f) < 0.001f, "SetSpeed(0.5f) updates speed");
         session.SetSpeed(2.0f);
         Check(Math.Abs(session.Speed - 2.0f) < 0.001f, "SetSpeed(2.0f) updates speed");
+        session.SetSpeed(4.0f);
+        Check(Math.Abs(session.Speed - 4.0f) < 0.001f, "SetSpeed(4.0f) updates speed");
         session.SetSpeed(1.0f);
 
+        // Test Tick stepping when playing
+        session.Play();
+        session.Tick(0.85f); // BaseStepInterval is 0.8f at 1.0x -> should trigger 1 step
+        Check(session.CurrentRequestIndex == 1, "session.Tick(0.85f) advanced 1 request while playing");
+        session.Pause();
+        session.Tick(10.0f);
+        Check(session.CurrentRequestIndex == 1, "session.Tick() does not advance requests while paused");
+
         // Step one request manually
-        bool step1 = session.StepRequest();
-        Check(step1, "StepRequest() executed first request");
-        Check(session.CurrentRequestIndex == 1, "CurrentRequestIndex == 1 after 1 step");
-        Check(session.ObservationHashesMatched == 1, "1st observation hash matched");
+        bool step2 = session.StepRequest();
+        Check(step2, "StepRequest() executed next request");
+        Check(session.CurrentRequestIndex == 2, "CurrentRequestIndex == 2 after manual step");
+        Check(session.ObservationHashesMatched == 2, "first 2 observation hashes matched");
 
         // Step through Season 1..5
         session.StepSeason(); // S1 -> S2
@@ -93,6 +105,7 @@ internal static partial class Harness
         session.StepSeason(); // S5 -> finish
         Check(session.IsCompleted, "session is completed after Season 5");
         Check(session.CurrentRequestIndex == 44, $"total requests stepped == 44 (got {session.CurrentRequestIndex})");
+        Check(!session.StepRequest(), "StepRequest() returns false when already completed");
         Check(session.EventFeed.Count == 44, $"session.EventFeed.Count == 44 (got {session.EventFeed.Count})");
         Check(session.EventFeed[0].ActionType == "reclaim", "first event has ActionType == 'reclaim'");
         Check(!string.IsNullOrEmpty(session.EventFeed[0].Explanation), "first event has non-empty explanation");
