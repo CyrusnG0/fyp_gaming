@@ -49,15 +49,19 @@ internal static partial class Harness
         Check(hasWeiMild, "turn summaries contain persona 'wei-mild'");
         Check(hasShuAggressive, "turn summaries contain persona 'shu-aggressive'");
 
-        // Verify joined exchange records
+        // Verify joined exchange records & exact-matched explanations
         bool exchangesJoined = true;
+        bool explanationsJoined = true;
         for (int i = 0; i < bundle.Requests.Count; i++)
         {
             var req = bundle.Requests[i];
             if (string.IsNullOrEmpty(req.PromptExcerpt) || string.IsNullOrEmpty(req.ResponseContentText))
-            { exchangesJoined = false; break; }
+                exchangesJoined = false;
+            if (string.IsNullOrEmpty(req.RecordedExplanation))
+                explanationsJoined = false;
         }
         Check(exchangesJoined, "all 44 requests have joined PromptExcerpt and ResponseContentText");
+        Check(explanationsJoined, "all 44 requests have exact-matched RecordedExplanation");
 
         // 2. Playback controls & stepping tests
         var session = new ReplaySession(bundle);
@@ -89,6 +93,15 @@ internal static partial class Harness
         session.StepSeason(); // S5 -> finish
         Check(session.IsCompleted, "session is completed after Season 5");
         Check(session.CurrentRequestIndex == 44, $"total requests stepped == 44 (got {session.CurrentRequestIndex})");
+        Check(session.EventFeed.Count == 44, $"session.EventFeed.Count == 44 (got {session.EventFeed.Count})");
+        Check(session.EventFeed[0].ActionType == "reclaim", "first event has ActionType == 'reclaim'");
+        Check(!string.IsNullOrEmpty(session.EventFeed[0].Explanation), "first event has non-empty explanation");
+        Check(session.EventFeed[0].ResultOk, "first event ResultOk == true");
+
+        session.Reset();
+        Check(session.EventFeed.Count == 0, "session.Reset() clears EventFeed");
+        session.RunToCompletion();
+        Check(session.EventFeed.Count == 44, "EventFeed re-accumulates on replay");
 
         // 3. Strict verification metrics
         Check(session.AcceptedActionsReplayed == 42, $"AcceptedActionsReplayed == 42 (got {session.AcceptedActionsReplayed})");
@@ -143,7 +156,10 @@ internal static partial class Harness
         // 7. Synthetic action rejection accounting & reason tests
         RunRejectedActionsAccountingTest();
 
-        // 8. Snapshot verification & printout
+        // 8. Exact explanation matching rule & event feed tests
+        RunExactExplanationMatchingRuleTests();
+
+        // 9. Snapshot verification & printout
         string snapshot = session.GetDisplayedSummarySnapshot();
         Check(!string.IsNullOrEmpty(snapshot) && snapshot.Contains("OFFLINE REPLAY") && snapshot.Contains("Zero API calls"),
             "GetDisplayedSummarySnapshot() returns non-empty formatted summary snapshot");
@@ -339,6 +355,70 @@ internal static partial class Harness
         s6.StepRequest();
         Check(s6.RejectedActionsReplayed == 1 && s6.RejectionReasonMismatches == 0 && s6.ActionOutcomeMismatches == 0,
             "case 6: matching validator reason increments RejectedActionsReplayed (1)");
+    }
+
+    private static void RunExactExplanationMatchingRuleTests()
+    {
+        // 1. Absent request index (<= 0) -> no explanation
+        var reqAbsent = new ReplayRequestRecord
+        {
+            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+            TurnToken = 1, Season = 1, RequestIndex = 0, TotalRequests = 1,
+            ObservationHash = "hash00000001", RawModelText = "{\"type\":\"end_turn\"}",
+            ParseOk = true, ResultOk = true, RecordedExplanation = null
+        };
+        var sAbsent = new ReplaySession(new ReplayBundle {
+            Summary = new ReplaySummaryData { RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeasonsPlanned = 1, SeasonsPlayed = 1, TotalRequests = 1 },
+            Requests = new List<ReplayRequestRecord> { reqAbsent }
+        });
+        sAbsent.StepRequest();
+        Check(sAbsent.EventFeed.Count == 1 && sAbsent.EventFeed[0].Explanation == null,
+            "absent request index (<= 0) shows no explanation");
+
+        // 2. Exact match on run_id + seat_id + season + request_index
+        string tempDir = Path.Combine(Path.GetTempPath(), "luanshi_exp_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sFile = Path.Combine(tempDir, "sum.json");
+            string jFile = Path.Combine(tempDir, "req.jsonl");
+            string eFile = Path.Combine(tempDir, "ex.ndjson");
+
+            File.WriteAllText(sFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seed\":12345,\"requests\":1,\"totals\":{{\"actions\":1,\"accepted\":1,\"rejected\":0,\"voluntary_end_turns\":0}}}}");
+            File.WriteAllText(jFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seed\":12345,\"seat_id\":\"seat-0\",\"turn_token\":1,\"season\":1,\"request_index\":1,\"total_requests\":1,\"raw_model_text\":\"{{\\\"type\\\":\\\"end_turn\\\"}}\",\"parse_ok\":true,\"result_ok\":true,\"observation_hash\":\"h1\"}}\n");
+
+            // Ex with matching key but no summary/reason in JSON -> "unknown"
+            File.WriteAllText(eFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":1,\"request_index\":1,\"exchange_event\":\"request\",\"request\":{{\"user\":\"test\"}}}}\n" +
+                                     $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":1,\"request_index\":1,\"exchange_event\":\"result\",\"response\":{{\"content_text\":\"{{\\\"type\\\":\\\"end_turn\\\"}}\"}}}}\n");
+            var bUnknown = ReplayLoader.Load(sFile, jFile, eFile);
+            Check(bUnknown.Requests[0].RecordedExplanation == "unknown", "exchange missing explanation field resolves to 'unknown'");
+
+            // Ex with mismatched seat_id -> fails because request has no matching exchange
+            File.WriteAllText(eFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-1\",\"season\":1,\"request_index\":1,\"exchange_event\":\"request\",\"request\":{{\"user\":\"test\"}}}}\n" +
+                                     $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-1\",\"season\":1,\"request_index\":1,\"exchange_event\":\"result\",\"response\":{{\"content_text\":\"{{\\\"summary\\\":\\\"test explanation\\\"}}\"}}}}\n");
+            bool caughtMismatchedSeat = false;
+            try { ReplayLoader.Load(sFile, jFile, eFile); }
+            catch (InvalidDataException) { caughtMismatchedSeat = true; }
+            Check(caughtMismatchedSeat, "exchange with mismatched seat_id fails exact match");
+
+            // Ex with mismatched season -> fails exact match
+            File.WriteAllText(eFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":2,\"request_index\":1,\"exchange_event\":\"request\",\"request\":{{\"user\":\"test\"}}}}\n" +
+                                     $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":2,\"request_index\":1,\"exchange_event\":\"result\",\"response\":{{\"content_text\":\"{{\\\"summary\\\":\\\"test explanation\\\"}}\"}}}}\n");
+            bool caughtMismatchedSeason = false;
+            try { ReplayLoader.Load(sFile, jFile, eFile); }
+            catch (InvalidDataException) { caughtMismatchedSeason = true; }
+            Check(caughtMismatchedSeason, "exchange with mismatched season fails exact match");
+
+            // Ex with matching key and summary -> exact explanation
+            File.WriteAllText(eFile, $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":1,\"request_index\":1,\"exchange_event\":\"request\",\"request\":{{\"user\":\"test\"}}}}\n" +
+                                     $"{{\"run_id\":\"{ReplayLoader.VerifiedDemoRunId}\",\"seat_id\":\"seat-0\",\"season\":1,\"request_index\":1,\"exchange_event\":\"result\",\"response\":{{\"content_text\":\"{{\\\"summary\\\":\\\"I will defend the border\\\"}}\"}}}}\n");
+            var bMatched = ReplayLoader.Load(sFile, jFile, eFile);
+            Check(bMatched.Requests[0].RecordedExplanation == "I will defend the border", "exact match on run_id + seat_id + season + request_index captures summary");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
     }
 
     private static ReplaySession CreateSingleReqSession(string rawText, bool parseOk, bool resultOk, string resultError = null)

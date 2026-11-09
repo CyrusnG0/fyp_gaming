@@ -32,7 +32,9 @@ namespace LuanShi.Engine
         private int _voluntaryEndTurnsReplayed;
 
         private readonly List<ReplaySeasonScoreboard> _replayedScores = new List<ReplaySeasonScoreboard>();
+        private readonly List<ReplayFeedEvent> _eventFeed = new List<ReplayFeedEvent>();
         private ReplayComparisonReport _finalReport;
+        public event Action<ReplayFeedEvent> OnEventReplayed;
 
         public ReplayBundle Bundle => _bundle;
         public GameEngine Engine => _engine;
@@ -62,6 +64,7 @@ namespace LuanShi.Engine
         public int VoluntaryEndTurnsReplayed => _voluntaryEndTurnsReplayed;
         public ReplayComparisonReport FinalReport => _finalReport;
         public IReadOnlyList<ReplaySeasonScoreboard> ReplayedScores => _replayedScores;
+        public IReadOnlyList<ReplayFeedEvent> EventFeed => _eventFeed;
 
         public ReplayRequestRecord CurrentRequestRecord
             => _currentRequestIndex >= 0 && _currentRequestIndex < _bundle.Requests.Count
@@ -112,7 +115,7 @@ namespace LuanShi.Engine
             _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
             _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
             _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
-            _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _finalReport = null;
+            _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null;
 
             int seed = _bundle.Summary != null && _bundle.Summary.Seed != 0 ? _bundle.Summary.Seed : 12345;
             string profileKey = _bundle.Summary?.BalanceProfileKey ?? "easy-research";
@@ -196,6 +199,7 @@ namespace LuanShi.Engine
 
             ParseResult parsed = LlmActionParser.Parse(req.RawModelText);
             bool isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
+            bool replayedOk = false;
 
             if (isEndTurn)
             {
@@ -207,7 +211,11 @@ namespace LuanShi.Engine
                     endResOk = true;
                 }
 
-                if (req.ParseOk && req.ResultOk && endResOk) _voluntaryEndTurnsReplayed++;
+                if (req.ParseOk && req.ResultOk && endResOk)
+                {
+                    replayedOk = true;
+                    _voluntaryEndTurnsReplayed++;
+                }
                 else
                 {
                     _actionOutcomeMismatches++;
@@ -217,7 +225,6 @@ namespace LuanShi.Engine
             else
             {
                 bool replayedParseOk = parsed.Ok && parsed.Action != null;
-                bool replayedOk = false;
                 string replayedError = null;
                 if (!replayedParseOk)
                 {
@@ -259,6 +266,39 @@ namespace LuanShi.Engine
                     _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected acceptance");
                 }
             }
+
+            string actType = isEndTurn ? "end_turn" : (parsed.Ok && parsed.Action != null ? parsed.Action.Type : "unknown");
+            string actSummary = isEndTurn
+                ? "Voluntary end of turn"
+                : (parsed.Ok && parsed.Action != null
+                    ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
+                    : (!string.IsNullOrEmpty(req.RawModelText) ? req.RawModelText : "unknown"));
+            string resText = isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected");
+            string facName = "unknown";
+            if (_engine?.State?.Factions != null)
+            {
+                foreach (var f in _engine.State.Factions)
+                    if (string.Equals(f.SeatId, req.SeatId, StringComparison.Ordinal)) { facName = f.Name; break; }
+            }
+
+            var feedEvt = new ReplayFeedEvent
+            {
+                Sequence = _eventFeed.Count + 1,
+                RunId = req.RunId,
+                SeatId = req.SeatId,
+                Faction = facName,
+                Season = req.Season,
+                RequestIndex = req.RequestIndex,
+                ActionType = actType,
+                ActionSummary = actSummary,
+                CommandJson = req.CommandJson,
+                ResultOk = isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk,
+                ResultText = resText,
+                Explanation = req.RecordedExplanation,
+                ObservationHash = req.ObservationHash
+            };
+            _eventFeed.Add(feedEvt);
+            OnEventReplayed?.Invoke(feedEvt);
 
             _currentRequestIndex++;
             if (_currentRequestIndex >= _bundle.Requests.Count)

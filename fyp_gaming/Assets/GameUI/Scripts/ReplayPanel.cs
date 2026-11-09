@@ -14,6 +14,8 @@ namespace LuanShi
     {
         private Vector2 _replayPromptScroll;
         private Vector2 _replayResponseScroll;
+        private Vector2 _replayFeedScroll;
+        private string _replaySubTab = "feed";
 
         static Rect ReplayPanelArea()
             => new Rect(SidePanelX, SidePanelY, SidePanelWidth, Mathf.Min(580f, Screen.height - SidePanelY - 40f));
@@ -95,36 +97,50 @@ namespace LuanShi
             DrawReplayScoreboards(x, y, width);
             y += _replaySession.IsCompleted ? 78f : 66f;
 
-            // Current request & Persona
-            ReplayRequestRecord rec = _replaySession.CurrentRequestRecord;
-            string seatId = rec != null ? rec.SeatId : (_replaySession.CurrentSeatId ?? "seat-0");
-            string persona = _replaySession.CurrentPersonaId;
-            GUI.Label(new Rect(x, y, width, 16f), $"Current Turn: {seatId} ({persona})", uiPanelTitle);
-            y += 18f;
+            // Sub-navigation: Event Feed vs Exchanges
+            float tabW = (width - 4f) * 0.5f;
+            if (GUI.Button(new Rect(x, y, tabW, 20f), "Event Feed", _replaySubTab == "feed" ? uiTabActive : uiButton)) _replaySubTab = "feed";
+            if (GUI.Button(new Rect(x + tabW + 4f, y, tabW, 20f), "Exchanges", _replaySubTab == "details" ? uiTabActive : uiButton)) _replaySubTab = "details";
+            y += 24f;
 
-            string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
-            GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
-            y += 16f;
+            if (_replaySubTab == "feed")
+            {
+                DrawReplayEventFeed(x, y, width, 180f);
+                y += 184f;
+            }
+            else
+            {
+                // Current request & Persona
+                ReplayRequestRecord rec = _replaySession.CurrentRequestRecord;
+                string seatId = rec != null ? rec.SeatId : (_replaySession.CurrentSeatId ?? "seat-0");
+                string persona = _replaySession.CurrentPersonaId;
+                GUI.Label(new Rect(x, y, width, 16f), $"Current Turn: {seatId} ({persona})", uiPanelTitle);
+                y += 18f;
 
-            // Saved Prompt Excerpt (scrollable box)
-            GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
-            y += 15f;
-            string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
-            Rect promptRect = new Rect(x, y, width, 55f);
-            _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, width - 20f, 180f));
-            GUI.TextArea(new Rect(0, 0, width - 20f, 180f), promptText, uiMono);
-            GUI.EndScrollView();
-            y += 60f;
+                string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
+                GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
+                y += 16f;
 
-            // Saved Model Response
-            GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
-            y += 15f;
-            string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
-            Rect respRect = new Rect(x, y, width, 40f);
-            _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
-            GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);
-            GUI.EndScrollView();
-            y += 45f;
+                // Saved Prompt Excerpt (scrollable box)
+                GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
+                y += 15f;
+                string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
+                Rect promptRect = new Rect(x, y, width, 55f);
+                _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, width - 20f, 180f));
+                GUI.TextArea(new Rect(0, 0, width - 20f, 180f), promptText, uiMono);
+                GUI.EndScrollView();
+                y += 60f;
+
+                // Saved Model Response
+                GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
+                y += 15f;
+                string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
+                Rect respRect = new Rect(x, y, width, 40f);
+                _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
+                GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);
+                GUI.EndScrollView();
+                y += 45f;
+            }
 
             // Verification status
             int obs = _replaySession.ObservationHashesMatched;
@@ -230,6 +246,50 @@ namespace LuanShi
             {
                 if (GUI.Button(rect, "Step Replay", uiButton)) ReplayStepRequest();
             }
+        }
+
+        void DrawReplayEventFeed(float x, float y, float width, float height)
+        {
+            var feed = _replaySession != null ? _replaySession.EventFeed : null;
+            int count = feed != null ? feed.Count : 0;
+            GUI.Label(new Rect(x, y, width, 16f), $"EVENT FEED ({count} events replayed):", uiPanelTitle);
+            y += 18f;
+            float viewH = height - 18f;
+
+            if (count == 0)
+            {
+                GUI.Label(new Rect(x, y, width, 30f), "Replay at start. Click Play or Step to replay recorded actions.", uiHint);
+                return;
+            }
+
+            float rowHeight = 44f;
+            float contentHeight = count * rowHeight;
+            Rect viewRect = new Rect(x, y, width, viewH);
+            _replayFeedScroll = GUI.BeginScrollView(viewRect, _replayFeedScroll, new Rect(0, 0, width - 20f, contentHeight));
+
+            for (int i = 0; i < count; i++)
+            {
+                var evt = feed[i];
+                float rowY = i * rowHeight;
+                Rect r = new Rect(0, rowY, width - 20f, rowHeight - 2f);
+                DrawSolidColor(r, i % 2 == 0 ? new Color(0.12f, 0.12f, 0.12f, 0.6f) : new Color(0.08f, 0.08f, 0.08f, 0.6f));
+
+                string mark = evt.ResultOk ? "✓" : "✗";
+                string header = $"#{evt.Sequence} S{evt.Season} R{evt.RequestIndex} | {evt.Faction} ({evt.SeatId}) | {mark} {evt.ResultText}";
+                GUI.Label(new Rect(4f, rowY + 1f, width - 28f, 14f), EllipsizeToWidth(uiSmall, header, width - 28f), uiSmall);
+
+                string actLine = $"Action: {evt.ActionSummary}";
+                GUI.Label(new Rect(4f, rowY + 14f, width - 28f, 13f), EllipsizeToWidth(uiMonoTiny, actLine, width - 28f), uiMonoTiny);
+
+                if (evt.RequestIndex > 0)
+                {
+                    string exp = !string.IsNullOrEmpty(evt.Explanation) ? evt.Explanation : "unknown";
+                    string expLine = $"Why: \"{exp}\"";
+                    GUI.Label(new Rect(4f, rowY + 26f, width - 28f, 14f), EllipsizeToWidth(uiHint, expLine, width - 28f), uiHint);
+                }
+            }
+
+            GUI.EndScrollView();
         }
 
         void DrawSolidColor(Rect rect, Color color)

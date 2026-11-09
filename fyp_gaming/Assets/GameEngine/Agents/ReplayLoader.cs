@@ -14,6 +14,7 @@ namespace LuanShi.Engine
             public string ExchangeId;
             public string UserPrompt;
             public string ContentText;
+            public string Explanation;
         }
 
         public static bool TryResolveRunFiles(string runId, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
@@ -123,9 +124,11 @@ namespace LuanShi.Engine
             for (int i = 0; i < requests.Count; i++)
             {
                 var req = requests[i];
-                string key = $"{req.RunId}:{req.TurnToken}:{req.RequestIndex}";
-                if (!exchanges.TryGetValue(key, out ExchangeRecord ex) || string.IsNullOrEmpty(ex.UserPrompt) || string.IsNullOrEmpty(ex.ContentText))
-                    throw new InvalidDataException($"Missing or incomplete exchange record for request {key}.");
+                string key = (req.RequestIndex > 0 && !string.IsNullOrEmpty(req.RunId) && !string.IsNullOrEmpty(req.SeatId) && req.Season > 0)
+                    ? $"{req.RunId}:{req.SeatId}:{req.Season}:{req.RequestIndex}"
+                    : null;
+                if (key == null || !exchanges.TryGetValue(key, out ExchangeRecord ex) || string.IsNullOrEmpty(ex.UserPrompt) || string.IsNullOrEmpty(ex.ContentText))
+                    throw new InvalidDataException($"Missing or incomplete exchange record for request {key ?? "absent-request-index"}.");
             }
 
             return new ReplayBundle {
@@ -152,7 +155,16 @@ namespace LuanShi.Engine
                     if (!string.Equals(runId, expectedRunId, StringComparison.Ordinal))
                         throw new InvalidDataException($"Exchange record at line {lineNum} has run_id '{runId}' (expected '{expectedRunId}').");
 
-                    string key = $"{runId}:{GetInt(obj, "turn_token")}:{GetInt(obj, "request_index")}";
+                    int reqIdx = GetInt(obj, "request_index", -1);
+                    string seatId = GetString(obj, "seat_id");
+                    int season = GetInt(obj, "season", -1);
+                    // Match key exact: run_id + seat_id + season + request_index.
+                    // If request index is absent (<= 0), record cannot match an action.
+                    string key = (reqIdx > 0 && !string.IsNullOrEmpty(runId) && !string.IsNullOrEmpty(seatId) && season > 0)
+                        ? $"{runId}:{seatId}:{season}:{reqIdx}"
+                        : null;
+                    if (key == null) continue;
+
                     if (!map.TryGetValue(key, out ExchangeRecord rec)) { rec = new ExchangeRecord(); map[key] = rec; }
                     string exId = GetString(obj, "exchange_id");
                     if (!string.IsNullOrEmpty(exId)) rec.ExchangeId = exId;
@@ -161,7 +173,22 @@ namespace LuanShi.Engine
                     if (evt == "request" && obj.TryGet("request", out JsonNode reqNode) && reqNode is JsonObject reqObj)
                         rec.UserPrompt = GetString(reqObj, "user");
                     else if (evt == "result" && obj.TryGet("response", out JsonNode resNode) && resNode is JsonObject resObj)
-                        rec.ContentText = GetString(resObj, "content_text");
+                    {
+                        string ct = GetString(resObj, "content_text");
+                        rec.ContentText = ct;
+                        if (!string.IsNullOrEmpty(ct) && StrictJson.TryParse(ct, out JsonNode ctNode, out _) && ctNode is JsonObject ctObj)
+                        {
+                            string summary = GetString(ctObj, "summary", null);
+                            string reason = GetString(ctObj, "reason", null);
+                            if (!string.IsNullOrEmpty(summary)) rec.Explanation = summary;
+                            else if (!string.IsNullOrEmpty(reason)) rec.Explanation = reason;
+                            else rec.Explanation = "unknown";
+                        }
+                        else
+                        {
+                            rec.Explanation = "unknown";
+                        }
+                    }
                 }
             }
             return map;
@@ -298,14 +325,21 @@ namespace LuanShi.Engine
                         TotalTokens = GetInt(obj, "total_tokens"), ProviderRequestId = GetString(obj, "provider_request_id")
                     };
 
-                    string key = $"{rec.RunId}:{rec.TurnToken}:{rec.RequestIndex}";
-                    if (exchanges.TryGetValue(key, out ExchangeRecord ex))
+                    string key = (rec.RequestIndex > 0 && !string.IsNullOrEmpty(rec.RunId) && !string.IsNullOrEmpty(rec.SeatId) && rec.Season > 0)
+                        ? $"{rec.RunId}:{rec.SeatId}:{rec.Season}:{rec.RequestIndex}"
+                        : null;
+                    if (key != null && exchanges.TryGetValue(key, out ExchangeRecord ex))
                     {
                         rec.ExchangeId = ex.ExchangeId; rec.UserPrompt = ex.UserPrompt;
                         rec.PromptExcerpt = ExtractPromptExcerpt(ex.UserPrompt);
                         rec.ResponseContentText = ex.ContentText ?? rec.RawModelText;
+                        rec.RecordedExplanation = !string.IsNullOrEmpty(ex.Explanation) ? ex.Explanation : "unknown";
                     }
-                    else { rec.ResponseContentText = rec.RawModelText; }
+                    else
+                    {
+                        rec.ResponseContentText = rec.RawModelText;
+                        rec.RecordedExplanation = null;
+                    }
                     list.Add(rec);
                 }
             }

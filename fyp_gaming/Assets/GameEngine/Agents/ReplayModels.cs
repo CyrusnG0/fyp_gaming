@@ -113,6 +113,24 @@ namespace LuanShi.Engine
         public string UserPrompt;
         public string PromptExcerpt;
         public string ResponseContentText;
+        public string RecordedExplanation;
+    }
+
+    public sealed class ReplayFeedEvent
+    {
+        public int Sequence;
+        public string RunId;
+        public string SeatId;
+        public string Faction;
+        public int Season;
+        public int RequestIndex;
+        public string ActionType;
+        public string ActionSummary;
+        public string CommandJson;
+        public bool ResultOk;
+        public string ResultText;
+        public string Explanation;
+        public string ObservationHash;
     }
 
     public sealed class ReplayBundle

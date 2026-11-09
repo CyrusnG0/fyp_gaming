@@ -50,6 +50,7 @@ namespace LuanShi
                         balanceProfile = _replayBundle.Summary.BalanceProfileKey;
                 }
                 _replaySession = new ReplaySession(_replayBundle, engine != null ? engine.State.Map : null);
+                _replaySession.OnEventReplayed += HandleReplayEvent;
                 engine = _replaySession.Engine;
                 _replayLastViewedSeat = "seat-0";
                 RefreshReplayView();
@@ -170,12 +171,24 @@ namespace LuanShi
         void ReplayReset()
         {
             if (_replaySession == null) return;
+            jsonFeed.Clear();
             _replaySession.Reset();
             engine = _replaySession.Engine;
             _replaySyncedRequestIndex = -1;
             _replayFinalReportLogged = false;
             RefreshReplayView();
             SyncSpectatorArmyVisuals();
+        }
+
+        void HandleReplayEvent(ReplayFeedEvent evt)
+        {
+            if (evt == null) return;
+            string okMark = evt.ResultOk ? "✓ " : "✗ ";
+            string line = $"{okMark}[Replay S{evt.Season} {evt.Faction}] {evt.ActionSummary}";
+            if (!string.IsNullOrEmpty(evt.Explanation))
+                line += $" — \"{evt.Explanation}\"";
+            jsonFeed.Add(line);
+            if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
         }
 
         void ReplaySetSpeed(float multiplier)
