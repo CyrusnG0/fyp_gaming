@@ -26,7 +26,8 @@ namespace LuanShi.Engine
         private int _observationHashesMatched, _observationHashMismatches;
         private readonly List<string> _observationHashDiscrepancies = new List<string>();
 
-        private int _acceptedActionsReplayed, _rejectedActionsReplayed, _unexpectedRejections, _unexpectedAcceptances, _actionOutcomeMismatches;
+        private int _acceptedActionsReplayed, _rejectedActionsReplayed, _unexpectedRejections, _unexpectedAcceptances;
+        private int _rejectionReasonMismatches, _actionOutcomeMismatches;
         private readonly List<string> _actionDiscrepancies = new List<string>();
         private int _voluntaryEndTurnsReplayed;
 
@@ -52,6 +53,7 @@ namespace LuanShi.Engine
         public int RejectedActionsReplayed => _rejectedActionsReplayed;
         public int UnexpectedRejections => _unexpectedRejections;
         public int UnexpectedAcceptances => _unexpectedAcceptances;
+        public int RejectionReasonMismatches => _rejectionReasonMismatches;
         public int ActionOutcomeMismatches => _actionOutcomeMismatches;
         public IReadOnlyList<string> ActionDiscrepancies => _actionDiscrepancies;
         public int ObservationHashesMatched => _observationHashesMatched;
@@ -109,7 +111,7 @@ namespace LuanShi.Engine
 
             _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
             _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
-            _unexpectedAcceptances = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
+            _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
             _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _finalReport = null;
 
             int seed = _bundle.Summary != null && _bundle.Summary.Seed != 0 ? _bundle.Summary.Seed : 12345;
@@ -214,12 +216,13 @@ namespace LuanShi.Engine
             }
             else
             {
+                bool replayedParseOk = parsed.Ok && parsed.Action != null;
                 bool replayedOk = false;
-                string failReason = null;
-                if (!parsed.Ok || parsed.Action == null)
+                string replayedError = null;
+                if (!replayedParseOk)
                 {
                     replayedOk = false;
-                    failReason = "Parse failure: " + parsed.Error;
+                    replayedError = parsed.Error ?? "parse_failure";
                 }
                 else
                 {
@@ -227,15 +230,28 @@ namespace LuanShi.Engine
                     cmd.ControllerType = ControllerType.Llm;
                     ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
                     replayedOk = res.Ok;
-                    if (!res.Ok) failReason = "Validation error: " + res.Error;
+                    if (!res.Ok) replayedError = res.Error ?? "validation_failure";
                 }
 
                 if (req.ParseOk && req.ResultOk && replayedOk) _acceptedActionsReplayed++;
-                else if ((!req.ParseOk || !req.ResultOk) && !replayedOk) _rejectedActionsReplayed++;
+                else if ((!req.ParseOk || !req.ResultOk) && !replayedOk)
+                {
+                    bool categoryMatch = req.ParseOk == replayedParseOk;
+                    bool reasonMatch = true;
+                    if (req.ParseOk && replayedParseOk && !string.IsNullOrEmpty(req.ResultError))
+                        reasonMatch = string.Equals(replayedError, req.ResultError, StringComparison.Ordinal);
+
+                    if (categoryMatch && reasonMatch) _rejectedActionsReplayed++;
+                    else
+                    {
+                        _rejectionReasonMismatches++; _actionOutcomeMismatches++;
+                        _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): rejection category/reason mismatch (recParse={req.ParseOk}, actParse={replayedParseOk}, recErr='{req.ResultError}', actErr='{replayedError}')");
+                    }
+                }
                 else if (req.ParseOk && req.ResultOk && !replayedOk)
                 {
                     _unexpectedRejections++; _actionOutcomeMismatches++;
-                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected rejection ({failReason})");
+                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected rejection ({replayedError})");
                 }
                 else if ((!req.ParseOk || !req.ResultOk) && replayedOk)
                 {

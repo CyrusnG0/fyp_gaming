@@ -209,12 +209,24 @@ namespace LuanShi.Engine
                     if (sObj.TryGet("scoreboard", out JsonNode sbNode) && sbNode is JsonArray sbArr)
                         foreach (JsonNode scNode in sbArr.Items)
                             if (scNode is JsonObject scObj)
+                            {
+                                var missing = new List<string>();
+                                if (!scObj.TryGet("seat_id", out var sidNode) || !(sidNode is JsonString)) missing.Add("seat_id");
+                                if (!scObj.TryGet("faction", out var facNode) || !(facNode is JsonString)) missing.Add("faction");
+                                if (!scObj.TryGet("gold", out var gNode) || !(gNode is JsonInt)) missing.Add("gold");
+                                if (!scObj.TryGet("food", out var fNode) || !(fNode is JsonInt)) missing.Add("food");
+                                if (!scObj.TryGet("population", out var pNode) || !(pNode is JsonInt)) missing.Add("population");
+                                if (!scObj.TryGet("garrison", out var garNode) || !(garNode is JsonInt)) missing.Add("garrison");
+                                if (!scObj.TryGet("cities", out var cNode) || !(cNode is JsonInt)) missing.Add("cities");
+
                                 list.Add(new ReplaySeatScore {
                                     SeatId = GetString(scObj, "seat_id"), Faction = GetString(scObj, "faction"),
                                     Gold = GetInt(scObj, "gold"), Food = GetInt(scObj, "food"),
                                     Population = GetInt(scObj, "population"), Garrison = GetInt(scObj, "garrison"),
-                                    Cities = GetInt(scObj, "cities")
+                                    Cities = GetInt(scObj, "cities"),
+                                    MissingFields = missing.Count > 0 ? missing : null
                                 });
+                            }
                     scoreboards.Add(new ReplaySeasonScoreboard { Season = seasonNum, Scores = list });
                 }
             }

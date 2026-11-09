@@ -39,6 +39,7 @@ namespace LuanShi.Engine
         public int Population;
         public int Garrison;
         public int Cities;
+        public IReadOnlyList<string> MissingFields;
     }
 
     public sealed class ReplaySeasonScoreboard
@@ -71,6 +72,7 @@ namespace LuanShi.Engine
         public int TotalVoluntaryEndTurns;
         public long InputTokens;
         public long OutputTokens;
+        public int TotalInvalid;
         public IReadOnlyList<ReplaySeasonScoreboard> Scoreboards;
         public IReadOnlyList<ReplayTurnSummary> Turns;
     }
@@ -89,21 +91,24 @@ namespace LuanShi.Engine
         public string ObservationHash;
         public string ObservationJson;
         public int RequestIndex;
-        public int TotalRequests;
+        public int LatencyMs;
+        public int InputTokens;
+        public int OutputTokens;
         public string RawModelText;
         public bool ParseOk;
         public string CommandJson;
         public bool ResultOk;
         public string ResultError;
         public string StateAfter;
+        public string ErrorKind;
+        public string ErrorDetail;
+        public string ProviderRequestId;
         public string FinishReason;
-        public int InputTokens;
-        public int OutputTokens;
         public int ReasoningTokens;
         public int TotalTokens;
-        public string ProviderRequestId;
+        public int HttpStatus;
+        public int TotalRequests;
 
-        // Joined exchange fields
         public string ExchangeId;
         public string UserPrompt;
         public string PromptExcerpt;
@@ -153,6 +158,7 @@ namespace LuanShi.Engine
         public int RejectedActionsReplayed;
         public int UnexpectedRejections;
         public int UnexpectedAcceptances;
+        public int RejectionReasonMismatches;
         public int ActionOutcomeMismatches;
         public IReadOnlyList<string> ActionDiscrepancies;
 
@@ -199,7 +205,7 @@ namespace LuanShi.Engine
             sb.AppendLine($"Run ID: {RunId} | Seed: {Seed} | Profile: {BalanceProfileKey}");
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
             sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
-            sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances})");
+            sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");
             sb.AppendLine($"Voluntary EndTurns: {VoluntaryEndTurnsReplayed}/{ExpectedVoluntaryEndTurns} matched");
             sb.AppendLine($"Action Outcome Mismatches: {ActionOutcomeMismatches}");
             sb.AppendLine();

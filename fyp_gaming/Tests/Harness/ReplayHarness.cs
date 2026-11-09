@@ -55,10 +55,7 @@ internal static partial class Harness
         {
             var req = bundle.Requests[i];
             if (string.IsNullOrEmpty(req.PromptExcerpt) || string.IsNullOrEmpty(req.ResponseContentText))
-            {
-                exchangesJoined = false;
-                break;
-            }
+            { exchangesJoined = false; break; }
         }
         Check(exchangesJoined, "all 44 requests have joined PromptExcerpt and ResponseContentText");
 
@@ -98,6 +95,7 @@ internal static partial class Harness
         Check(session.RejectedActionsReplayed == 0, $"RejectedActionsReplayed == 0 (got {session.RejectedActionsReplayed})");
         Check(session.UnexpectedRejections == 0, $"UnexpectedRejections == 0 (got {session.UnexpectedRejections})");
         Check(session.UnexpectedAcceptances == 0, $"UnexpectedAcceptances == 0 (got {session.UnexpectedAcceptances})");
+        Check(session.RejectionReasonMismatches == 0, $"RejectionReasonMismatches == 0 (got {session.RejectionReasonMismatches})");
         Check(session.ActionOutcomeMismatches == 0, $"ActionOutcomeMismatches == 0 (got {session.ActionOutcomeMismatches})");
         Check(session.VoluntaryEndTurnsReplayed == 2, $"VoluntaryEndTurnsReplayed == 2 (got {session.VoluntaryEndTurnsReplayed})");
 
@@ -139,10 +137,10 @@ internal static partial class Harness
         // 5. Temp directory file resolution & cross-validation tests
         RunTempDirectoryValidationTests(summaryPath, jsonlPath, exchangesPath);
 
-        // 6. Raw value tampering test
-        RunTamperedScoreboardTest(summaryPath, jsonlPath, exchangesPath);
+        // 6. Scoreboard integrity & tampering tests
+        RunScoreboardIntegrityTests(summaryPath, jsonlPath, exchangesPath, session.ReplayedScores);
 
-        // 7. Synthetic action rejection accounting tests (engine-level validator & parse failure)
+        // 7. Synthetic action rejection accounting & reason tests
         RunRejectedActionsAccountingTest();
 
         // 8. Snapshot verification & printout
@@ -176,8 +174,7 @@ internal static partial class Harness
             string firstJsonlLine = File.ReadAllLines(jsonlPath)[0].Replace(ReplayLoader.VerifiedDemoRunId, "run-tampered-12345");
             File.WriteAllText(fakeJsonl, firstJsonlLine + "\n");
             bool threwMixedJsonl = false;
-            try { ReplayLoader.Load(summaryPath, fakeJsonl, exchangesPath); }
-            catch (InvalidDataException) { threwMixedJsonl = true; }
+            try { ReplayLoader.Load(summaryPath, fakeJsonl, exchangesPath); } catch (InvalidDataException) { threwMixedJsonl = true; }
             Check(threwMixedJsonl, "mixed run_id in jsonl throws InvalidDataException");
 
             // Mixed run_id in exchanges
@@ -185,147 +182,178 @@ internal static partial class Harness
             string firstExchLine = File.ReadAllLines(exchangesPath)[0].Replace(ReplayLoader.VerifiedDemoRunId, "run-tampered-12345");
             File.WriteAllText(fakeExch, firstExchLine + "\n");
             bool threwMixedExch = false;
-            try { ReplayLoader.Load(summaryPath, jsonlPath, fakeExch); }
-            catch (InvalidDataException) { threwMixedExch = true; }
+            try { ReplayLoader.Load(summaryPath, jsonlPath, fakeExch); } catch (InvalidDataException) { threwMixedExch = true; }
             Check(threwMixedExch, "mixed run_id in exchanges throws InvalidDataException");
 
             // Missing exchange entry
             string emptyExch = Path.Combine(tempDir, "empty-exchanges.ndjson");
             File.WriteAllText(emptyExch, "");
             bool threwMissingExch = false;
-            try { ReplayLoader.Load(summaryPath, jsonlPath, emptyExch); }
-            catch (InvalidDataException) { threwMissingExch = true; }
+            try { ReplayLoader.Load(summaryPath, jsonlPath, emptyExch); } catch (InvalidDataException) { threwMissingExch = true; }
             Check(threwMissingExch, "missing exchange entry throws InvalidDataException");
         }
-        finally
-        {
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
-        }
+        finally { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
     }
 
-    private static void RunTamperedScoreboardTest(string summaryPath, string jsonlPath, string exchangesPath)
+    private static List<ReplaySeasonScoreboard> CloneScoreboards(IReadOnlyList<ReplaySeasonScoreboard> source)
+    {
+        var list = new List<ReplaySeasonScoreboard>();
+        foreach (var sb in source)
+        {
+            var scores = new List<ReplaySeatScore>();
+            foreach (var sc in sb.Scores)
+                scores.Add(new ReplaySeatScore {
+                    SeatId = sc.SeatId, Faction = sc.Faction, Gold = sc.Gold, Food = sc.Food,
+                    Population = sc.Population, Garrison = sc.Garrison, Cities = sc.Cities, MissingFields = sc.MissingFields
+                });
+            list.Add(new ReplaySeasonScoreboard { Season = sb.Season, Scores = scores });
+        }
+        return list;
+    }
+
+    private static void RunScoreboardIntegrityTests(string summaryPath, string jsonlPath, string exchangesPath, IReadOnlyList<ReplaySeasonScoreboard> exactReplayedScores)
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "luanshi_tamper_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try
         {
-            string tamperedSum = Path.Combine(tempDir, Path.GetFileName(summaryPath));
+            // 0. Exact-matching baseline (zero numeric deltas across all 5 seasons & both seats)
+            var bExact = ReplayLoader.Load(summaryPath, jsonlPath, exchangesPath);
+            bExact.Summary.Scoreboards = CloneScoreboards(exactReplayedScores);
+            var sExact = new ReplaySession(bExact); sExact.RunToCompletion();
+            Check(sExact.FinalReport.FinalScoreboardExactMatch && sExact.FinalReport.AllSeasonsScoreboardExactMatch,
+                "exact-matching scoreboard baseline has FinalScoreboardExactMatch == true && AllSeasonsScoreboardExactMatch == true");
+
+            // 1. Raw value tampering test
+            string tamperedSum = Path.Combine(tempDir, "tampered-summary.json");
             string sumText = File.ReadAllText(summaryPath);
-            string modified = sumText.Replace("\"food\":243", "\"food\":999").Replace("\"food\": 243", "\"food\": 999");
-            File.WriteAllText(tamperedSum, modified);
+            File.WriteAllText(tamperedSum, sumText.Replace("\"food\":243", "\"food\":999").Replace("\"food\": 243", "\"food\": 999"));
 
-            var tamperedBundle = ReplayLoader.Load(tamperedSum, jsonlPath, exchangesPath);
-            var tamperedSession = new ReplaySession(tamperedBundle);
-            tamperedSession.RunToCompletion();
-            var rpt = tamperedSession.FinalReport;
+            var b1 = ReplayLoader.Load(tamperedSum, jsonlPath, exchangesPath);
+            var s1 = new ReplaySession(b1); s1.RunToCompletion();
+            Check(s1.FinalReport != null && !s1.FinalReport.FinalScoreboardExactMatch, "tampered summary produces FinalScoreboardExactMatch == false");
+            Check(HasMismatchText(s1.FinalReport, "Food", "999"), "RawScoreboardMismatches records raw food delta");
 
-            Check(rpt != null && !rpt.FinalScoreboardExactMatch, "tampered summary produces FinalScoreboardExactMatch == false");
-            bool recordsRawMismatch = false;
-            if (rpt != null && rpt.RawScoreboardMismatches != null)
-            {
-                foreach (var m in rpt.RawScoreboardMismatches)
-                    if (m.Contains("Food") && (m.Contains("999") || m.Contains("-756"))) recordsRawMismatch = true;
-            }
-            Check(recordsRawMismatch, "RawScoreboardMismatches records raw food delta (243 vs 999, delta -756)");
+            // 2. Missing Season 3 scoreboard (from exact-matching baseline)
+            var b2 = ReplayLoader.Load(summaryPath, jsonlPath, exchangesPath);
+            var listNoS3 = CloneScoreboards(exactReplayedScores);
+            listNoS3.RemoveAll(sb => sb.Season == 3);
+            b2.Summary.Scoreboards = listNoS3;
+            var s2 = new ReplaySession(b2); s2.RunToCompletion();
+            Check(!s2.FinalReport.AllSeasonsScoreboardExactMatch, "missing S3 scoreboard flips AllSeasonsScoreboardExactMatch from true to false");
+            Check(HasMismatchText(s2.FinalReport, "Season 3: missing expected summary season scoreboard"), "mismatches records missing S3");
+
+            // 3. Missing Season 5 scoreboard (from exact-matching baseline)
+            var b3 = ReplayLoader.Load(summaryPath, jsonlPath, exchangesPath);
+            var listNoS5 = CloneScoreboards(exactReplayedScores);
+            listNoS5.RemoveAll(sb => sb.Season == 5);
+            b3.Summary.Scoreboards = listNoS5;
+            var s3 = new ReplaySession(b3); s3.RunToCompletion();
+            Check(!s3.FinalReport.FinalScoreboardExactMatch, "missing S5 scoreboard flips FinalScoreboardExactMatch from true to false");
+            Check(!s3.FinalReport.AllSeasonsScoreboardExactMatch, "missing S5 scoreboard flips AllSeasonsScoreboardExactMatch from true to false");
+            Check(HasMismatchText(s3.FinalReport, "Season 5: missing expected summary season scoreboard"), "mismatches records missing S5");
+
+            // 4. Missing faction scoreboard entry in Season 5 (from exact-matching baseline)
+            var b4 = ReplayLoader.Load(summaryPath, jsonlPath, exchangesPath);
+            var sbsNoShu = CloneScoreboards(exactReplayedScores);
+            var s5ScoresNoShu = new List<ReplaySeatScore>();
+            foreach (var sc in sbsNoShu[4].Scores) if (sc.SeatId != "seat-1") s5ScoresNoShu.Add(sc);
+            sbsNoShu[4] = new ReplaySeasonScoreboard { Season = 5, Scores = s5ScoresNoShu };
+            b4.Summary.Scoreboards = sbsNoShu;
+            var s4 = new ReplaySession(b4); s4.RunToCompletion();
+            Check(!s4.FinalReport.FinalScoreboardExactMatch, "missing seat-1 in S5 flips FinalScoreboardExactMatch from true to false");
+            Check(HasMismatchText(s4.FinalReport, "Season 5 seat-1: missing faction scoreboard entry"), "mismatches records missing seat-1 entry");
+
+            // 5. Incomplete final score JSON (missing food field) & MissingFields on exact-matching baseline
+            string incompSum = Path.Combine(tempDir, "incomp-summary.json");
+            File.WriteAllText(incompSum, sumText.Replace("\"food\":243,", "").Replace("\"food\": 243,", ""));
+            var b5 = ReplayLoader.Load(incompSum, jsonlPath, exchangesPath);
+            ReplaySeatScore s5Wei = null;
+            foreach (var sb in b5.Summary.Scoreboards)
+                if (sb.Season == 5)
+                    foreach (var sc in sb.Scores) if (sc.SeatId == "seat-0") { s5Wei = sc; break; }
+            Check(s5Wei != null && s5Wei.MissingFields != null && new List<string>(s5Wei.MissingFields).Contains("food"), "missing food captured in MissingFields");
+            var sbsIncomp = CloneScoreboards(exactReplayedScores);
+            sbsIncomp[4].Scores[0].MissingFields = s5Wei?.MissingFields ?? new[] { "food" };
+            b5.Summary.Scoreboards = sbsIncomp;
+            var s5 = new ReplaySession(b5); s5.RunToCompletion();
+            Check(!s5.FinalReport.FinalScoreboardExactMatch, "incomplete S5 score flips FinalScoreboardExactMatch from true to false even with 0 numeric deltas");
+            Check(HasMismatchText(s5.FinalReport, "incomplete scoreboard entry in summary (missing: food)"), "mismatches records incomplete food entry");
         }
-        finally
+        finally { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+    }
+
+    private static bool HasMismatchText(ReplayComparisonReport rpt, params string[] terms)
+    {
+        if (rpt?.RawScoreboardMismatches == null) return false;
+        foreach (var m in rpt.RawScoreboardMismatches)
         {
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+            bool match = true;
+            for (int i = 0; i < terms.Length; i++) if (!m.Contains(terms[i])) { match = false; break; }
+            if (match) return true;
         }
+        return false;
     }
 
     private static void RunRejectedActionsAccountingTest()
     {
         // Case 0: Parse failure (unparseable text)
-        var fakeReqs0 = new List<ReplayRequestRecord>
-        {
-            new ReplayRequestRecord
-            {
-                RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
-                TurnToken = 1, Season = 1, RequestIndex = 1, TotalRequests = 1,
-                ObservationHash = "hash00000000",
-                RawModelText = "invalid gibberish action", ParseOk = false, ResultOk = false
-            }
-        };
-        var bundle0 = new ReplayBundle
-        {
-            Summary = new ReplaySummaryData { RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeasonsPlanned = 1, SeasonsPlayed = 1, TotalRequests = 1 },
-            Requests = fakeReqs0
-        };
-        var sess0 = new ReplaySession(bundle0);
-        sess0.StepRequest();
-        Check(sess0.RejectedActionsReplayed == 1, "case 0: parse failure increments RejectedActionsReplayed (1)");
-        Check(sess0.AcceptedActionsReplayed == 0, "case 0: parse failure does NOT increment AcceptedActionsReplayed (0)");
-        Check(sess0.ActionOutcomeMismatches == 0, "case 0: parse failure has ActionOutcomeMismatches == 0");
+        var s0 = CreateSingleReqSession("invalid gibberish action", parseOk: false, resultOk: false);
+        s0.StepRequest();
+        Check(s0.RejectedActionsReplayed == 1 && s0.AcceptedActionsReplayed == 0 && s0.ActionOutcomeMismatches == 0,
+            "case 0: parse failure increments RejectedActionsReplayed (1)");
 
         // Case 1: Recorded rejected, Replayed rejected via engine validation (valid JSON march into fog)
-        var fakeReqs1 = new List<ReplayRequestRecord>
-        {
-            new ReplayRequestRecord
-            {
-                RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
-                TurnToken = 1, Season = 1, RequestIndex = 1, TotalRequests = 1,
-                ObservationHash = "hash00000001",
-                RawModelText = "{\"type\":\"march\",\"target_id\":\"army-wei-1\",\"param_a\":25,\"param_b\":16,\"reason\":\"march beyond sight\"}",
-                ParseOk = true, ResultOk = false
-            }
-        };
-        var bundle1 = new ReplayBundle
-        {
-            Summary = new ReplaySummaryData { RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeasonsPlanned = 1, SeasonsPlayed = 1, TotalRequests = 1 },
-            Requests = fakeReqs1
-        };
-        var sess1 = new ReplaySession(bundle1);
-        sess1.StepRequest();
-        Check(sess1.RejectedActionsReplayed == 1, "case 1: engine rejected action increments RejectedActionsReplayed (1)");
-        Check(sess1.AcceptedActionsReplayed == 0, "case 1: engine rejected action does NOT increment AcceptedActionsReplayed (0)");
-        Check(sess1.ActionOutcomeMismatches == 0, "case 1: matching engine rejection has ActionOutcomeMismatches == 0");
+        const string marchFog = "{\"type\":\"march\",\"target_id\":\"army-wei-1\",\"param_a\":25,\"param_b\":16,\"reason\":\"march beyond sight\"}";
+        var s1 = CreateSingleReqSession(marchFog, parseOk: true, resultOk: false);
+        s1.StepRequest();
+        Check(s1.RejectedActionsReplayed == 1 && s1.AcceptedActionsReplayed == 0 && s1.ActionOutcomeMismatches == 0,
+            "case 1: matching engine rejection increments RejectedActionsReplayed (1)");
 
         // Case 2: Recorded accepted, Replayed rejected via engine validation (unexpected rejection)
-        var fakeReqs2 = new List<ReplayRequestRecord>
-        {
-            new ReplayRequestRecord
-            {
-                RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
-                TurnToken = 1, Season = 1, RequestIndex = 1, TotalRequests = 1,
-                ObservationHash = "hash00000002",
-                RawModelText = "{\"type\":\"march\",\"target_id\":\"army-wei-1\",\"param_a\":25,\"param_b\":16,\"reason\":\"march beyond sight\"}",
-                ParseOk = true, ResultOk = true
-            }
-        };
-        var bundle2 = new ReplayBundle
-        {
-            Summary = new ReplaySummaryData { RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeasonsPlanned = 1, SeasonsPlayed = 1, TotalRequests = 1 },
-            Requests = fakeReqs2
-        };
-        var sess2 = new ReplaySession(bundle2);
-        sess2.StepRequest();
-        Check(sess2.UnexpectedRejections == 1, "case 2: engine unexpected rejection increments UnexpectedRejections (1)");
-        Check(sess2.ActionOutcomeMismatches == 1, "case 2: engine unexpected rejection increments ActionOutcomeMismatches (1)");
-        Check(sess2.AcceptedActionsReplayed == 0, "case 2: engine unexpected rejection does NOT increment AcceptedActionsReplayed (0)");
+        var s2 = CreateSingleReqSession(marchFog, parseOk: true, resultOk: true);
+        s2.StepRequest();
+        Check(s2.UnexpectedRejections == 1 && s2.ActionOutcomeMismatches == 1 && s2.AcceptedActionsReplayed == 0,
+            "case 2: engine unexpected rejection increments UnexpectedRejections (1)");
 
         // Case 3: Recorded rejected, Replayed accepted via engine validation (unexpected acceptance)
-        var fakeReqs3 = new List<ReplayRequestRecord>
-        {
-            new ReplayRequestRecord
-            {
-                RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
-                TurnToken = 1, Season = 1, RequestIndex = 1, TotalRequests = 1,
-                ObservationHash = "hash00000003",
-                RawModelText = "{\"type\":\"reclaim\",\"target_id\":\"city-wei\",\"reason\":\"legal reclaim\"}",
-                ParseOk = true, ResultOk = false
-            }
+        var s3 = CreateSingleReqSession("{\"type\":\"reclaim\",\"target_id\":\"city-wei\",\"reason\":\"legal reclaim\"}", parseOk: true, resultOk: false);
+        s3.StepRequest();
+        Check(s3.UnexpectedAcceptances == 1 && s3.ActionOutcomeMismatches == 1 && s3.AcceptedActionsReplayed == 0,
+            "case 3: engine unexpected acceptance increments UnexpectedAcceptances (1)");
+
+        // Case 4: Rejection category mismatch (recorded parse failure vs replayed engine validator rejection)
+        var s4 = CreateSingleReqSession(marchFog, parseOk: false, resultOk: false);
+        s4.StepRequest();
+        Check(s4.RejectionReasonMismatches == 1 && s4.ActionOutcomeMismatches == 1 && s4.RejectedActionsReplayed == 0,
+            "case 4: category mismatch increments RejectionReasonMismatches (1)");
+
+        // Case 5: Rejection validator reason mismatch (recorded 'Insufficient gold' vs replayed sight failure)
+        var s5 = CreateSingleReqSession(marchFog, parseOk: true, resultOk: false, resultError: "Insufficient gold");
+        s5.StepRequest();
+        Check(s5.RejectionReasonMismatches == 1 && s5.ActionOutcomeMismatches == 1 && s5.RejectedActionsReplayed == 0,
+            "case 5: reason mismatch increments RejectionReasonMismatches (1)");
+
+        // Case 6: Matching validator reason ('destination is beyond your sight')
+        var s6 = CreateSingleReqSession(marchFog, parseOk: true, resultOk: false, resultError: "destination is beyond your sight");
+        s6.StepRequest();
+        Check(s6.RejectedActionsReplayed == 1 && s6.RejectionReasonMismatches == 0 && s6.ActionOutcomeMismatches == 0,
+            "case 6: matching validator reason increments RejectedActionsReplayed (1)");
+    }
+
+    private static ReplaySession CreateSingleReqSession(string rawText, bool parseOk, bool resultOk, string resultError = null)
+    {
+        var req = new ReplayRequestRecord {
+            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+            TurnToken = 1, Season = 1, RequestIndex = 1, TotalRequests = 1,
+            ObservationHash = "hash00000001", RawModelText = rawText,
+            ParseOk = parseOk, ResultOk = resultOk, ResultError = resultError
         };
-        var bundle3 = new ReplayBundle
-        {
+        var bundle = new ReplayBundle {
             Summary = new ReplaySummaryData { RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeasonsPlanned = 1, SeasonsPlayed = 1, TotalRequests = 1 },
-            Requests = fakeReqs3
+            Requests = new List<ReplayRequestRecord> { req }
         };
-        var sess3 = new ReplaySession(bundle3);
-        sess3.StepRequest();
-        Check(sess3.UnexpectedAcceptances == 1, "case 3: engine unexpected acceptance increments UnexpectedAcceptances (1)");
-        Check(sess3.ActionOutcomeMismatches == 1, "case 3: engine unexpected acceptance increments ActionOutcomeMismatches (1)");
-        Check(sess3.AcceptedActionsReplayed == 0, "case 3: engine unexpected acceptance does NOT increment AcceptedActionsReplayed (0)");
+        return new ReplaySession(bundle);
     }
 }
 

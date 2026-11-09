@@ -23,11 +23,9 @@ namespace LuanShi.Engine
 
             if (_isCompleted && _finalReport != null)
             {
-                int dWeiG = _finalReport.WeiFinalGold - _finalReport.WeiExpectedGold;
-                int dWeiF = _finalReport.WeiFinalFood - _finalReport.WeiExpectedFood;
+                int dWeiG = _finalReport.WeiFinalGold - _finalReport.WeiExpectedGold, dWeiF = _finalReport.WeiFinalFood - _finalReport.WeiExpectedFood;
                 sb.AppendLine($"Wei Summary G:{_finalReport.WeiExpectedGold} ({(dWeiG >= 0 ? "+" : "")}{dWeiG}) F:{_finalReport.WeiExpectedFood} ({(dWeiF >= 0 ? "+" : "")}{dWeiF})");
-                int dShuG = _finalReport.ShuFinalGold - _finalReport.ShuExpectedGold;
-                int dShuF = _finalReport.ShuFinalFood - _finalReport.ShuExpectedFood;
+                int dShuG = _finalReport.ShuFinalGold - _finalReport.ShuExpectedGold, dShuF = _finalReport.ShuFinalFood - _finalReport.ShuExpectedFood;
                 sb.AppendLine($"Shu Summary G:{_finalReport.ShuExpectedGold} ({(dShuG >= 0 ? "+" : "")}{dShuG}) F:{_finalReport.ShuExpectedFood} ({(dShuF >= 0 ? "+" : "")}{dShuF})");
             }
 
@@ -59,57 +57,107 @@ namespace LuanShi.Engine
             int weiExpFood = 0, weiExpGold = 0, weiExpPop = 0, weiExpGar = 0;
             int shuFinalFood = 0, shuFinalGold = 0, shuFinalPop = 0, shuFinalGar = 0;
             int shuExpFood = 0, shuExpGold = 0, shuExpPop = 0, shuExpGar = 0;
-            int finalSeasonNum = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : _replayedScores.Count;
 
-            for (int sIdx = 0; sIdx < _replayedScores.Count; sIdx++)
+            var seasonsSet = new SortedSet<int>();
+            int played = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
+            int planned = _bundle.Summary != null ? _bundle.Summary.SeasonsPlanned : 0;
+            for (int s = 1; s <= Math.Max(played, planned); s++) seasonsSet.Add(s);
+            if (_bundle.Summary?.Turns != null) foreach (var t in _bundle.Summary.Turns) if (t.Season > 0) seasonsSet.Add(t.Season);
+            if (_bundle.Summary?.Scoreboards != null) foreach (var sb in _bundle.Summary.Scoreboards) if (sb.Season > 0) seasonsSet.Add(sb.Season);
+            if (_bundle.Requests != null) foreach (var r in _bundle.Requests) if (r.Season > 0) seasonsSet.Add(r.Season);
+            foreach (var sb in _replayedScores) if (sb.Season > 0) seasonsSet.Add(sb.Season);
+            var expectedSeasons = new List<int>(seasonsSet);
+
+            var seatsList = new List<string>();
+            void AddSeat(string s) { if (!string.IsNullOrEmpty(s) && !seatsList.Contains(s)) seatsList.Add(s); }
+            if (_engine?.State?.Factions != null) foreach (var f in _engine.State.Factions) AddSeat(f.SeatId);
+            if (_bundle.Requests != null) foreach (var r in _bundle.Requests) AddSeat(r.SeatId);
+            if (_bundle.Summary?.Turns != null) foreach (var t in _bundle.Summary.Turns) AddSeat(t.SeatId);
+            if (_bundle.Summary?.Scoreboards != null)
+                foreach (var sb in _bundle.Summary.Scoreboards)
+                    if (sb.Scores != null) foreach (var sc in sb.Scores) AddSeat(sc.SeatId);
+
+            int finalSeasonNum = expectedSeasons.Count > 0
+                ? expectedSeasons[expectedSeasons.Count - 1]
+                : (played > 0 ? played : 5);
+
+            if (_bundle.Summary == null || _bundle.Summary.Scoreboards == null || expectedSeasons.Count == 0)
+            { allSeasonsExact = false; finalSeasonExact = false; rawMismatches.Add("Missing summary scoreboards"); }
+            if (seatsList.Count == 0) { allSeasonsExact = false; finalSeasonExact = false; }
+
+            bool finalSeasonVerified = false;
+            int finalSeasonSeatsVerified = 0;
+
+            for (int sIdx = 0; sIdx < expectedSeasons.Count; sIdx++)
             {
-                var actualSb = _replayedScores[sIdx];
-                int seasonNum = actualSb.Season;
+                int seasonNum = expectedSeasons[sIdx];
+                ReplaySeasonScoreboard actualSb = null;
+                foreach (var sb in _replayedScores) if (sb.Season == seasonNum) { actualSb = sb; break; }
                 ReplaySeasonScoreboard expSb = null;
                 if (_bundle.Summary?.Scoreboards != null)
+                    foreach (var sb in _bundle.Summary.Scoreboards) if (sb.Season == seasonNum) { expSb = sb; break; }
+
+                if (actualSb == null || expSb == null || expSb.Scores == null)
                 {
-                    foreach (var sb in _bundle.Summary.Scoreboards)
-                        if (sb.Season == seasonNum) { expSb = sb; break; }
+                    allSeasonsExact = false; if (seasonNum == finalSeasonNum) finalSeasonExact = false;
+                    rawMismatches.Add($"Season {seasonNum}: missing {(expSb == null ? "expected summary" : "replayed")} season scoreboard");
+                    continue;
                 }
 
-                if (expSb != null)
+                for (int stIdx = 0; stIdx < seatsList.Count; stIdx++)
                 {
-                    foreach (var actScore in actualSb.Scores)
+                    string seatId = seatsList[stIdx];
+                    ReplaySeatScore actScore = null;
+                    if (actualSb.Scores != null)
+                        foreach (var sc in actualSb.Scores) if (string.Equals(sc.SeatId, seatId, StringComparison.Ordinal)) { actScore = sc; break; }
+                    ReplaySeatScore expScore = null;
+                    foreach (var sc in expSb.Scores) if (string.Equals(sc.SeatId, seatId, StringComparison.Ordinal)) { expScore = sc; break; }
+
+                    if (actScore == null || expScore == null)
                     {
-                        ReplaySeatScore expScore = null;
-                        foreach (var sc in expSb.Scores)
-                            if (string.Equals(sc.SeatId, actScore.SeatId, StringComparison.Ordinal)) { expScore = sc; break; }
+                        allSeasonsExact = false; if (seasonNum == finalSeasonNum) finalSeasonExact = false;
+                        rawMismatches.Add($"Season {seasonNum} {seatId}: missing faction scoreboard entry in {(expScore == null ? "summary" : "replayed state")}");
+                        continue;
+                    }
 
-                        if (expScore != null)
+                    if ((expScore.MissingFields != null && expScore.MissingFields.Count > 0) || string.IsNullOrEmpty(expScore.SeatId) || string.IsNullOrEmpty(expScore.Faction))
+                    {
+                        allSeasonsExact = false; if (seasonNum == finalSeasonNum) finalSeasonExact = false;
+                        string missingList = expScore.MissingFields != null && expScore.MissingFields.Count > 0 ? string.Join(",", expScore.MissingFields) : "seat_id/faction";
+                        rawMismatches.Add($"Season {seasonNum} {seatId}: incomplete scoreboard entry in summary (missing: {missingList})");
+                    }
+
+                    int dGold = actScore.Gold - expScore.Gold, dFood = actScore.Food - expScore.Food;
+                    int dPop = actScore.Population - expScore.Population, dGar = actScore.Garrison - expScore.Garrison;
+                    int dCities = actScore.Cities - expScore.Cities;
+                    bool factionMatch = string.Equals(actScore.Faction, expScore.Faction, StringComparison.Ordinal);
+
+                    if (dGold != 0 || dFood != 0 || dPop != 0 || dGar != 0 || dCities != 0 || !factionMatch)
+                    {
+                        allSeasonsExact = false; if (seasonNum == finalSeasonNum) finalSeasonExact = false;
+                        rawMismatches.Add($"Season {seasonNum} {actScore.SeatId} ({actScore.Faction}): Gold delta={dGold} (act={actScore.Gold}, exp={expScore.Gold}), Food delta={dFood} (act={actScore.Food}, exp={expScore.Food}), Pop delta={dPop}, Gar delta={dGar}, Cities delta={dCities}{(factionMatch ? "" : $", Faction mismatch: act='{actScore.Faction}', exp='{expScore.Faction}'")}");
+                    }
+
+                    if (seasonNum == finalSeasonNum)
+                    {
+                        finalSeasonSeatsVerified++;
+                        if (actScore.SeatId == "seat-0")
                         {
-                            int dGold = actScore.Gold - expScore.Gold, dFood = actScore.Food - expScore.Food;
-                            int dPop = actScore.Population - expScore.Population, dGar = actScore.Garrison - expScore.Garrison;
-                            int dCities = actScore.Cities - expScore.Cities;
-
-                            if (dGold != 0 || dFood != 0 || dPop != 0 || dGar != 0 || dCities != 0)
-                            {
-                                allSeasonsExact = false;
-                                rawMismatches.Add($"Season {seasonNum} {actScore.SeatId} ({actScore.Faction}): Gold delta={dGold} (act={actScore.Gold}, exp={expScore.Gold}), Food delta={dFood} (act={actScore.Food}, exp={expScore.Food}), Pop delta={dPop}, Gar delta={dGar}, Cities delta={dCities}");
-                            }
-
-                            if (seasonNum == finalSeasonNum)
-                            {
-                                if (dGold != 0 || dFood != 0 || dPop != 0 || dGar != 0 || dCities != 0) finalSeasonExact = false;
-                                if (actScore.SeatId == "seat-0")
-                                {
-                                    weiFinalFood = actScore.Food; weiFinalGold = actScore.Gold; weiFinalPop = actScore.Population; weiFinalGar = actScore.Garrison;
-                                    weiExpFood = expScore.Food; weiExpGold = expScore.Gold; weiExpPop = expScore.Population; weiExpGar = expScore.Garrison;
-                                }
-                                else if (actScore.SeatId == "seat-1")
-                                {
-                                    shuFinalFood = actScore.Food; shuFinalGold = actScore.Gold; shuFinalPop = actScore.Population; shuFinalGar = actScore.Garrison;
-                                    shuExpFood = expScore.Food; shuExpGold = expScore.Gold; shuExpPop = expScore.Population; shuExpGar = expScore.Garrison;
-                                }
-                            }
+                            weiFinalFood = actScore.Food; weiFinalGold = actScore.Gold; weiFinalPop = actScore.Population; weiFinalGar = actScore.Garrison;
+                            weiExpFood = expScore.Food; weiExpGold = expScore.Gold; weiExpPop = expScore.Population; weiExpGar = expScore.Garrison;
+                        }
+                        else if (actScore.SeatId == "seat-1")
+                        {
+                            shuFinalFood = actScore.Food; shuFinalGold = actScore.Gold; shuFinalPop = actScore.Population; shuFinalGar = actScore.Garrison;
+                            shuExpFood = expScore.Food; shuExpGold = expScore.Gold; shuExpPop = expScore.Population; shuExpGar = expScore.Garrison;
                         }
                     }
                 }
+                if (seasonNum == finalSeasonNum) finalSeasonVerified = true;
             }
+
+            if (!finalSeasonVerified || finalSeasonSeatsVerified < seatsList.Count)
+            { finalSeasonExact = false; allSeasonsExact = false; }
 
             ParseLoggedPositions(out var observedEntities, out var inferredMoves);
             var checks = new List<ReplayPositionCheck>();
@@ -126,8 +174,7 @@ namespace LuanShi.Engine
                 if (!observedEntities.TryGetValue(ent.id, out var obs))
                 {
                     unverifiedCount++;
-                    pc = new ReplayPositionCheck
-                    {
+                    pc = new ReplayPositionCheck {
                         EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
                         ExpectedX = null, ExpectedZ = null, ActualX = ent.actX, ActualZ = ent.actZ,
                         Matched = false, VerifiedByLogs = false, VerificationKind = ReplayPositionVerificationKind.UnverifiedSceneSetup,
@@ -139,8 +186,7 @@ namespace LuanShi.Engine
                     cmdCount++;
                     bool matched = ent.actX == move.x && ent.actZ == move.z;
                     if (matched) cmdMatched++;
-                    pc = new ReplayPositionCheck
-                    {
+                    pc = new ReplayPositionCheck {
                         EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
                         ExpectedX = move.x, ExpectedZ = move.z, ActualX = ent.actX, ActualZ = ent.actZ,
                         Matched = matched, VerifiedByLogs = true, VerificationKind = ReplayPositionVerificationKind.AcceptedCommandInference,
@@ -153,8 +199,7 @@ namespace LuanShi.Engine
                     directCount++;
                     bool matched = ent.actX == obs.x && ent.actZ == obs.z;
                     if (matched) directMatched++;
-                    pc = new ReplayPositionCheck
-                    {
+                    pc = new ReplayPositionCheck {
                         EntityId = ent.id, EntityKind = ent.kind, OwnerSeatId = ent.owner,
                         ExpectedX = obs.x, ExpectedZ = obs.z, ActualX = ent.actX, ActualZ = ent.actZ,
                         Matched = matched, VerifiedByLogs = true, VerificationKind = ReplayPositionVerificationKind.DirectObservation,
@@ -183,6 +228,7 @@ namespace LuanShi.Engine
                 RejectedActionsReplayed = _rejectedActionsReplayed,
                 UnexpectedRejections = _unexpectedRejections,
                 UnexpectedAcceptances = _unexpectedAcceptances,
+                RejectionReasonMismatches = _rejectionReasonMismatches,
                 ActionOutcomeMismatches = _actionOutcomeMismatches,
                 ActionDiscrepancies = _actionDiscrepancies,
                 ExpectedVoluntaryEndTurns = _expectedVoluntaryEndTurns,
@@ -207,11 +253,12 @@ namespace LuanShi.Engine
                 ProposedFloatingPointNotes = new[]
                 {
                     "In Season 1 EndSeason, city tax is calculated as (int)(Population * 0.01f).",
-                    "With Season 1 starting population 9000, 9000 * 0.01f evaluates to 89 in Unity Mono (F64 CIL evaluation stack) vs 90 in .NET CoreCLR (F32 native single precision), producing +1 gold across S1-S5 for both Wei and Shu.",
+                    "With Season 1 starting population 9000, 9000 * 0.01f evaluates to 89 in Unity Mono (F64 CIL evaluation stack) vs 90 in .NET CoreCLR (F32 native single precision), producing +1 gold across S1-S5 for both Wei and Shu (Wei final gold 1742 vs 1741, Shu final gold 1249 vs 1248).",
                     "In Season 1 EndSeason, city food consumption/harvest is (int)(9000 * 0.02f + 50f) = 230 in CoreCLR F32 vs 229 in Mono F64 (-1 food for Wei in S1-S4: 1111 vs 1112, 866 vs 867, 1089 vs 1090, 574 vs 575).",
                     "In Season 5, (int)(300f * 1.6f * 0.7f) evaluates to 336 in CoreCLR vs 335 in Mono, exactly offsetting the -1 food delta so Season 5 final Wei food matches 100% exactly (243 vs 243).",
                     "All population, garrison, and city values match 100% exactly across all 5 seasons.",
-                    "Raw observation hashes differ in Seasons 2-5 due to the Season 1 +1 gold / -1 food float truncation carryover in serialized city state and city_resolved event payloads."
+                    "Raw observation hashes differ in Seasons 2-5 (10/44 matched, 34 mismatches) due to the Season 1 +1 gold / -1 food float truncation carryover in serialized city state and city_resolved event payloads.",
+                    "A separate standalone Unity Mono CLI executable (MonoBleedingEdge/bin/mono.exe against unityjit-win32) matched this run (44/44 hashes, 0 resource deltas), confirming the (int)(9000 * 0.01f) F64-vs-F32 truncation cause, but that separate Mono executable is not an interactive Unity Editor Play Mode result."
                 },
                 DisclosedDependencies = new[]
                 {
@@ -219,7 +266,8 @@ namespace LuanShi.Engine
                     "easy-research balance profile: starting food 1500, gold 900, base harvest 300, 0.5x upkeep & domestic gold cost.",
                     "JIT Float Evaluation (Unity Mono F64 CIL stack vs .NET CoreCLR F32): at S1 pop=9000, (int)(9000*0.01f) is 89 in Mono F64 vs 90 in CoreCLR F32 (+1 gold).",
                     "MapData / Scene Setup: 26x17 staggered hex grid matching TBTK layout.",
-                    "Neutral city-south (12,2) and watch-tower-1 (6,2): never in fog-of-war sight in JSONL; positions come from scene setup."
+                    "Neutral city-south (12,2) and watch-tower-1 (6,2): never in fog-of-war sight in JSONL; positions come from scene setup.",
+                    "Rejection category and validator reason comparison (parse_failure vs engine_validation_failure + ResultError) is implemented; run-20261109082434809-51b7ebd5 itself contains 0 rejected actions (42 accepted + 2 voluntary end_turns)."
                 },
                 RawExactMatch = rawExact
             };
@@ -282,12 +330,7 @@ namespace LuanShi.Engine
 
         public static MapData BuildDefaultStaggeredHexMap(int width = 26, int height = 17)
         {
-            var map = new MapData
-            {
-                Width = width, Height = height,
-                Walkable = new bool[width * height], Cost = new int[width * height],
-                Neighbors = new int[width * height][]
-            };
+            var map = new MapData { Width = width, Height = height, Walkable = new bool[width * height], Cost = new int[width * height], Neighbors = new int[width * height][] };
             for (int x = 0; x < width; x++)
                 for (int z = 0; z < height; z++)
                 {
@@ -308,11 +351,8 @@ namespace LuanShi.Engine
                     for (int o = 0; o < offsets.Length; o++)
                     {
                         int nx = x + offsets[o][0], nz = z + offsets[o][1];
-                        if (nx >= 0 && nx < width && nz >= 0 && nz < height)
-                        {
-                            int ni = map.Index(nx, nz);
-                            if (map.Walkable[ni]) list.Add(ni);
-                        }
+                        if (nx >= 0 && nx < width && nz >= 0 && nz < height && map.Walkable[map.Index(nx, nz)])
+                            list.Add(map.Index(nx, nz));
                     }
                     map.Neighbors[i] = list.ToArray();
                 }
