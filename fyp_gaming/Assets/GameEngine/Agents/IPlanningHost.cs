@@ -15,4 +15,15 @@ namespace LuanShi.Engine
         MovementView PlanMovement();
         bool IsGameOver { get; }
     }
+
+    /// <summary>
+    /// A planning host that can also offer seat-safe attack and assault candidates. The runner uses
+    /// it only when <see cref="LlmConfig.EnableAttack"/> is on; a planning host without this
+    /// interface keeps the march-only demo behaviour. <see cref="PlanAttacks"/> must be a read-only,
+    /// seat-filtered query (see <see cref="AttackPlanner.Build"/>).
+    /// </summary>
+    public interface IAttackPlanningHost : IPlanningHost
+    {
+        AttackView PlanAttacks();
+    }
 }

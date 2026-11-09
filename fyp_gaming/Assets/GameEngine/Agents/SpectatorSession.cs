@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : IPlanningHost, IPersonaHost
+        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -71,6 +71,12 @@ namespace LuanShi.Engine
 
             /// <summary>Seat-safe candidates for this host's own seat (read-only).</summary>
             public MovementView PlanMovement() => MovementPlanner.Build(_engine, _seatId);
+
+            /// <summary>
+            /// Seat-safe attack/assault candidates. Only consulted when the config opts in
+            /// (<see cref="LlmConfig.EnableAttack"/>), so the default prompt is unchanged.
+            /// </summary>
+            public AttackView PlanAttacks() => AttackPlanner.Build(_engine, _seatId);
 
             /// <summary>Authoritative terminal signal, never a cached observation or display value.</summary>
             public bool IsGameOver => _engine.State.WinnerSeatId != null;

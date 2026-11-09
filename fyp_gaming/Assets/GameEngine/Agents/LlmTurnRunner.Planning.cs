@@ -14,6 +14,12 @@ namespace LuanShi.Engine
         private bool HasPlanningHost => _host is IPlanningHost;
 
         /// <summary>
+        /// Attack and assault orders are advertised, parsed and submitted only when the config opts in
+        /// AND the host can plan them. Either missing means the march-only behaviour, exactly as before.
+        /// </summary>
+        private bool AttackActive => _config.EnableAttack && _host is IAttackPlanningHost;
+
+        /// <summary>
         /// Calls the host's read-only movement query and rejects a view built for another seat.
         /// A null view is allowed (the host may have no map); it means no advertised options.
         /// </summary>
@@ -26,6 +32,22 @@ namespace LuanShi.Engine
             if (movement != null && !string.IsNullOrEmpty(movement.SeatId)
                 && !string.Equals(movement.SeatId, _seatId, StringComparison.Ordinal))
             { failure = "movement view seat mismatch"; return false; }
+            return true;
+        }
+
+        /// <summary>
+        /// Calls the host's read-only attack query and rejects a view built for another seat.
+        /// A null view is allowed and advertises nothing.
+        /// </summary>
+        private bool TryPlanAttacks(out AttackView attacks, out string failure)
+        {
+            attacks = null;
+            failure = null;
+            try { attacks = ((IAttackPlanningHost)_host).PlanAttacks(); }
+            catch (Exception) { failure = "host attack query failed"; return false; }
+            if (attacks != null && !string.IsNullOrEmpty(attacks.SeatId)
+                && !string.Equals(attacks.SeatId, _seatId, StringComparison.Ordinal))
+            { failure = "attack view seat mismatch"; return false; }
             return true;
         }
 

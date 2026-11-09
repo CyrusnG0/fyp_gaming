@@ -199,16 +199,17 @@ namespace LuanShi.Engine
         public static string UserPrompt(Observation observation, IReadOnlyList<ActionOption> options,
             IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft,
             MovementView movement, IReadOnlyList<LlmMemory> memories = null,
-            string inquiryResult = null, bool inquiryEnabled = false, LlmPersona persona = null)
+            string inquiryResult = null, bool inquiryEnabled = false, LlmPersona persona = null,
+            bool attackEnabled = false)
         {
+            string version = VersionFor(true, inquiryEnabled, persona, attackEnabled);
             if (movement == null)
                 return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                    VersionFor(true, inquiryEnabled, persona), null, memories, inquiryResult, persona);
+                    version, null, memories, inquiryResult, persona);
 
-            string version = VersionFor(true, inquiryEnabled, persona);
             string full = BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
                 version, MovementOptionsText(movement), memories, inquiryResult, persona);
-            int sysLen = SystemPromptFor(true, inquiryEnabled, persona).Length;
+            int sysLen = SystemPromptFor(true, inquiryEnabled, persona, attackEnabled).Length;
             if (sysLen + full.Length <= MaxPromptChars)
                 return full;
 

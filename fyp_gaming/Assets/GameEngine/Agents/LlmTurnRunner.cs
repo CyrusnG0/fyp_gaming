@@ -322,6 +322,12 @@ namespace LuanShi.Engine
             if (planning && !TryPlanMovement(out movement, out string movementFailure))
             { FinishFailed(movementFailure, EndReason.HostError); return; }
 
+            // Opt-in attack/capture candidates; null (and a byte-identical prompt) unless enabled.
+            bool attackOn = AttackActive;
+            AttackView attacks = null;
+            if (attackOn && !TryPlanAttacks(out attacks, out string attackFailure))
+            { FinishFailed(attackFailure, EndReason.HostError); return; }
+
             // The prompt carries a bounded event history; record exactly that same JSON, not the full one.
             string observationJson = PromptBuilder.BoundedObservationJson(observation);
             // The private result is consumed by exactly this prompt; it never survives into a
@@ -330,14 +336,14 @@ namespace LuanShi.Engine
             bool inquiry = _config.EnableManualLookup;
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
             CurrentPersonaId = persona?.Id;
-            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona);
-            List<ActionOption> options = ActionCatalogue.Build(observation);
+            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn);
+            List<ActionOption> options = ActionCatalogue.Build(observation, attacks);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             string user = planning
                 ? PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), movement, relevantMemories,
-                    inquiryResult, inquiry, persona)
+                    inquiryResult, inquiry, persona, attackOn)
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     RemainingRequests(), RemainingActions(), relevantMemories, inquiryResult,
                     inquiry, persona);
@@ -345,8 +351,8 @@ namespace LuanShi.Engine
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
-            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona);
-            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona);
+            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn);
+            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
