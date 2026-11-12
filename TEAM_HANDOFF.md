@@ -9,7 +9,7 @@ Our milestone is a real two-LLM match in which both can make informed decisions,
 ## Start here
 
 1. Fetch `origin/main`. The coordinator's local remote-tracking ref was `8c879fe` when this handoff was written. If main has advanced, post the new SHA in the group chat and confirm the task baseline before starting.
-2. Claim one task card and create your own branch from current main. Open the inner `fyp_gaming/` folder in Unity. Work only in the files listed in your card. Read those files and the dependencies named in the card. Stop and post the exact file and reason if you need a scope expansion.
+2. Claim one task card and create your own branch. Use `codex/team-integration` for work intended for the combined build, or current main for a clean baseline comparison. Follow the [integration README](fyp_gaming/README.md). Open the inner `fyp_gaming/` folder in Unity. Work only in the files listed in your card. Read those files and the dependencies named in the card. Stop and post the exact file and reason if you need a scope expansion.
 3. Use your own API key via `LUANSHI_LLM_API_KEY`. Put local settings in `fyp_gaming/llm.local.json`. Commit only sanitized profile templates. Keep keys, local configs, raw exchanges and run data out of Git. The coordinator can share approved redacted evidence privately.
 4. Keep commits on your branch. Send the commit SHA and evidence in the group chat. The integration owner coordinates sharing, pushing and merging. Never edit another person's branch or files.
 
@@ -32,7 +32,7 @@ dotnet run --project fyp_gaming/Tests/ResponseDiagnostics/ResponseDiagnostics.cs
 | Deliberation foundation | `DeliberationBudget*.cs` on main | Ledger exists. Runner wiring, extra inquiry routes and strategic-note behavior need design and implementation. Manual lookup is the only currently wired inquiry. |
 | Diplomacy and research | `fyp_gaming/Assets/GameEngine/ActionCommand.cs`, `GameEngine.cs` | Existing engine actions need explicit LLM-facing contracts, legal options, visibility rules and end-to-end tests. The baseline match provides no evidence of either feature working through the LLM. |
 
-Branch names above identify the coordinator's local candidates. The teammate can work from main while the integration owner publishes or incorporates approved changes.
+The integration branch combines the combat, expanded manual and replay candidates listed above. Use its README for branch setup and the pending verification for each candidate.
 
 ### Recorded baseline to beat
 
