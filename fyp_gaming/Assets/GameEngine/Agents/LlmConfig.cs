@@ -34,6 +34,14 @@ namespace LuanShi.Engine
         /// </summary>
         public bool EnablePersonas;
 
+        /// <summary>
+        /// Opt-in attack and assault orders, default OFF. When true and the host can plan attacks
+        /// (<see cref="IAttackPlanningHost"/>), the prompt appends the attack rules and lists the
+        /// engine-computed attack_army / attack_city candidates, and the parser accepts those two
+        /// orders. When false the prompt text, version, hash and parser vocabulary are unchanged.
+        /// </summary>
+        public bool EnableAttack;
+
         public int MaxRequestsPerTurn = 6;
         public int MaxActionsPerTurn = 5;
         public int MaxInvalidPerTurn = 2;
@@ -97,7 +105,7 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
-        /// enable_personas, personas.
+        /// enable_personas, enable_attack, personas.
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
         {
@@ -146,6 +154,7 @@ namespace LuanShi.Engine
             // Appending only when enabled keeps the legacy disabled diagnostic byte-for-byte unchanged.
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
             if (EnablePersonas) sb.Append("; personas=true");
+            if (EnableAttack) sb.Append("; attack=true");
             return sb.ToString();
         }
 
@@ -179,6 +188,8 @@ namespace LuanShi.Engine
                         EnableManualLookup = Bool(field.Value, EnableManualLookup); break;
                     case "enable_personas":
                         EnablePersonas = Bool(field.Value, EnablePersonas); break;
+                    case "enable_attack":
+                        EnableAttack = Bool(field.Value, EnableAttack); break;
                     case "personas":
                         if (field.Value is JsonObject personasObj)
                         {

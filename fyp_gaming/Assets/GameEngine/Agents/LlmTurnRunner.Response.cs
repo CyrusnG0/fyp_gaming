@@ -116,7 +116,7 @@ namespace LuanShi.Engine
                 return;
             }
 
-            ParseResult parsed = LlmActionParser.Parse(response.Text);
+            ParseResult parsed = LlmActionParser.Parse(response.Text, AttackActive);
             if (!parsed.Ok)
             {
                 InvalidThisTurn++;
@@ -212,7 +212,8 @@ namespace LuanShi.Engine
                 accepted = validation.Ok;
                 // Deny-by-default feedback: raw engine text can distinguish a hidden-but-existing
                 // id from a nonexistent one, so only the typed allowlist reaches the model.
-                resultError = accepted ? null : FeedbackPolicy.ForModel(validation.Error);
+                resultError = accepted ? null
+                    : FeedbackPolicy.ForModel(validation.Error, command, flight.Observation);
             }
             catch (Exception)
             {
@@ -240,7 +241,8 @@ namespace LuanShi.Engine
             StoreMemory(LlmMemoryExtractor.FromSummary(_gameId, _seatId, flight.Season,
                 action.Summary ?? action.Reason));
 
-            string capture = accepted && action.Type == ActionType.March
+            string capture = accepted
+                && (action.Type == ActionType.March || action.Type == ActionType.AttackCity)
                 ? CapturedCityName(flight, action) : null;
             string resultText = accepted ? "Accepted by engine." : "Rejected: " + LastResult;
             if (!string.IsNullOrEmpty(capture)) resultText += " Captured " + capture + ".";
@@ -283,8 +285,9 @@ namespace LuanShi.Engine
 
         private static string ActivityCommandText(LlmAction action)
         {
-            if (action.Type == ActionType.March)
-                return "march " + (action.TargetId ?? "?") + " -> ("
+            if (action.Type == ActionType.March || action.Type == ActionType.AttackArmy
+                || action.Type == ActionType.AttackCity)
+                return action.Type + " " + (action.TargetId ?? "?") + " -> ("
                      + action.ParamA.ToString(System.Globalization.CultureInfo.InvariantCulture) + ","
                      + action.ParamB.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
 

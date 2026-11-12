@@ -80,11 +80,17 @@ namespace LuanShi.Engine
             Field(sb, "state", session.State.ToString(), config, true);
             Field(sb, "provider", provider, config, true);
             Field(sb, "model", model, config, true);
-            Field(sb, "prompt_version", config != null && config.EnablePersonas
-                ? PromptBuilder.PersonaPromptVersion : PromptBuilder.VersionFor(true, config != null && config.EnableManualLookup), config, true);
+            bool inquiry = config != null && config.EnableManualLookup;
+            bool personas = config != null && config.EnablePersonas;
+            // Spectator seats always expose attack planning, so the opt-in flag alone selects the
+            // attack prompt identity here.
+            bool attack = config != null && config.EnableAttack;
+            Field(sb, "prompt_version",
+                PromptBuilder.VersionFor(true, inquiry, personas, attack), config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
-            Field(sb, "schema_hash", config != null && config.EnablePersonas
-                ? "per-request" : PromptBuilder.SchemaHashFor(true, config != null && config.EnableManualLookup), config, true);
+            Field(sb, "schema_hash",
+                personas ? "per-request" : PromptBuilder.SchemaHashFor(true, inquiry, null, attack),
+                config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);
             Field(sb, "end_utc", Utc(end), config, true);

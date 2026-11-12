@@ -50,7 +50,26 @@ namespace LuanShi.Engine
         /// <summary>The exact demo-slice vocabulary, in catalogue order (domestic orders, march, end_turn).</summary>
         public static IReadOnlyCollection<string> SupportedTypes => VocabularyView;
 
-        public static ParseResult Parse(string modelText)
+        /// <summary>Opt-in attack vocabulary, accepted only by <see cref="Parse(string,bool)"/> with allowAttack.</summary>
+        private static readonly string[] AttackVocabulary = { ActionType.AttackArmy, ActionType.AttackCity };
+
+        private static readonly ReadOnlyCollection<string> AttackVocabularyView = Array.AsReadOnly(AttackVocabulary);
+        private static readonly HashSet<string> AttackSet =
+            new HashSet<string>(AttackVocabulary, StringComparer.Ordinal);
+
+        /// <summary>attack_army and attack_city, in catalogue order. Not part of <see cref="SupportedTypes"/>.</summary>
+        public static IReadOnlyCollection<string> AttackTypes => AttackVocabularyView;
+
+        /// <summary>The unchanged demo vocabulary: an attack type here is an "unsupported action type".</summary>
+        public static ParseResult Parse(string modelText) => Parse(modelText, false);
+
+        /// <summary>
+        /// With <paramref name="allowAttack"/> the two attack orders join the vocabulary; they take the
+        /// same fixed shape as march (own army id plus two small integer coordinates). The flag only
+        /// widens the vocabulary — the host must also have advertised the order, and the engine
+        /// still decides legality.
+        /// </summary>
+        public static ParseResult Parse(string modelText, bool allowAttack)
         {
             if (!UnwrapFence(modelText, out string json, out string error))
                 return ParseResult.Failure(error);
@@ -111,7 +130,9 @@ namespace LuanShi.Engine
             }
 
             if (type == null) return ParseResult.Failure("type is required");
-            if (!VocabularySet.Contains(type)) return ParseResult.Failure("unsupported action type");
+            bool attackType = AttackSet.Contains(type);
+            if (!VocabularySet.Contains(type) && !(allowAttack && attackType))
+                return ParseResult.Failure("unsupported action type");
 
             bool endTurn = type == EndTurnType;
             if (endTurn)
@@ -126,9 +147,10 @@ namespace LuanShi.Engine
                 return ParseResult.Failure("target is required");
             }
 
-            // A march carries the destination as two required small integers (map coordinates).
-            // The model never supplies a path or a cost; the engine revalidates the destination.
-            if (type == ActionType.March)
+            // A march carries the destination as two required small integers (map coordinates); an
+            // attack carries the target hex the same way. The model never supplies a path, a cost or
+            // an odds figure; the engine revalidates the hex.
+            if (type == ActionType.March || attackType)
             {
                 if (!hasParamA || !hasParamB)
                     return ParseResult.Failure("coordinates are required");

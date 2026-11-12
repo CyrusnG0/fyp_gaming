@@ -15,6 +15,7 @@ internal static partial class Harness
         RunSpectatorResume();
         RunSpectatorFailurePolicy();
         RunSpectatorSummary();
+        RunSpectatorSummaryPromptIdentity();
         RunSpectatorPromptIsolation();
         RunSpectatorDeterministic();
         RunSpectatorLivePilotOffline();
@@ -401,6 +402,71 @@ internal static partial class Harness
                 Check(!text.Contains(LlmFakeKey) && !text.Contains("Bearer "),
                     "[DEMO-E1] the summary never contains the API key or headers");
             }
+        }
+        finally { LlmDelete(dir); }
+    }
+
+    // ---- 5b: summary prompt identity ----------------------------------------
+
+    private static void RunSpectatorSummaryPromptIdentity()
+    {
+        Section("Spectator summary: prompt version and hash follow the attack/persona opt-ins [DEMO-E1]");
+
+        // Persona text changes by faction, which is why a persona run cannot report one hash.
+        Check(PromptBuilder.SchemaHashFor(true, false, LlmPersona.ShuAggressive, false)
+              != PromptBuilder.SchemaHashFor(true, false, LlmPersona.WeiMild, false),
+            "[DEMO-E1] persona hashes differ by faction");
+
+        SpectatorSummaryIdentity("attack off, personas off", false, false,
+            PromptBuilder.PromptVersion, PromptBuilder.SchemaHash());
+        SpectatorSummaryIdentity("attack on, personas off", true, false,
+            PromptBuilder.AttackPromptVersion,
+            PromptBuilder.SchemaHashFor(true, false, null, true));
+        SpectatorSummaryIdentity("attack off, personas on", false, true,
+            PromptBuilder.PersonaPromptVersion, "per-request");
+        SpectatorSummaryIdentity("attack on, personas on", true, true,
+            PromptBuilder.AttackPromptVersion, "per-request");
+    }
+
+    /// <summary>
+    /// Plays one season with the given opt-ins, writes the pilot summary and checks that the
+    /// reported prompt identity is both the expected one and the one the runner actually used.
+    /// </summary>
+    private static void SpectatorSummaryIdentity(string label, bool attack, bool personas,
+        string expectedVersion, string expectedHash)
+    {
+        string dir = LlmTempDir("pilot-identity");
+        try
+        {
+            var config = new LlmConfig
+            {
+                MaxRequestsPerTurn = 4, MaxActionsPerTurn = 2, MaxTotalRequests = 20,
+                EnableAttack = attack, EnablePersonas = personas,
+            };
+            var engine = SpectatorEngine();
+            var fake = new FakeLlmTransport();
+            SpectatorQueueSeasons(fake, 1);
+            var runner = SpectatorRunner(fake, config);
+            var session = SpectatorNew(engine, runner, 1);
+            session.Start();
+            SpectatorDrain(session);
+            Check(session.State == SpectatorState.Completed && fake.CallCount == 4,
+                "[DEMO-E1] " + label + ": one season completes with four provider calls");
+
+            string path = SpectatorSummary.Write(dir, session, config, fake, runner);
+            bool parsed = StrictJson.TryParse(File.Exists(path) ? File.ReadAllText(path) : "",
+                out JsonNode root, out string error);
+            var obj = root as JsonObject;
+            Check(parsed && obj != null
+                  && LlmStr(obj, "prompt_version") == expectedVersion
+                  && LlmStr(obj, "schema_hash") == expectedHash,
+                "[DEMO-E1] " + label + ": summary reports " + expectedVersion
+                + " / " + expectedHash + (parsed ? "" : ": " + error));
+
+            string systems = string.Join("\n", fake.Requests.Select(r => r.System));
+            Check(systems.Contains("ATTACK AND CAPTURE") == attack
+                  && systems.Contains("FACTION PERSONA") == personas,
+                "[DEMO-E1] " + label + ": the reported identity matches the prompts sent");
         }
         finally { LlmDelete(dir); }
     }

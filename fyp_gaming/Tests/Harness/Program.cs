@@ -117,6 +117,9 @@ internal static partial class Harness
         RunLlmTerminal();
         RunMovementMemoryIntegration();
         RunDeliberationBudget();
+        RunAttackOptions();
+        RunLlmAttack();
+        RunAttackFeedback();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;

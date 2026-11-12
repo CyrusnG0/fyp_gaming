@@ -341,8 +341,17 @@ namespace LuanShi
             ValidationResult result = engine.SubmitAs(seatId, agentSeatToken, cmd);
             agentLastActionType = cmd != null ? cmd.Type : null;
             // A model march must move the same banner and refresh the same fog/tint view a human
-            // march does. Presentation only: the engine already executed the order above.
-            if (result.Ok && cmd != null && cmd.Type == ActionType.March)
+            // march does, and a model battle must leave the same map a human battle does: destroyed
+            // armies lose their banner, routed survivors and the occupying winner are re-placed, and
+            // the fog/tint view is re-read from the display seat's own observation. Presentation
+            // only: the engine already executed the order above.
+            if (result.Ok && cmd != null && IsBattle(cmd.Type))
+            {
+                SafeClearArmyMoveTargets();
+                SyncBattleVisuals();
+                RefreshObservation();
+            }
+            else if (result.Ok && cmd != null && cmd.Type == ActionType.March)
             {
                 SafeClearArmyMoveTargets();
                 SyncArmyVisual(cmd.TargetId);
@@ -378,7 +387,7 @@ namespace LuanShi
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
-        private sealed class AgentTurnHost : IPlanningHost, IPersonaHost
+        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost
         {
             private readonly KingdomDemo _owner;
             private readonly string _seatId;
@@ -389,6 +398,11 @@ namespace LuanShi
             public void EndTurn() => _owner.AgentEndTurnRequested();
             /// <summary>Read-only, seat-filtered candidates for this agent seat.</summary>
             public MovementView PlanMovement() => MovementPlanner.Build(_owner.engine, _seatId);
+            /// <summary>
+            /// Read-only, seat-filtered attack/assault candidates. Only consulted when the config
+            /// opts in (<see cref="LlmConfig.EnableAttack"/>), so the default prompt is unchanged.
+            /// </summary>
+            public AttackView PlanAttacks() => AttackPlanner.Build(_owner.engine, _seatId);
             /// <summary>Authoritative terminal signal from the engine, not a cached observation.</summary>
             public bool IsGameOver => _owner.engine != null && _owner.engine.State.WinnerSeatId != null;
         }
