@@ -67,6 +67,12 @@ namespace LuanShi
         [Tooltip("Seasons the spectator pilot plays before completing. The panel can extend it by 3.")]
         public int spectatorSeasons = 3;
 
+        [Header("Offline Match Replay (Zero API Calls)")]
+        [Tooltip("Third demo mode: offline playback of recorded 5-season match with zero live model calls. Overrides spectatorMode and human/LLM seats.")]
+        public bool replayMode;
+        [Tooltip("The run ID or directory containing recorded match evidence.")]
+        public string replayRunId = "run-20261109082434809-51b7ebd5";
+
         private GameEngine engine;
         private bool ready;
         private string initError;
@@ -174,6 +180,7 @@ namespace LuanShi
                 InitGame();
                 InitializeAgent();
                 InitializeSpectator();
+                InitializeReplay();
                 ready = true;
                 StartAgentTicker();
                 StartFirstPlannedTurn();
@@ -296,7 +303,7 @@ namespace LuanShi
         /// LLM membership wins over humanSeats so an old hotseat roster cannot claim the LLM seat.</summary>
         string ControlOf(string seatId)
         {
-            if (spectatorMode) return ControllerType.Llm;   // both seats are model-driven
+            if (replayMode || spectatorMode) return ControllerType.Llm;   // both seats are model-driven
             if (llmSeats != null)
                 foreach (var id in llmSeats)
                     if (id == seatId) return ControllerType.Llm;

@@ -50,6 +50,7 @@ namespace LuanShi
         /// <summary>Validates the LLM seat, loads llm.local.json (never logged raw) and builds the runner.</summary>
         void InitializeAgent()
         {
+            if (replayMode) return;
             // Spectator mode drives BOTH seats with one runner, so it does not depend on llmSeats.
             if (spectatorMode)
             {
@@ -149,7 +150,7 @@ namespace LuanShi
         }
         void StartAgentTicker()
         {
-            bool tick = spectatorMode
+            bool tick = replayMode ? _replaySession != null : spectatorMode
                 ? spectatorSession != null
                 : agentHasSeat || agentResumeAfterInterrupt;
             if (tick && agentTickLoop == null) agentTickLoop = StartCoroutine(AgentTickLoop());
@@ -162,7 +163,8 @@ namespace LuanShi
                 {
                     if (!pauseMenuOpen)
                     {
-                        if (spectatorMode) TickSpectator();
+                        if (replayMode) TickReplay();
+                        else if (spectatorMode) TickSpectator();
                         else TickAgent();
                     }
                 }

@@ -9,11 +9,12 @@ namespace LuanShi
 {
     public partial class KingdomDemo : MonoBehaviour
     {
-        bool SideDockVisible() => spectatorMode || agentHasSeat;
+        bool SideDockVisible() => replayMode || spectatorMode || agentHasSeat;
 
         /// <summary>The opaque side panel this layout must never slide under.</summary>
         Rect ActiveOverlayPanel()
         {
+            if (replayMode) return ReplayPanelArea();
             if (spectatorMode) return SpectatorPanelArea();
             if (agentHasSeat) return AgentPanelArea();
             return new Rect(0f, 0f, 0f, 0f);

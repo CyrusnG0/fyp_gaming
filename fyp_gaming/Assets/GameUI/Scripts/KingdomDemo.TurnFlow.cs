@@ -78,7 +78,7 @@ namespace LuanShi
         /// of agentHasSeat so an invalid llmSeats roster is still recognised as scripted-only.
         /// </summary>
         bool CanRunLlmSeat(string seatId)
-            => !spectatorMode && agentRunner != null
+            => !replayMode && !spectatorMode && agentRunner != null
                && (useFakeLlm || string.IsNullOrEmpty(agentUnavailableReason));
 
         bool RosterHasPlayableSeat()
@@ -92,7 +92,7 @@ namespace LuanShi
         /// </summary>
         void EndTurn()
         {
-            if (spectatorMode) return;   // SpectatorSession owns every turn
+            if (replayMode || spectatorMode) return;   // SpectatorSession owns every turn
             if (!ready || engine == null || string.IsNullOrEmpty(currentSeat)) return;
             if (reportShowing || handoverShowing) return;
             if (agentTurnActive || agentResumePending) return;   // repeat clicks while Shu is playing
@@ -114,7 +114,7 @@ namespace LuanShi
         /// </summary>
         void StartFirstPlannedTurn()
         {
-            if (spectatorMode || engine == null) return;
+            if (replayMode || spectatorMode || engine == null) return;
             StartPlannedTurn(TurnFlowPlanner.First(engine.State));
         }
 
@@ -339,7 +339,7 @@ namespace LuanShi
             BuildReport(report);
             pendingReport = true;
             handoverShowing = false;
-            if (spectatorMode) return;   // SpectatorSession owns the next season too
+            if (replayMode || spectatorMode) return;   // SpectatorSession owns the next season too
 
             StartPlannedTurn(TurnFlowPlanner.First(engine.State));
         }
@@ -352,7 +352,7 @@ namespace LuanShi
         /// </summary>
         public void DebugEndTurn()
         {
-            if (spectatorMode) return;   // a spectator may never advance a model seat
+            if (replayMode || spectatorMode) return;   // a spectator may never advance a model seat
             if (!ready || engine == null || uiInputLocked || reportShowing || handoverShowing) return;
             if (engine.State.WinnerSeatId != null) return;
             locationChoiceOpen = false;

@@ -38,6 +38,7 @@ namespace LuanShi
 
             // The spectator loop must never be blocked by a court report or a hotseat handover.
             if (spectatorMode) DismissSpectatorModals();
+            if (replayMode) DismissReplayModals();
 
             // Between human seats the whole screen is replaced by the handover blocker: the previous
             // player must not see the next player's map, panels or report (hotseat rule).
@@ -83,7 +84,8 @@ namespace LuanShi
             {
                 if (!reportShowing)
                 {
-                    if (spectatorMode)
+                    if (replayMode) DrawReplayPanel();
+                    else if (spectatorMode)
                     {
                         // No order panels: the spectator cannot select or command a seat.
                         DrawSpectatorPanel();
@@ -101,17 +103,17 @@ namespace LuanShi
 
             // A locked LLM turn may never expose a tab body. ShowTab also refuses to switch, but the
             // draw path keeps the invariant even if some other code changes activeTab.
-            bool tabBodyAllowed = !(uiInputLocked && !spectatorMode);
+            bool tabBodyAllowed = !(uiInputLocked && !spectatorMode && !replayMode);
             if (activeTab != "map" && !reportShowing && tabBodyAllowed)
                 DrawTabPanel(uiBody, uiButton, uiTitle, uiMono);
             if (reportShowing) DrawReport(uiBody, uiButton, uiTitle);
 
             // HUD overlay, not the map-tab branch: the Cancel button must stay reachable even if a
             // tab was open when the agent turn began. DrawAgentPanel adds/removes its uiRects entry.
-            if (!spectatorMode && !reportShowing && agentHasSeat)
+            if (!spectatorMode && !replayMode && !reportShowing && agentHasSeat)
                 DrawAgentPanel(AgentPanelArea());
 
-            if (!reportShowing) DrawAgentChat();
+            if (!reportShowing && !replayMode) DrawAgentChat();
 
             HandleClicks();
 
