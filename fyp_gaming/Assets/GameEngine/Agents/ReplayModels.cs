@@ -98,7 +98,13 @@ namespace LuanShi.Engine
         public bool ParseOk;
         public string CommandJson;
         public bool ResultOk;
+        /// <summary>True only when the record itself carried result_ok; ResultOk is otherwise derived.</summary>
+        public bool ResultRecorded;
         public string ResultError;
+        /// <summary>Recorded inquiry_tool (empty when the record is not an inquiry or the field is absent).</summary>
+        public string InquiryTool;
+        /// <summary>Recorded bounded inquiry result size; present when the runner wrote an inquiry result.</summary>
+        public int? InquiryResultChars;
         public string StateAfter;
         public string ErrorKind;
         public string ErrorDetail;

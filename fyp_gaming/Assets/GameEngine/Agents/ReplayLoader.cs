@@ -320,6 +320,8 @@ namespace LuanShi.Engine
                         RequestIndex = GetInt(obj, "request_index"), TotalRequests = GetInt(obj, "total_requests"),
                         RawModelText = raw, ParseOk = parseOk,
                         CommandJson = GetRawOrString(obj, "command_json"), ResultOk = resultOk,
+                        ResultRecorded = roNode is JsonBool, InquiryTool = GetString(obj, "inquiry_tool"),
+                        InquiryResultChars = GetNullableInt(obj, "inquiry_result_chars"),
                         ResultError = GetString(obj, "result_error"), StateAfter = GetString(obj, "state_after"),
                         FinishReason = GetString(obj, "finish_reason"), InputTokens = GetInt(obj, "input_tokens"),
                         OutputTokens = GetInt(obj, "output_tokens"), ReasoningTokens = GetInt(obj, "reasoning_tokens"),
@@ -362,6 +364,8 @@ namespace LuanShi.Engine
         private static string GetString(JsonObject obj, string key, string fallback = "") => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonString s ? s.Value : fallback;
         private static string GetRawOrString(JsonObject obj, string key) => obj != null && obj.TryGet(key, out JsonNode n) ? (n is JsonString s ? s.Value : n.ToString()) : "";
         private static int GetInt(JsonObject obj, string key, int fallback = 0) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? (int)i.Value : fallback;
+        private static int? GetNullableInt(JsonObject obj, string key)
+            => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? (int?)i.Value : null;
         private static long GetLong(JsonObject obj, string key, long fallback = 0) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? i.Value : fallback;
         private static bool GetBool(JsonObject obj, string key, bool fallback = false) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonBool b ? b.Value : fallback;
     }

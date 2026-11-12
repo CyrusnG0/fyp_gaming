@@ -107,7 +107,9 @@ namespace LuanShi
         {
             GUI.Label(new Rect(x, y, width, 16f), "SEASON-BY-SEASON SUMMARY:", uiPanelTitle);
             y += 18f;
-            float viewH = height - 18f;
+            GUI.Label(new Rect(x, y, width, 14f), "Recorded historical results from the saved run, not live playback state.", uiHint);
+            y += 15f;
+            float viewH = height - 33f;
 
             var summaries = _replaySession != null ? _replaySession.SeasonSummaries : null;
             if (summaries == null || summaries.Count == 0)
@@ -116,7 +118,7 @@ namespace LuanShi
                 return;
             }
 
-            float contentHeight = summaries.Count * 85f + 10f;
+            float contentHeight = summaries.Count * 135f + 10f;
             Rect viewRect = new Rect(x, y, width, viewH);
             _replaySeasonsScroll = GUI.BeginScrollView(viewRect, _replaySeasonsScroll, new Rect(0, 0, width - 20f, contentHeight));
 
@@ -127,33 +129,37 @@ namespace LuanShi
             {
                 var s = summaries[i];
                 DrawSolidColor(new Rect(0, rowY, innerW, 16f), new Color(0.2f, 0.2f, 0.25f, 0.8f));
-                GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), $"[SEASON {s.Season} SUMMARY]", uiPanelTitle);
+                GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), $"[SEASON {s.Season} SUMMARY - recorded result{ReplaySeasonProgressNote(s.Season)}]", uiPanelTitle);
                 rowY += 18f;
-
-                if (s.Wei != null)
-                {
-                    GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f),
-                        $"Wei: Food {s.Wei.BeforeFood}->{s.Wei.AfterFood}, Gold {s.Wei.BeforeGold}->{s.Wei.AfterGold} | Actions: {s.Wei.ActionCountsSummary} | Lookups: {s.Wei.Lookups}", uiSmall);
-                    rowY += 15f;
-                    GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f),
-                        $"Troops: {s.Wei.TroopSummary}", uiHint);
-                    rowY += 15f;
-                }
-
-                if (s.Shu != null)
-                {
-                    GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f),
-                        $"Shu: Food {s.Shu.BeforeFood}->{s.Shu.AfterFood}, Gold {s.Shu.BeforeGold}->{s.Shu.AfterGold} | Actions: {s.Shu.ActionCountsSummary} | Lookups: {s.Shu.Lookups}", uiSmall);
-                    rowY += 15f;
-                    GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f),
-                        $"Troops: {s.Shu.TroopSummary}", uiHint);
-                    rowY += 15f;
-                }
+                rowY = DrawReplaySideSummary(s.Wei, rowY, innerW);
+                rowY = DrawReplaySideSummary(s.Shu, rowY, innerW);
 
                 rowY += 6f;
             }
 
             GUI.EndScrollView();
+        }
+
+        // Summaries are recorded history and can be opened at any time; say so when playback has
+        // not finished the season they describe.
+        private string ReplaySeasonProgressNote(int season)
+        {
+            if (_replaySession == null || _replaySession.IsCompleted || season < _replaySession.CurrentSeason) return "";
+            return season == _replaySession.CurrentSeason
+                ? "; playback is in this season now"
+                : "; playback has not reached this season";
+        }
+
+        private float DrawReplaySideSummary(ReplaySideSeasonSummary side, float rowY, float innerW)
+        {
+            if (side == null) return rowY;
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f),
+                $"{side.Faction}: Food {side.BeforeFood}->{side.AfterFood}, Gold {side.BeforeGold}->{side.AfterGold} | Lookups: {side.LookupsDisplay}", uiSmall);
+            rowY += 15f;
+            GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f), $"Requests: {side.ActionCountsSummary}", uiHint);
+            rowY += 15f;
+            GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f), $"Troops: {side.TroopSummary}", uiHint);
+            return rowY + 15f + 6f;
         }
     }
 }
