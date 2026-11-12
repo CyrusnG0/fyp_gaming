@@ -7,14 +7,14 @@ Open this folder in Unity **6000.6.2f1**. The spectator scene is `Assets/GameUI/
 | Base | Use it for |
 | --- | --- |
 | `main` | Stable baseline and clean comparisons with the 20-season run. |
-| `codex/team-integration` | Shared test baseline combining the combat candidate, expanded manual, offline replay and its in-progress summary fixes. Start a task branch from this base when testing against the combined work. |
-| Your task branch | Your own changes. Open a PR targeting `codex/team-integration` when ready for the integration owner to review. |
+| `team-integration` | Shared test baseline combining the combat candidate, expanded manual, offline replay and its in-progress summary fixes. Start a task branch from this base when testing against the combined work. |
+| Your task branch | Your own changes. Open a PR targeting `team-integration` when ready for the integration owner to review. |
 
 Once the integration owner has published the branch, start from a clean checkout:
 
 ```sh
 git fetch origin
-git switch -c teammate/<task> origin/codex/team-integration
+git switch -c teammate/<task> origin/team-integration
 ```
 
 Record the starting SHA. Ask the integration owner before moving a change to `main`. Keep API keys, machine settings, paid run logs and raw exchanges local. Use a fake provider for initial tests.

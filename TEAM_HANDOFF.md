@@ -9,7 +9,7 @@ Our milestone is a real two-LLM match in which both can make informed decisions,
 ## Start here
 
 1. Fetch `origin/main`. The coordinator's local remote-tracking ref was `8c879fe` when this handoff was written. If main has advanced, post the new SHA in the group chat and confirm the task baseline before starting.
-2. Claim one task card and create your own branch. Use `codex/team-integration` for work intended for the combined build, or current main for a clean baseline comparison. Follow the [integration README](fyp_gaming/README.md). Open the inner `fyp_gaming/` folder in Unity. Work only in the files listed in your card. Read those files and the dependencies named in the card. Stop and post the exact file and reason if you need a scope expansion.
+2. Claim one task card and create your own branch. Use `team-integration` for work intended for the combined build, or current main for a clean baseline comparison. Follow the [integration README](fyp_gaming/README.md). Open the inner `fyp_gaming/` folder in Unity. Work only in the files listed in your card. Read those files and the dependencies named in the card. Stop and post the exact file and reason if you need a scope expansion.
 3. Use your own API key via `LUANSHI_LLM_API_KEY`. Put local settings in `fyp_gaming/llm.local.json`. Commit only sanitized profile templates. Keep keys, local configs, raw exchanges and run data out of Git. The coordinator can share approved redacted evidence privately.
 4. Keep commits on your branch. Send the commit SHA and evidence in the group chat. The integration owner coordinates sharing, pushing and merging. Never edit another person's branch or files.
 
