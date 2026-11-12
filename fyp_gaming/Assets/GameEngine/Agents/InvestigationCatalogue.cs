@@ -14,12 +14,15 @@ namespace LuanShi.Engine
     }
 
     /// <summary>
-    /// Finite, discoverable catalogue for the LS-018 read-only investigation foundation.
+    /// Finite, discoverable catalogue for the read-only investigation manual.
     ///
-    /// This is deliberately not the full game manual: it documents the implemented turn / command
-    /// point / fog rules and the seven domestic actions the current LLM action catalogue exposes.
-    /// Combat, pathfinding, diplomacy, espionage, research and deferred actions are NOT served here,
-    /// and unsupported requests return the bounded index instead of invented rules.
+    /// The frozen foundation is nine topics: the turn / command point and fog rules plus the seven
+    /// domestic actions the current LLM action catalogue exposes. InvestigationManualTopics appends
+    /// eight broad mechanics topics — seasonal economy, army supply, field combat, city assault,
+    /// unit-type modifiers, diplomacy, research and movement — so manual_lookup serves 17 topics in
+    /// all. Only the seven domestic topics are LLM-action-exposed: documenting a mechanic never
+    /// implies its action is available to the model. Unsupported requests return the bounded index
+    /// instead of invented rules.
     /// </summary>
     public static class InvestigationCatalogue
     {
@@ -35,8 +38,11 @@ namespace LuanShi.Engine
                 {
                     Name = "manual_lookup",
                     Title = "English rules lookup",
-                    Summary = "Look up an implemented rule or the seven currently exposed domestic "
-                            + "actions. An empty topic returns the bounded English topic index.",
+                    Summary = "Look up an implemented rule in the 17-topic English manual: nine "
+                            + "foundation topics plus eight broad mechanics topics (economy, supply, "
+                            + "combat, assault, unit types, diplomacy, research, movement). Only the "
+                            + "seven domestic topics are model actions; rules never imply command "
+                            + "availability. An empty topic returns the bounded English topic index.",
                 },
                 new InvestigationToolDescriptor
                 {
