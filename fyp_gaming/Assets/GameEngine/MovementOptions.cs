@@ -18,6 +18,9 @@ namespace LuanShi.Engine
         public string CityId;      // only for capture_neutral_city (the city is in sight => observable)
         public string TowerId;     // only for capture_tower
         public string Note;        // short, safe, terrain/visibility words only — never hidden facts
+        public string Direction;   // W..SW compass bearing when diversified; null otherwise
+        public bool ExploresFrontier;
+        public string ObjectiveHint;
     }
 
     /// <summary>
@@ -35,7 +38,8 @@ namespace LuanShi.Engine
         public string BlockedReason;       // "no orders left" | "already marched this season" | null
         public int TotalReachable;         // all valid candidates before the cap; 0 when blocked
         public bool Truncated;             // TotalReachable exceeded the advertised cap
-        public IReadOnlyList<MoveOption> Options;   // capped, stable order: captures, cost, z, x
+        public string SelectionMode;       // null for default; "diversified" when opt-in enabled
+        public IReadOnlyList<MoveOption> Options;   // capped, deterministic order
     }
 
     /// <summary>
@@ -89,6 +93,8 @@ namespace LuanShi.Engine
             sb.Append(",\"blocked_reason\":").Append(MiniJson.Str(plan.BlockedReason));
             sb.Append(",\"total_reachable\":").Append(MiniJson.Num(plan.TotalReachable));
             sb.Append(",\"truncated\":").Append(plan.Truncated ? "true" : "false");
+            if (!string.IsNullOrEmpty(plan.SelectionMode))
+                sb.Append(",\"selection_mode\":").Append(MiniJson.Str(plan.SelectionMode));
             sb.Append(",\"options\":").Append(MiniJson.Array(options));
             sb.Append('}');
             return sb.ToString();
@@ -106,6 +112,12 @@ namespace LuanShi.Engine
             sb.Append(",\"city_id\":").Append(MiniJson.Str(option.CityId));
             sb.Append(",\"tower_id\":").Append(MiniJson.Str(option.TowerId));
             sb.Append(",\"note\":").Append(MiniJson.Str(option.Note));
+            if (option.Direction != null)
+            {
+                sb.Append(",\"direction\":").Append(MiniJson.Str(option.Direction));
+                sb.Append(",\"explores_frontier\":").Append(option.ExploresFrontier ? "true" : "false");
+                sb.Append(",\"objective_hint\":").Append(MiniJson.Str(option.ObjectiveHint));
+            }
             sb.Append('}');
             return sb.ToString();
         }
@@ -129,6 +141,18 @@ namespace LuanShi.Engine
 
         public static MovementView Build(GameEngine engine, string seatId,
             int maxOptionsPerArmy = DefaultMaxOptionsPerArmy)
+            => BuildPlanSet(engine, seatId, maxOptionsPerArmy, false, null);
+
+        /// <summary>
+        /// Opt-in directionally varied and objective/frontier-aware selection of legal movement
+        /// candidates. Never changes legality or reads unseen terrain or hidden entities.
+        /// </summary>
+        public static MovementView BuildDiversified(GameEngine engine, string seatId,
+            int maxOptionsPerArmy = DefaultMaxOptionsPerArmy, SpatialContextView spatial = null)
+            => BuildPlanSet(engine, seatId, maxOptionsPerArmy, true, spatial);
+
+        private static MovementView BuildPlanSet(GameEngine engine, string seatId,
+            int maxOptionsPerArmy, bool diversify, SpatialContextView spatial)
         {
             int cap = ClampCap(maxOptionsPerArmy);
             var view = new MovementView
@@ -148,6 +172,10 @@ namespace LuanShi.Engine
             view.CommandPoints = fac.CommandPoints;
             view.Season = engine.State.Season;
 
+            List<SpatialObjectiveTarget> targets = diversify
+                ? SpatialContextBuilder.CollectMovementTargets(engine, fac.SeatId, spatial)
+                : null;
+
             int marchCost = view.MarchOrderCost;
             var own = new List<ArmyState>();
             foreach (var army in engine.State.Armies)
@@ -156,13 +184,13 @@ namespace LuanShi.Engine
 
             var plans = new List<ArmyMovePlan>(own.Count);
             foreach (var army in own)
-                plans.Add(BuildPlan(engine, fac, army, cap, marchCost));
+                plans.Add(BuildPlan(engine, fac, army, cap, marchCost, diversify, targets));
             view.Armies = plans;
             return view;
         }
 
         private static ArmyMovePlan BuildPlan(GameEngine engine, FactionState fac, ArmyState army,
-            int cap, int marchCost)
+            int cap, int marchCost, bool diversify, List<SpatialObjectiveTarget> targets)
         {
             int marches = UnitTypes.MarchesPerSeason(army.UnitType);
             int marchesLeft = Math.Max(0, marches - army.MarchCountThisSeason);
@@ -184,6 +212,7 @@ namespace LuanShi.Engine
                     : (marchesLeft <= 0 ? "already marched this season" : "no orders left"),
                 TotalReachable = 0,
                 Truncated = false,
+                SelectionMode = diversify ? "diversified" : null,
                 Options = new List<MoveOption>(),
             };
 
@@ -198,10 +227,10 @@ namespace LuanShi.Engine
             {
                 for (int x = 0; x < map.Width; x++)
                 {
-                    // Same predicate order as DoMarch's destination checks.
-                    if (!map.IsWalkable(x, z)) continue;
                     if (x == army.X && z == army.Z) continue;
-                    if (!GameEngine.InSight(engine.State, fac.SeatId, x, z)) continue;
+                    // Check sight before reading Walkable/Cost/occupants so unseen terrain never leaks.
+                    if (!engine.InSight(fac.SeatId, x, z)) continue;
+                    if (!map.IsWalkable(x, z)) continue;
 
                     var blocker = engine.State.ArmyAt(x, z);
                     if (blocker != null && blocker.Id != army.Id) continue;
@@ -242,19 +271,24 @@ namespace LuanShi.Engine
                 }
             }
 
-            // Contract order: captures first, then PathCost, then Z, then X. Stable and total
-            // (two options never share a cell), so truncation is deterministic.
             all.Sort(CompareOptions);
             plan.TotalReachable = all.Count;
-            int take = Math.Min(cap, all.Count);
-            var options = new List<MoveOption>(take);
-            for (int i = 0; i < take; i++) options.Add(all[i]);
-            plan.Options = options;
-            plan.Truncated = all.Count > take;
+            plan.Options = diversify
+                ? SpatialMovementDiversifier.SelectDiversified(engine, fac.SeatId, map, army, all, cap, targets)
+                : TakePrefix(all, cap);
+            plan.Truncated = all.Count > plan.Options.Count;
             return plan;
         }
 
-        private static int CompareOptions(MoveOption a, MoveOption b)
+        private static List<MoveOption> TakePrefix(List<MoveOption> all, int cap)
+        {
+            int take = Math.Min(cap, all.Count);
+            var options = new List<MoveOption>(take);
+            for (int i = 0; i < take; i++) options.Add(all[i]);
+            return options;
+        }
+
+        internal static int CompareOptions(MoveOption a, MoveOption b)
         {
             bool aCapture = a.Kind != KindMove;
             bool bCapture = b.Kind != KindMove;

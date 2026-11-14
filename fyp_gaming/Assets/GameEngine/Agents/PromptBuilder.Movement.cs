@@ -23,14 +23,14 @@ namespace LuanShi.Engine
 
         /// <summary>Full section (every advertised option, including any engine-side cap).</summary>
         public static string MovementOptionsText(MovementView view)
-            => MovementOptionsText(view, int.MaxValue);
+            => RenderMovementOptions(view, int.MaxValue, int.MaxValue, includeSpatialTags: false);
 
         /// <summary>
         /// Renders at most <paramref name="maxOptionsPerArmy"/> options per army, keeping each
         /// army's stable prefix (captures first). A counted note follows when options were dropped.
         /// </summary>
         public static string MovementOptionsText(MovementView view, int maxOptionsPerArmy)
-            => MovementOptionsText(view, maxOptionsPerArmy, int.MaxValue);
+            => RenderMovementOptions(view, maxOptionsPerArmy, int.MaxValue, includeSpatialTags: false);
 
         /// <summary>
         /// Bounded form used by the prompt-size fallback: also keeps only the first
@@ -38,6 +38,25 @@ namespace LuanShi.Engine
         /// Deterministic; captures stay first because they are first within each army's prefix.
         /// </summary>
         public static string MovementOptionsText(MovementView view, int maxOptionsPerArmy, int maxArmies)
+            => RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags: false);
+
+        /// <summary>
+        /// Opt-in spatial-aware rendering: keeps <paramref name="includeSpatialTags"/> == false
+        /// byte-identical to legacy formatting and adds compass direction, frontier and objective
+        /// tags when enabled.
+        /// </summary>
+        public static string MovementOptionsText(
+            MovementView view,
+            int maxOptionsPerArmy,
+            int maxArmies,
+            bool includeSpatialTags)
+            => RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags);
+
+        private static string RenderMovementOptions(
+            MovementView view,
+            int maxOptionsPerArmy,
+            int maxArmies,
+            bool includeSpatialTags)
         {
             var sb = new StringBuilder(512);
             sb.Append(MovementHeader);
@@ -59,6 +78,8 @@ namespace LuanShi.Engine
                   .Append(" position=").Append(Int(plan.X)).Append(',').Append(Int(plan.Z))
                   .Append(" marches_left=").Append(Int(plan.MarchesLeft))
                   .Append(" budget=").Append(Int(plan.Budget));
+                if (includeSpatialTags && !string.IsNullOrEmpty(plan.SelectionMode))
+                    sb.Append(" selection=").Append(Safe(plan.SelectionMode));
                 if (!plan.CanMarch && !string.IsNullOrEmpty(plan.BlockedReason))
                     sb.Append(" blocked=\"").Append(Safe(plan.BlockedReason)).Append('"');
                 sb.Append('\n');
@@ -81,6 +102,16 @@ namespace LuanShi.Engine
                         sb.Append(Int(option.X)).Append(',').Append(Int(option.Z))
                           .Append(" cost=").Append(Int(option.PathCost))
                           .Append(' ').Append(Safe(option.Kind));
+                        if (includeSpatialTags)
+                        {
+                            if (!string.IsNullOrEmpty(option.Direction))
+                                sb.Append(" dir=").Append(Safe(option.Direction));
+                            if (option.ExploresFrontier)
+                                sb.Append(" [frontier]");
+                            string hint = NoteText(option.ObjectiveHint);
+                            if (hint.Length > 0)
+                                sb.Append(" (goal: ").Append(hint).Append(')');
+                        }
                         string note = NoteText(option.Note);
                         if (note.Length > 0) sb.Append(" - ").Append(note);
                     }
