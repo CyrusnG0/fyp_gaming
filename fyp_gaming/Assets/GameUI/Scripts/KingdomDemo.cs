@@ -48,6 +48,11 @@ namespace LuanShi
         [Header("Game setup")]
         public int randomSeed = 12345;
         public string balanceProfile = "standard";
+        [Tooltip("Optional starting scenario key (see CompactScenario.Keys, e.g. compact-contact-v1). " +
+                 "Empty keeps the built-in demo roster. A scenario replaces factions, cities, armies " +
+                 "and towers from data and applies to both the single-agent and the spectator mode; " +
+                 "it never edits or saves this scene.")]
+        public string scenario = "";
 
         [Header("Fog of war")]
         [Tooltip("Height of the procedural, non-repeating fog shroud above each hex node.")]
@@ -255,26 +260,33 @@ namespace LuanShi
             factionColors[SeatB] = new Color(0.8509804f, 0.3490196f, 0.1843137f, 1f); // Shu #D95947
             factionColors[SeatA] = new Color(0.3490196f, 0.5019608f, 0.8509804f, 1f); // Wei #5980D9
 
-            engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "Wei", Controller = ControlOf(SeatA) });
-            engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "Shu", Controller = ControlOf(SeatB) });
-
-            AddCity(weiCityObj, "city-wei", "Wei Capital", SeatA);
-            AddCity(shuCityObj, "city-shu", "Chengdu", SeatB);
-            AddCity(southCityObj, "city-south", "Southern City", null);
-            AddWatchTower(watchTowerObj, "watch-tower-1", "Watch Tower", 6, 2);
-
-            AddArmy(weiArmyObj, "army-wei-1", "Wei Army", SeatA);
-            AddArmy(shuArmyObj, "army-shu-1", "Shu Army", SeatB);
-            foreach (var name in extraArmyObjs)
+            if (string.IsNullOrEmpty(scenario))
             {
-                var go = FindSceneObject(name);
-                if (go == null || !go.activeInHierarchy) continue;
+                engine.State.Factions.Add(new FactionState { SeatId = SeatA, Name = "Wei", Controller = ControlOf(SeatA) });
+                engine.State.Factions.Add(new FactionState { SeatId = SeatB, Name = "Shu", Controller = ControlOf(SeatB) });
 
-                bool isWei = name.StartsWith("Wei_", System.StringComparison.Ordinal);
-                string faction = isWei ? "wei" : "shu";
-                string seat = isWei ? SeatA : SeatB;
-                string number = name.Substring(name.Length - 1);
-                AddArmy(name, "army-" + faction + "-" + number, isWei ? "Wei Army" : "Shu Army", seat);
+                AddCity(weiCityObj, "city-wei", "Wei Capital", SeatA);
+                AddCity(shuCityObj, "city-shu", "Chengdu", SeatB);
+                AddCity(southCityObj, "city-south", "Southern City", null);
+                AddWatchTower(watchTowerObj, "watch-tower-1", "Watch Tower", 6, 2);
+
+                AddArmy(weiArmyObj, "army-wei-1", "Wei Army", SeatA);
+                AddArmy(shuArmyObj, "army-shu-1", "Shu Army", SeatB);
+                foreach (var name in extraArmyObjs)
+                {
+                    var go = FindSceneObject(name);
+                    if (go == null || !go.activeInHierarchy) continue;
+
+                    bool isWei = name.StartsWith("Wei_", System.StringComparison.Ordinal);
+                    string faction = isWei ? "wei" : "shu";
+                    string seat = isWei ? SeatA : SeatB;
+                    string number = name.Substring(name.Length - 1);
+                    AddArmy(name, "army-" + faction + "-" + number, isWei ? "Wei Army" : "Shu Army", seat);
+                }
+            }
+            else
+            {
+                ApplyOptInScenario(scenario);   // .Scenario.cs: data-driven roster, runtime markers only
             }
 
             engine.BeginSeason();

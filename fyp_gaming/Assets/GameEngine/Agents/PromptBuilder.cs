@@ -349,6 +349,7 @@ namespace LuanShi.Engine
                 Prestige = source.Prestige,
                 ResearchPoints = source.ResearchPoints,
                 WinnerSeatId = source.WinnerSeatId,
+                ScenarioId = source.ScenarioId,   // not serialised: keeps prompt bytes unchanged
             };
             foreach (var pair in source.Research) view.Research[pair.Key] = pair.Value;
             view.Cities.AddRange(source.Cities);

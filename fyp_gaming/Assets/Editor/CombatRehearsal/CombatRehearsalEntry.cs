@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using LuanShi.Engine;
@@ -12,30 +13,35 @@ using UnityEngine;
 namespace LuanShi.EditorTools
 {
     /// <summary>
-    /// Scripted Play Mode rehearsal for the combat milestone. Launched from the command line:
+    /// Scripted Play Mode rehearsal for the opt-in compact scenario. Launched from the command line:
     ///
-    ///   Unity.exe -projectPath &lt;worktree&gt;/fyp_gaming \
+    ///   set LUANSHI_REHEARSAL_OUT=&lt;evidence dir&gt;
+    ///   set LUANSHI_REHEARSAL_MODE=agent        (default) or "spectator"
+    ///   Unity.exe -projectPath &lt;worktree&gt;/fyp_gaming ^
     ///             -executeMethod LuanShi.EditorTools.CombatRehearsalEntry.Run
     ///
-    /// It opens the shipped demo scene, enters Play Mode, drives battle and assault commands through the
-    /// demo's own submit path, records what the engine and the presentation layer did, writes the
-    /// evidence beside the screenshots, and exits. It never saves the scene and never changes a
-    /// serialized field: every fixture change below is in-memory game state for this play session only.
+    /// It opens the shipped demo scene, selects the compact scenario and a balance profile in memory
+    /// (never saved), enters Play Mode, drives battle and assault commands through the demo's own submit
+    /// path, records what the engine and the presentation layer did, writes evidence beside the
+    /// screenshots, and exits. Every fixture change is in-memory game state for this play session.
     ///
     /// Entering Play Mode reloads the domain, which clears static delegates. The state machine therefore
-    /// persists its position in <see cref="SessionState"/> (which survives the reload) and is re-hooked
-    /// by the <see cref="InitializeOnLoadAttribute"/> constructor.
+    /// persists its position in <see cref="SessionState"/> and is re-hooked by the
+    /// <see cref="InitializeOnLoadAttribute"/> constructor.
     /// </summary>
     [InitializeOnLoad]
     public static class CombatRehearsalEntry
     {
         private const string DemoScene = "Assets/GameUI/Scenes/LuanShi_Demo.unity";
+        private const string ScenarioKey = "compact-contact-v1";
+        private const string ProfileKey = "food-easy";
         private const string ActiveKey = "LuanShi.CombatRehearsal.Active";
         private const string DirKey = "LuanShi.CombatRehearsal.Dir";
         private const string StepKey = "LuanShi.CombatRehearsal.Step";
         private const string StartedKey = "LuanShi.CombatRehearsal.Started";
         private const string PhaseKey = "LuanShi.CombatRehearsal.Phase";
         private const string IdleKey = "LuanShi.CombatRehearsal.Idle";
+        private const string ModeKey = "LuanShi.CombatRehearsal.Mode";
 
         private static bool _hooked;
         private static int _waitFrames;
@@ -53,22 +59,28 @@ namespace LuanShi.EditorTools
             {
                 string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
                 outDir = Path.Combine(projectRoot, "..", "runs",
-                    "unity-combat-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
+                    "unity-scenario-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
             }
             Directory.CreateDirectory(outDir);
+            string mode = Environment.GetEnvironmentVariable("LUANSHI_REHEARSAL_MODE");
+            if (string.IsNullOrEmpty(mode)) mode = "agent";
+
             SessionState.SetString(DirKey, outDir.Replace('\\', '/'));
+            SessionState.SetString(ModeKey, mode);
             SessionState.SetInt(StepKey, 0);
             SessionState.SetFloat(StartedKey, (float)EditorApplication.timeSinceStartup);
             SessionState.SetBool(ActiveKey, true);
-            SessionState.SetString(PhaseKey, "wait");
+            SessionState.SetString(PhaseKey, "select");
             SessionState.SetInt(IdleKey, 0);
             File.WriteAllText(StepsPath(), "");
 
             Hook();
-            Debug.Log("[rehearsal] waiting for the editor to finish importing/compiling before Play Mode");
+            Debug.Log("[rehearsal] mode=" + mode + " scenario=" + ScenarioKey + " profile=" + ProfileKey
+                + "; waiting for the editor to settle before selecting them");
         }
 
         private static string OutDir => SessionState.GetString(DirKey, "");
+        private static string Mode => SessionState.GetString(ModeKey, "agent");
         private static string StepsPath() => Path.Combine(OutDir, "rehearsal-steps.jsonl").Replace('\\', '/');
         private static int Step { get => SessionState.GetInt(StepKey, 0); set => SessionState.SetInt(StepKey, value); }
 
@@ -79,6 +91,13 @@ namespace LuanShi.EditorTools
             EditorApplication.update += Tick;
         }
 
+        private static void Unhook()
+        {
+            if (!_hooked) return;
+            _hooked = false;
+            EditorApplication.update -= Tick;
+        }
+
         // ------------------------------------------------------------------ state machine
 
         private static void Tick()
@@ -86,60 +105,55 @@ namespace LuanShi.EditorTools
             try
             {
                 if (!SessionState.GetBool(ActiveKey, false)) { Unhook(); return; }
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
 
-                // Phase 1: a startup recompile during Play Mode reloads the domain and silently
-                // drops the demo's non-serialized engine reference, so wait for a calm editor first.
-                if (SessionState.GetString(PhaseKey, "wait") == "wait")
+                string phase = SessionState.GetString(PhaseKey, "select");
+
+                if (phase == "select")
                 {
-                    if (EditorApplication.isCompiling || EditorApplication.isUpdating
-                        || EditorApplication.isPlayingOrWillChangePlaymode)
-                    {
-                        SessionState.SetInt(IdleKey, 0);
-                        return;
-                    }
                     int idle = SessionState.GetInt(IdleKey, 0) + 1;
                     SessionState.SetInt(IdleKey, idle);
-                    if (idle < 120) return;
-                    Debug.Log("[rehearsal] editor idle for " + idle + " frames; opening the demo scene and entering Play Mode");
+                    if (idle < 90) return;
+
                     EditorSceneManager.OpenScene(DemoScene, OpenSceneMode.Single);
+                    var demo = UnityEngine.Object.FindAnyObjectByType<KingdomDemo>();
+                    if (demo == null) { Finish(4, "the demo scene has no KingdomDemo component"); return; }
+                    // Opt-in selection, in memory only. The scene is never saved.
+                    SetField(demo, "scenario", ScenarioKey);
+                    SetField(demo, "balanceProfile", ProfileKey);
+                    if (Mode == "spectator")
+                    {
+                        SetField(demo, "spectatorMode", true);
+                        SetField(demo, "spectatorSeasons", 1);
+                        SetField(demo, "useFakeLlm", true);
+                    }
+                    Debug.Log("[rehearsal] selected scenario=" + ScenarioKey + " profile=" + ProfileKey
+                        + " spectator=" + (Mode == "spectator") + "; entering Play Mode");
                     SessionState.SetString(PhaseKey, "play");
                     EditorApplication.EnterPlaymode();
                     return;
                 }
 
-                if (!EditorApplication.isPlaying)
-                {
-                    if (Step > 0) Finish(1, "play mode ended unexpectedly");
-                    return;
-                }
+                if (!EditorApplication.isPlaying) return;
                 if (_waitFrames > 0) { _waitFrames--; return; }
 
-                var demo = ResolveDemo(out int instances);
-                if (demo == null) return;
-                if (!AsBool(FieldOrNull(demo, "ready"))) return;
-                if (EngineOrNull(demo) == null)
+                var live = ResolveDemo();
+                if (live == null) return;
+                if (!AsBool(FieldOrNull(live, "ready"))) return;
+                if (EngineOrNull(live) == null)
                 {
-                    Finish(3, "the demo lost its engine reference: a domain reload happened during Play Mode "
-                        + "(non-serialized state is not restored)");
+                    Finish(3, "the demo lost its engine reference: a domain reload happened during Play Mode");
                     return;
-                }
-                if (SessionState.GetInt("LuanShi.CombatRehearsal.DiagStep", -1) != Step)
-                {
-                    SessionState.SetInt("LuanShi.CombatRehearsal.DiagStep", Step);
-                    Debug.Log("[rehearsal] step " + Step + ": " + instances + " KingdomDemo instance(s); using id="
-                        + demo.GetEntityId().ToString() + " engine=" + (EngineOrNull(demo) != null)
-                        + " season=" + (EngineOrNull(demo) == null ? -1 : EngineOrNull(demo).State.Season));
                 }
 
                 switch (Step)
                 {
-                    case 0: StepBaseline(demo); break;
-                    case 1: StepAgentTurn(demo); break;
-                    case 11: StepAgentTurnWait(demo); break;
-                    case 2: StepFieldBattle(demo); break;
-                    case 3: StepAssaultRejected(demo); break;
-                    case 4: StepAssaultCaptured(demo); break;
-                    case 5: StepUnification(demo); break;
+                    case 0: StepSelection(live); break;
+                    case 1: if (Mode == "spectator") StepSpectator(live); else StepAgentTurn(live); break;
+                    case 11: StepAgentTurnWait(live); break;
+                    case 2: StepFieldBattle(live); break;
+                    case 3: StepAssaultRejected(live); break;
+                    case 4: StepAssaultCaptured(live); break;
                     case 9: Finish(0, "rehearsal complete"); break;
                     default: Finish(0, "rehearsal complete"); break;
                 }
@@ -150,46 +164,54 @@ namespace LuanShi.EditorTools
             }
         }
 
-        private static void Unhook()
-        {
-            if (!_hooked) return;
-            _hooked = false;
-            EditorApplication.update -= Tick;
-        }
+        // ---- step 0: the selected scenario and profile are live ------------------
 
-        // ---- step 0: what the match looks like before any order -----------------
-
-        private static void StepBaseline(KingdomDemo demo)
+        private static void StepSelection(KingdomDemo demo)
         {
             var engine = Engine(demo);
-            var roster = new List<string>();
-            foreach (var f in engine.State.Factions) roster.Add(f.SeatId + "=" + f.Name + "/" + f.Controller);
-            _log.Add("[baseline] roster " + string.Join(", ", roster.ToArray()));
-            _log.Add("[baseline] currentSeat=" + (string)Field(demo, "currentSeat")
-                + " season=" + engine.State.Season
-                + " cities=" + engine.State.Cities.Count + " armies=" + engine.State.Armies.Count
-                + " agentRunner=" + (Field(demo, "agentRunner") != null));
-            _log.Add("[baseline] fog overlays=" + Count(Field(demo, "fogOverlays"))
-                + " visible=" + VisibleFogCount(demo));
-            _log.Add("[baseline] Wei city tint=" + TintOf(demo, "city-wei")
-                + " Shu city tint=" + TintOf(demo, "city-shu")
-                + " neutral city tint=" + TintOf(demo, "city-south"));
+            var scenario = CompactScenario.CompactContact;
+            _log.Add("[select] scenario=" + (engine.State.ScenarioId ?? "none")
+                + " profile=" + engine.Balance.Key + " season=" + engine.State.Season);
+            _log.Add("[select] cities=" + engine.State.Cities.Count + " armies=" + engine.State.Armies.Count
+                + " towers=" + engine.State.WatchTowers.Count
+                + " roster=" + Roster(engine));
+            _log.Add("[select] expected scenario=" + scenario.ScenarioId + " keys="
+                + string.Join(",", CompactScenario.Keys.ToArray()));
+
+            foreach (var city in engine.State.Cities)
+                _log.Add("[select] city " + city.Id + " owner=" + (city.OwnerSeatId ?? "neutral")
+                    + " at (" + city.X + "," + city.Z + ") food=" + city.Food + " gold=" + city.Gold
+                    + " garrison=" + city.Garrison
+                    + " tint=" + TintOf(demo, city.Id));
             foreach (var army in engine.State.Armies)
-                _log.Add("[baseline] banner " + army.Id + " " + BannerActive(demo, army.Id)
-                    + " pos=" + BannerPos(demo, army.Id) + " troops=" + army.Troops);
-            LogLines();
-            Record(demo, "baseline", true);
-            Capture("01-baseline");
+                _log.Add("[select] army " + army.Id + " owner=" + army.OwnerSeatId + " at ("
+                    + army.X + "," + army.Z + ") troops=" + army.Troops + " banner=" + BannerActive(demo, army.Id));
+
+            var wei = engine.Observe("seat-0");
+            var shu = engine.Observe("seat-1");
+            _log.Add("[select] seat-0 sees " + Names(wei));
+            _log.Add("[select] seat-1 sees " + Names(shu));
+            _log.Add("[select] fog overlays=" + Count(Field(demo, "fogOverlays")) + " visible=" + VisibleFogCount(demo)
+                + " marker counts cities=" + Count(Field(demo, "cityObjs"))
+                + " armies=" + Count(Field(demo, "armyObjs"))
+                + " towers=" + Count(Field(demo, "watchTowerObjs")));
+
+            bool ok = engine.State.ScenarioId == CompactScenario.CompactContactId
+                      && engine.Balance.Key == ProfileKey
+                      && engine.State.Cities.Count == scenario.Cities.Count
+                      && engine.State.Armies.Count == scenario.Armies.Count
+                      && engine.State.CitiesOf("seat-0").TrueForAll(c => c.Food == BalanceConfig.FoodEasyStartFood);
+            _log.Add("[select] PASS=" + ok);
+            foreach (string line in _log) Debug.Log("[rehearsal] " + line);
+            Record(demo, "selection", ok);
+            Capture("01-selection");
             Next(1, 5);
         }
 
-        // ---- step 1: the model seat's own turn (fake provider) ------------------
+        // ---- step 1: the LLM seat's own turn, or the spectator pilot -------------
 
         private static void StepAgentTurn(KingdomDemo demo)
         {
-            // The shipped scene has useFakeLlm off and no key, so the model seat would be skipped.
-            // Switching the flags in memory (never saved) lets the fake provider play the seat once,
-            // which exercises the agent turn, the runner activity and the session chat.
             SetField(demo, "useFakeLlm", true);
             CallByName(demo, "RebuildAgentRunner");
             var runner = Field(demo, "agentRunner");
@@ -199,68 +221,72 @@ namespace LuanShi.EditorTools
             _log.Add("[agent] human seat ended; the fake model seat now plays the season");
             LogLines();
             SessionState.SetInt("LuanShi.CombatRehearsal.Wait", 0);
-            Next(11, 30);   // wait for the fake request and the season rollover
+            Next(11, 20);
         }
 
-        /// <summary>Waits for the fake model seat to finish, then records the agent/chat evidence.</summary>
         private static void StepAgentTurnWait(KingdomDemo demo)
         {
             var engine = EngineOrNull(demo);
             bool active = AsBool(FieldOrNull(demo, "agentTurnActive"));
             int waited = SessionState.GetInt("LuanShi.CombatRehearsal.Wait", 0) + 1;
             SessionState.SetInt("LuanShi.CombatRehearsal.Wait", waited);
-
             if (active && waited < 900) { _waitFrames = 2; return; }
 
             var runner = FieldOrNull(demo, "agentRunner");
             var activity = runner == null ? null : FieldOrNull(runner, "Activity") as System.Collections.IList;
-            _log.Add("[agent] turn finished: active=" + active + " waited_frames=" + waited
-                + " season=" + (engine == null ? -1 : engine.State.Season)
+            _log.Add("[agent] turn finished: season=" + (engine == null ? -1 : engine.State.Season)
                 + " runner=" + (runner != null) + " fake=" + AsBool(FieldOrNull(demo, "agentFakeMode"))
                 + " chat_lines=" + (activity == null ? 0 : activity.Count));
             if (activity != null)
             {
-                int first = Math.Max(0, activity.Count - 4);
-                for (int i = first; i < activity.Count; i++)
-                {
-                    var entry = activity[i];
-                    string kind = Convert.ToString(FieldOrNull(entry, "Kind"));
-                    string text = Convert.ToString(FieldOrNull(entry, "Text"));
-                    _log.Add("[agent] chat[" + i + "] " + kind + ": " + text);
-                }
+                for (int i = Math.Max(0, activity.Count - 3); i < activity.Count; i++)
+                    _log.Add("[agent] chat[" + i + "] "
+                        + Convert.ToString(FieldOrNull(activity[i], "Kind")) + ": "
+                        + Convert.ToString(FieldOrNull(activity[i], "Text")));
             }
-            _log.Add("[agent] chat panel visible=" + (runner != null && AsBool(FieldOrNull(demo, "agentHasSeat"))
-                && AsBool(FieldOrNull(demo, "showAgentDetails"))));
             _log.Add("[agent] feed=" + string.Join(" | ", FeedLines(demo)));
             LogLines();
-            Record(demo, "agent-turn", true);
+            Record(demo, "agent-turn", runner != null);
             Capture("02-agent-turn");
-            Next(2, 10);
+            Next(2, 8);
         }
 
-        // ---- step 2: an accepted field battle through the human submit path ------
+        private static void StepSpectator(KingdomDemo demo)
+        {
+            var engine = Engine(demo);
+            var session = FieldOrNull(demo, "spectatorSession");
+            _log.Add("[spectator] scenario=" + (engine.State.ScenarioId ?? "none")
+                + " profile=" + engine.Balance.Key
+                + " roster=" + Roster(engine)
+                + " session=" + (session != null)
+                + " setupError=" + (FieldOrNull(demo, "spectatorSetupError") ?? "none"));
+            _log.Add("[spectator] both seats are LLM-controlled: "
+                + (engine.State.Factions.TrueForAll(f => f.Controller == ControllerType.Llm)));
+            LogLines();
+            Record(demo, "spectator-selection",
+                engine.State.ScenarioId == CompactScenario.CompactContactId
+                && engine.Balance.Key == ProfileKey
+                && engine.State.Factions.TrueForAll(f => f.Controller == ControllerType.Llm));
+            Capture("02-spectator");
+            Next(9, 12);
+        }
+
+        // ---- step 2: an accepted field battle -----------------------------------
 
         private static void StepFieldBattle(KingdomDemo demo)
         {
             var engine = Engine(demo);
-            DismissReport(demo);
+            DismissModals(demo);
             var wei = engine.State.FindArmy("army-wei-1");
             var shu = engine.State.FindArmy("army-shu-1");
-            if (wei == null || shu == null)
-            {
-                _log.Add("[field] FAILED: a vanguard is missing after the agent turn (armies="
-                    + engine.State.Armies.Count + ")");
-                Finish(1, "vanguard missing");
-                return;
-            }
+            if (wei == null || shu == null) { Finish(1, "scenario vanguard missing"); return; }
 
-            // Fixture: two walkable neighbouring hexes on the demo map.
             wei.X = 12; wei.Z = 8;
             shu.X = 13; shu.Z = 8;
             CallByName(demo, "SyncArmyVisual", wei.Id);
             CallByName(demo, "SyncArmyVisual", shu.Id);
             CallByName(demo, "RefreshObservation");
-            _log.Add("[field] fixture: Wei at (12,8), Shu at (13,8); banners synced");
+            _log.Add("[field] fixture: Wei at (12,8), Shu at (13,8) on the scenario map; banners synced");
 
             string json = "{\"type\":\"attack_army\",\"target_id\":\"army-wei-1\",\"param_a\":13,\"param_b\":8,"
                         + "\"summary\":\"Rehearsal: engage the Shu vanguard.\"}";
@@ -274,18 +300,15 @@ namespace LuanShi.EditorTools
                     + " defender " + battle.Payload["defender_troops_before"] + "->" + battle.Payload["defender_troops_after"]);
             _log.Add("[field] battleResultShowing=" + AsBool(Field(demo, "battleResultShowing"))
                 + " status=\"" + (string)Field(demo, "statusMsg") + "\"");
-            _log.Add("[field] banner army-wei-1 " + BannerActive(demo, "army-wei-1")
-                + " pos=" + BannerPos(demo, "army-wei-1")
-                + " / army-shu-1 " + BannerActive(demo, "army-shu-1")
-                + " pos=" + BannerPos(demo, "army-shu-1"));
-            _log.Add("[field] fog visible=" + VisibleFogCount(demo));
+            _log.Add("[field] banner army-wei-1 " + BannerActive(demo, "army-wei-1") + " pos=" + BannerPos(demo, "army-wei-1")
+                + " / army-shu-1 " + BannerActive(demo, "army-shu-1") + " pos=" + BannerPos(demo, "army-shu-1"));
             LogLines();
             Record(demo, "field-battle", accepted && battle != null);
             Capture("03-field-battle");
             Next(3, 6);
         }
 
-        // ---- step 3: an assault the 3:1 rule must refuse ------------------------
+        // ---- step 3: the 3:1 rule refuses an assault ----------------------------
 
         private static void StepAssaultRejected(KingdomDemo demo)
         {
@@ -293,12 +316,11 @@ namespace LuanShi.EditorTools
             var engine = Engine(demo);
             var city = engine.State.FindCity("city-shu");
             city.Garrison = 1000;   // 3:1 needs 3,000; the host has 2,000
-            var host = EnsureRehearsalArmy(demo, "army-wei-9", "Wei Siege Host", "seat-0", 21, 8, 2000);
+            var host = EnsureRehearsalArmy(demo, "army-wei-9", "Wei Siege Host", "seat-0", 19, 8, 2000);
             CallByName(demo, "RefreshObservation");
             CallByName(demo, "TintCity", city.Id);
-            _log.Add("[assault-reject] fixture: Chengdu garrison 1000 at (" + city.X + "," + city.Z
-                + "), host " + host.Id + " at (" + host.X + "," + host.Z + ") troops " + host.Troops
-                + " adjacent=" + engine.State.Map.AreAdjacent(host.X, host.Z, city.X, city.Z));
+            _log.Add("[assault-reject] fixture: " + city.Id + " garrison 1000 at (" + city.X + "," + city.Z
+                + "), host " + host.Id + " adjacent=" + engine.State.Map.AreAdjacent(host.X, host.Z, city.X, city.Z));
 
             string json = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-9\",\"param_a\":" + city.X
                  + ",\"param_b\":" + city.Z + "}";
@@ -307,14 +329,13 @@ namespace LuanShi.EditorTools
             _log.Add("[assault-reject] accepted=" + accepted + " error=" + (error ?? "-")
                 + " battleEvent=" + (siege == null ? "none" : siege.Payload["outcome"]));
             _log.Add("[assault-reject] status=\"" + (string)Field(demo, "statusMsg") + "\"");
-            _log.Add("[assault-reject] battleResultShowing=" + AsBool(Field(demo, "battleResultShowing")));
             LogLines();
             Record(demo, "assault-rejected", !accepted && siege == null);
             Capture("04-assault-rejected");
             Next(4, 6);
         }
 
-        // ---- step 4: a legal assault that takes the city -----------------------
+        // ---- step 4: a legal assault captures the capital ----------------------
 
         private static void StepAssaultCaptured(KingdomDemo demo)
         {
@@ -326,62 +347,44 @@ namespace LuanShi.EditorTools
             string beforeTint = TintOf(demo, "city-shu");
 
             string json = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-9\",\"param_a\":" + city.X
-                 + ",\"param_b\":" + city.Z + ",\"summary\":\"Rehearsal: storm Chengdu.\"}";
+                 + ",\"param_b\":" + city.Z + ",\"summary\":\"Rehearsal: storm the capital.\"}";
             SubmitThroughDemoJson(demo, json, out bool accepted, out string error);
             var siege = LatestEvent(engine, "battle_siege");
             _log.Add("[assault] accepted=" + accepted + " error=" + (error ?? "-"));
             if (siege != null)
                 _log.Add("[assault] outcome=" + siege.Payload["outcome"]
                     + " rounds=" + siege.Payload["rounds"]
-                    + " garrison " + siege.Payload["garrison_before"] + "->" + siege.Payload["garrison_after"]
-                    + " troops " + siege.Payload["troops_before"] + "->" + siege.Payload["troops_after"]);
+                    + " garrison " + siege.Payload["garrison_before"] + "->" + siege.Payload["garrison_after"]);
             _log.Add("[assault] owner now " + engine.State.FindCity("city-shu").OwnerSeatId
-                + " / seat-0 cities=" + engine.State.CitiesOf("seat-0").Count);
-            _log.Add("[assault] city tint before=" + beforeTint + " after=" + TintOf(demo, "city-shu")
-                + " banner army-wei-9 " + BannerActive(demo, "army-wei-9")
-                + " pos=" + BannerPos(demo, "army-wei-9"));
+                + " / seat-0 cities=" + engine.State.CitiesOf("seat-0").Count
+                + " tint " + beforeTint + " -> " + TintOf(demo, "city-shu"));
             _log.Add("[assault] status=\"" + (string)Field(demo, "statusMsg") + "\"");
+            _log.Add("[assault] scenario=" + (engine.State.ScenarioId ?? "none") + " profile=" + engine.Balance.Key);
             LogLines();
             Record(demo, "assault-captured", accepted && engine.State.FindCity("city-shu").OwnerSeatId == "seat-0");
             Capture("05-assault-captured");
-            Next(5, 6);
-        }
-
-        // ---- step 5: unification through the existing engine rule --------------
-
-        private static void StepUnification(KingdomDemo demo)
-        {
-            DismissModals(demo);
-            var engine = Engine(demo);
-            var south = engine.State.FindCity("city-south");
-            var marcher = EnsureRehearsalArmy(demo, "army-wei-8", "Wei Reserve", "seat-0",
-                south.X - 1, south.Z, 1200);
-            _log.Add("[unification] fixture: reserve at (" + marcher.X + "," + marcher.Z
-                + ") beside the neutral city at (" + south.X + "," + south.Z + ")");
-
-            string json = "{\"type\":\"march\",\"target_id\":\"army-wei-8\",\"param_a\":" + south.X
-                 + ",\"param_b\":" + south.Z + ",\"summary\":\"Rehearsal: take the southern city.\"}";
-            SubmitThroughDemoJson(demo, json, out bool accepted, out string error);
-            _log.Add("[unification] march accepted=" + accepted + " error=" + (error ?? "-"));
-
-            var owners = new List<string>();
-            foreach (var c in engine.State.Cities) owners.Add(c.Id + "=" + (c.OwnerSeatId ?? "neutral"));
-            _log.Add("[unification] owners " + string.Join(", ", owners.ToArray()));
-            _log.Add("[unification] WinnerSeatId=" + (engine.State.WinnerSeatId ?? "none"));
-            var over = LatestEvent(engine, "game_over");
-            _log.Add("[unification] game_over=" + (over == null ? "none" : over.Payload["reason"]));
-            _log.Add("[unification] southern city tint=" + TintOf(demo, "city-south")
-                + " status=\"" + (string)Field(demo, "statusMsg") + "\"");
-            LogLines();
-            Record(demo, "unification", accepted && engine.State.WinnerSeatId != null);
-            Capture("06-unification");
-            Next(9, 20);   // let the last screenshot flush before the process exits
+            Next(9, 15);
         }
 
         // ------------------------------------------------------------------ helpers
 
-        /// <summary>Parses the same JSON a model would send, then submits it through the demo's own
-        /// human order path (the method the attack button calls). The engine still validates.</summary>
+        private static string Roster(GameEngine engine)
+        {
+            var parts = new List<string>();
+            foreach (var f in engine.State.Factions) parts.Add(f.SeatId + "=" + f.Name + "/" + f.Controller);
+            return string.Join(", ", parts.ToArray());
+        }
+
+        private static string Names(Observation obs)
+        {
+            if (obs == null) return "(none)";
+            var names = new List<string>();
+            foreach (var c in obs.Cities) names.Add("city " + c.Name);
+            foreach (var a in obs.Armies) names.Add("army " + a.Name);
+            foreach (var t in obs.WatchTowers) names.Add("tower " + t.Name);
+            return names.Count == 0 ? "(nothing)" : string.Join(", ", names.ToArray());
+        }
+
         private static void SubmitThroughDemoJson(KingdomDemo demo, string json, out bool accepted, out string error)
         {
             accepted = false;
@@ -419,16 +422,13 @@ namespace LuanShi.EditorTools
 
         private static void DismissModals(KingdomDemo demo)
         {
-            DismissReport(demo);
-            if (AsBool(Field(demo, "battleResultShowing"))) SetField(demo, "battleResultShowing", false);
-        }
-
-        private static void DismissReport(KingdomDemo demo)
-        {
-            if (!AsBool(Field(demo, "reportShowing"))) return;
-            SetField(demo, "reportShowing", false);
-            SetField(demo, "pendingReport", false);
-            _log.Add("[field] dismissed the season court report so the battle modal is visible");
+            if (AsBool(FieldOrNull(demo, "reportShowing")))
+            {
+                SetField(demo, "reportShowing", false);
+                SetField(demo, "pendingReport", false);
+            }
+            if (AsBool(FieldOrNull(demo, "battleResultShowing")))
+                SetField(demo, "battleResultShowing", false);
         }
 
         private static void LogLines()
@@ -449,31 +449,36 @@ namespace LuanShi.EditorTools
             var sb = new StringBuilder();
             sb.Append("{\"step\":").Append(Json(stepName));
             sb.Append(",\"ok\":").Append(ok ? "true" : "false");
+            sb.Append(",\"mode\":").Append(Json(Mode));
+            sb.Append(",\"scenario\":").Append(Json(engine == null ? null : engine.State.ScenarioId));
+            sb.Append(",\"profile\":").Append(Json(engine == null || engine.Balance == null ? null : engine.Balance.Key));
             sb.Append(",\"season\":").Append(engine == null ? -1 : engine.State.Season);
-            sb.Append(",\"current_seat\":").Append(Json((string)Field(demo, "currentSeat")));
-            sb.Append(",\"status\":").Append(Json((string)Field(demo, "statusMsg")));
-            sb.Append(",\"battle_modal\":").Append(AsBool(Field(demo, "battleResultShowing")) ? "true" : "false");
-            sb.Append(",\"report_showing\":").Append(AsBool(Field(demo, "reportShowing")) ? "true" : "false");
+            sb.Append(",\"current_seat\":").Append(Json((string)FieldOrNull(demo, "currentSeat")));
+            sb.Append(",\"status\":").Append(Json((string)FieldOrNull(demo, "statusMsg")));
+            sb.Append(",\"battle_modal\":").Append(AsBool(FieldOrNull(demo, "battleResultShowing")) ? "true" : "false");
+            sb.Append(",\"report_showing\":").Append(AsBool(FieldOrNull(demo, "reportShowing")) ? "true" : "false");
             sb.Append(",\"winner\":").Append(Json(engine == null ? null : engine.State.WinnerSeatId));
             sb.Append(",\"fog_visible\":").Append(VisibleFogCount(demo));
             sb.Append(",\"cities\":[");
             var cities = new List<string>();
-            if (engine != null) foreach (var c in engine.State.Cities)
-                cities.Add("{\"id\":" + Json(c.Id) + ",\"owner\":" + Json(c.OwnerSeatId)
-                    + ",\"tint\":" + Json(TintOf(demo, c.Id)) + ",\"garrison\":" + c.Garrison + "}");
+            if (engine != null)
+                foreach (var c in engine.State.Cities)
+                    cities.Add("{\"id\":" + Json(c.Id) + ",\"owner\":" + Json(c.OwnerSeatId)
+                        + ",\"x\":" + c.X + ",\"z\":" + c.Z + ",\"food\":" + c.Food + ",\"gold\":" + c.Gold
+                        + ",\"tint\":" + Json(TintOf(demo, c.Id)) + ",\"garrison\":" + c.Garrison + "}");
             sb.Append(string.Join(",", cities.ToArray())).Append("]");
             sb.Append(",\"armies\":[");
             var armies = new List<string>();
-            if (engine != null) foreach (var a in engine.State.Armies)
-                armies.Add("{\"id\":" + Json(a.Id) + ",\"owner\":" + Json(a.OwnerSeatId)
-                    + ",\"x\":" + a.X + ",\"z\":" + a.Z + ",\"troops\":" + a.Troops
-                    + ",\"banner\":" + Json(BannerActive(demo, a.Id))
-                    + ",\"banner_pos\":" + Json(BannerPos(demo, a.Id)) + "}");
+            if (engine != null)
+                foreach (var a in engine.State.Armies)
+                    armies.Add("{\"id\":" + Json(a.Id) + ",\"owner\":" + Json(a.OwnerSeatId)
+                        + ",\"x\":" + a.X + ",\"z\":" + a.Z + ",\"troops\":" + a.Troops
+                        + ",\"banner\":" + Json(BannerActive(demo, a.Id))
+                        + ",\"banner_pos\":" + Json(BannerPos(demo, a.Id)) + "}");
             sb.Append(string.Join(",", armies.ToArray())).Append("]");
             sb.Append(",\"feed\":[");
             var feedLines = new List<string>();
-            foreach (var line in (System.Collections.IEnumerable)Field(demo, "jsonFeed"))
-                feedLines.Add(Json(line as string));
+            foreach (var line in FeedLines(demo)) feedLines.Add(Json(line));
             sb.Append(string.Join(",", feedLines.ToArray())).Append("]");
             sb.Append(",\"log\":[");
             var logs = new List<string>();
@@ -503,8 +508,10 @@ namespace LuanShi.EditorTools
             var envelope = new StringBuilder();
             envelope.Append("{\n");
             envelope.Append("  \"scene\": ").Append(Json(DemoScene)).Append(",\n");
+            envelope.Append("  \"scenario_selected\": ").Append(Json(ScenarioKey)).Append(",\n");
+            envelope.Append("  \"profile_selected\": ").Append(Json(ProfileKey)).Append(",\n");
+            envelope.Append("  \"mode\": ").Append(Json(Mode)).Append(",\n");
             envelope.Append("  \"project\": ").Append(Json(Path.GetFullPath(Path.Combine(Application.dataPath, "..")))).Append(",\n");
-            envelope.Append("  \"started\": ").Append(Json(DateTime.Now.ToString("o", CultureInfo.InvariantCulture))).Append(",\n");
             envelope.Append("  \"result\": ").Append(Json(reason)).Append(",\n");
             envelope.Append("  \"exit_code\": ").Append(code).Append(",\n");
             envelope.Append("  \"wall_seconds\": ").Append(((float)EditorApplication.timeSinceStartup
@@ -513,23 +520,14 @@ namespace LuanShi.EditorTools
             string path = Path.Combine(OutDir, "rehearsal-evidence.json");
             File.WriteAllText(path, envelope.ToString());
             Debug.Log("[rehearsal] evidence -> " + path + " (" + reason + ", exit " + code + ")");
-            Debug.Log("[rehearsal] scene not saved; play-mode changes discarded");
-
-            // The process must end even though play mode would otherwise keep it alive.
+            Debug.Log("[rehearsal] scene file untouched; play-mode changes discarded");
             EditorApplication.Exit(0);
         }
 
-        private static GameEngine Engine(KingdomDemo demo) => (GameEngine)Field(demo, "engine");
-
-        /// <summary>
-        /// The live demo component. During Play Mode a stale or duplicate component can be returned
-        /// first, so prefer the instance that actually owns an engine; report how many were found.
-        /// </summary>
-        private static KingdomDemo ResolveDemo(out int instances)
+        private static KingdomDemo ResolveDemo()
         {
             var all = UnityEngine.Object.FindObjectsByType<KingdomDemo>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
-            instances = all.Length;
             KingdomDemo fallback = null;
             foreach (var candidate in all)
             {
@@ -539,6 +537,8 @@ namespace LuanShi.EditorTools
             }
             return fallback;
         }
+
+        private static GameEngine Engine(KingdomDemo demo) => (GameEngine)Field(demo, "engine");
 
         private static GameEngine EngineOrNull(KingdomDemo demo)
         {
@@ -555,14 +555,24 @@ namespace LuanShi.EditorTools
 
         private static object Field(object target, string name)
         {
+            var value = FieldOrNull(target, name);
+            if (value == null && !FieldOrPropertyExists(target, name))
+                throw new InvalidOperationException("no field " + name + " on " + target.GetType().Name);
+            return value;
+        }
+
+        private static bool FieldOrPropertyExists(object target, string name)
+        {
             var type = target.GetType();
             while (type != null)
             {
-                var field = type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                if (field != null) return field.GetValue(target);
+                if (type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public) != null)
+                    return true;
+                if (type.GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public) != null)
+                    return true;
                 type = type.BaseType;
             }
-            throw new InvalidOperationException("no field " + name + " on " + target.GetType().Name);
+            return false;
         }
 
         private static object FieldOrNull(object target, string name)
@@ -603,22 +613,22 @@ namespace LuanShi.EditorTools
         private static int Count(object enumerable)
         {
             int n = 0;
-            foreach (var unused in (System.Collections.IEnumerable)enumerable) n++;
+            if (enumerable is System.Collections.IEnumerable e) foreach (var unused in e) n++;
             return n;
         }
 
         private static string BannerActive(KingdomDemo demo, string armyId)
         {
-            var map = (System.Collections.IDictionary)Field(demo, "armyObjs");
-            if (!map.Contains(armyId)) return "no-banner";
+            var map = FieldOrNull(demo, "armyObjs") as System.Collections.IDictionary;
+            if (map == null || !map.Contains(armyId)) return "no-banner";
             var go = map[armyId] as GameObject;
             return go == null ? "destroyed" : (go.activeInHierarchy ? "active" : "hidden");
         }
 
         private static string BannerPos(KingdomDemo demo, string armyId)
         {
-            var map = (System.Collections.IDictionary)Field(demo, "armyObjs");
-            if (!map.Contains(armyId)) return null;
+            var map = FieldOrNull(demo, "armyObjs") as System.Collections.IDictionary;
+            if (map == null || !map.Contains(armyId)) return null;
             var go = map[armyId] as GameObject;
             if (go == null) return null;
             var p = go.transform.position;
@@ -628,8 +638,8 @@ namespace LuanShi.EditorTools
 
         private static string TintOf(KingdomDemo demo, string cityId)
         {
-            var map = (System.Collections.IDictionary)Field(demo, "cityObjs");
-            if (!map.Contains(cityId)) return "no-marker";
+            var map = FieldOrNull(demo, "cityObjs") as System.Collections.IDictionary;
+            if (map == null || !map.Contains(cityId)) return "no-marker";
             var go = map[cityId] as GameObject;
             if (go == null) return "destroyed";
             var sprite = go.GetComponentInChildren<SpriteRenderer>();
@@ -643,7 +653,8 @@ namespace LuanShi.EditorTools
         private static int VisibleFogCount(KingdomDemo demo)
         {
             int visible = 0;
-            foreach (var item in (System.Collections.IEnumerable)Field(demo, "fogOverlays"))
+            if (!(FieldOrNull(demo, "fogOverlays") is System.Collections.IEnumerable list)) return 0;
+            foreach (var item in list)
             {
                 var sprite = item as SpriteRenderer;
                 if (sprite != null && sprite.enabled && sprite.gameObject.activeInHierarchy) visible++;

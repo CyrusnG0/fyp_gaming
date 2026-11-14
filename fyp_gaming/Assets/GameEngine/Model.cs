@@ -574,6 +574,7 @@ namespace LuanShi.Engine
     public sealed class GameState
     {
         public string GameId = "g-001";
+        public string ScenarioId;                // opt-in scenario key; null for the built-in demo roster
         public int Season;                       // 1-based once the first season begins
         public string Phase = "setup";           // setup | player_orders | resolution
         public string WinnerSeatId;              // 一統天下: set when one seat owns every city (design §13)
@@ -663,6 +664,13 @@ namespace LuanShi.Engine
         public int ResearchPoints;       // own 研究點 (design §9) — research is private to the seat
         public readonly Dictionary<string, int> Research = new Dictionary<string, int>();  // ResearchLine.* → 0..5
         public string WinnerSeatId;      // set once 一統天下 is reached; null while the game is live
+
+        /// <summary>
+        /// The match setup this seat is playing (null for the built-in demo). Like
+        /// <see cref="Balance"/> it is match configuration, not a seat fact, so it is deliberately
+        /// absent from <see cref="ToJson"/>: prompt bytes stay unchanged.
+        /// </summary>
+        public string ScenarioId;
 
         /// <summary>
         /// The match's balance rules (null means <see cref="BalanceProfile.Standard"/>). Carried so

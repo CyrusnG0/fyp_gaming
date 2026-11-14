@@ -945,6 +945,7 @@ namespace LuanShi.Engine
                 Prestige = fac.Prestige,
                 ResearchPoints = fac.ResearchPoints,     // 研究 is private to the seat (ADR-014)
                 WinnerSeatId = State.WinnerSeatId,
+                ScenarioId = State.ScenarioId,
                 Balance = this.Balance,                  // seat-safe queries advertise the match's costs
             };
             foreach (string line in ResearchLine.All) obs.Research[line] = fac.ResearchLevel(line);

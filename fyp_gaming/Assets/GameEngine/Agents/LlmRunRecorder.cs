@@ -228,6 +228,7 @@ namespace LuanShi.Engine
                 // exact dispatched bytes).
                 parts.Add(Str("observation_json", Redact(flight.ObservationJson)));
                 parts.Add("\"balance_profile\":" + (flight.Observation?.Balance ?? BalanceProfile.Standard).ToJson());
+                parts.Add(Str("scenario_id", flight.Observation?.ScenarioId));
                 parts.Add(Num("request_index", flight.RequestIndex));
                 parts.Add(Num("latency_ms", response == null ? 0 : response.LatencyMs));
                 parts.Add(nullableInt("input_tokens", response?.InputTokens));
