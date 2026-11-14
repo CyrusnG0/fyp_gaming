@@ -218,6 +218,8 @@ internal static partial class Harness
               && easyJson.Contains("\"army_food_upkeep_mult\":0.5")
               && standardJson.Contains("\"profile\":\"standard\""),
               "[new] the profile serialises for run records and evidence notes: " + easyJson);
+
+        RunFoodEasyProfile();
     }
 
     /// <summary>Standard-vs-profile replay of the same domestic path; profile null = engine default.</summary>

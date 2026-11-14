@@ -16,6 +16,7 @@ namespace LuanShi.Engine
     {
         public const string StandardKey = "standard";
         public const string EasyResearchKey = "easy-research";
+        public const string FoodEasyKey = "food-easy";
 
         /// <summary>The shipped balance. Nothing is rescaled and no rounding changes.</summary>
         public static readonly BalanceProfile Standard = new BalanceProfile(
@@ -39,6 +40,21 @@ namespace LuanShi.Engine
             cityBaseFoodYield: BalanceConfig.EasyCityBaseFoodYield,
             armyFoodUpkeepMultiplier: BalanceConfig.EasyArmyFoodUpkeepMultiplier,
             domesticGoldCostMultiplier: BalanceConfig.EasyDomesticGoldCostMultiplier);
+
+        /// <summary>
+        /// Opt-in combat-test profile (2026-11-14): plentiful food (3,000 opening food, 600 base
+        /// passive city harvest, quarter troop food upkeep) paired with <see cref="EasyResearch"/>
+        /// gold and domestic discounts (900 opening gold, 0.5× domestic gold). Designed so starting
+        /// armies sustain 20 seasons without dedicated food actions while models focus on moving
+        /// and fighting; larger recruited armies or lost cities can still exhaust food.
+        /// </summary>
+        public static readonly BalanceProfile FoodEasy = new BalanceProfile(
+            FoodEasyKey,
+            startingFood: BalanceConfig.FoodEasyStartFood,
+            startingGold: BalanceConfig.FoodEasyStartGold,
+            cityBaseFoodYield: BalanceConfig.FoodEasyCityBaseFoodYield,
+            armyFoodUpkeepMultiplier: BalanceConfig.FoodEasyArmyFoodUpkeepMultiplier,
+            domesticGoldCostMultiplier: BalanceConfig.FoodEasyDomesticGoldCostMultiplier);
 
         /// <summary>Stable schema key used by hosts, run records and evidence notes.</summary>
         public string Key { get; }
@@ -80,6 +96,7 @@ namespace LuanShi.Engine
         {
             if (string.IsNullOrEmpty(key) || key == StandardKey) { profile = Standard; return true; }
             if (key == EasyResearchKey) { profile = EasyResearch; return true; }
+            if (key == FoodEasyKey) { profile = FoodEasy; return true; }
             profile = null;
             return false;
         }

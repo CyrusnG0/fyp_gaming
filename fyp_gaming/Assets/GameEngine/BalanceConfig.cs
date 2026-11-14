@@ -99,6 +99,17 @@ namespace LuanShi.Engine
         public const float EasyArmyFoodUpkeepMultiplier = 0.5f;    // reduced: troop (army/garrison) upkeep halved
         public const float EasyDomesticGoldCostMultiplier = 0.5f;  // reduced: 輕徭/募兵 gold halved, rounded up
 
+        // ---- opt-in combat-test profile (BalanceProfile.FoodEasy, 2026-11-14) -------------------
+        // Plentiful food so starting field armies sustain 20 seasons without dedicated food actions
+        // while keeping gold and domestic rules aligned with EasyResearch. Does not touch Standard
+        // or EasyResearch. Sustaining larger recruited forces depends on army size and harvests.
+
+        public const int FoodEasyStartFood = 3000;                     // combat-test: 6× standard opening food
+        public const int FoodEasyStartGold = EasyStartGold;            // combat-test: 900 gold (matches EasyResearch)
+        public const int FoodEasyCityBaseFoodYield = 600;              // combat-test: 3× standard passive harvest
+        public const float FoodEasyArmyFoodUpkeepMultiplier = 0.25f;   // combat-test: quarter troop (army/garrison) upkeep
+        public const float FoodEasyDomesticGoldCostMultiplier = EasyDomesticGoldCostMultiplier;  // matches EasyResearch 0.5×
+
         // ---- 戰鬥 M2/M3 (design §6, ACTIONS.md §4) ------------------------------
 
         public const int ArmyMoraleStart = 60;             // TBD: 士氣 of a new army
