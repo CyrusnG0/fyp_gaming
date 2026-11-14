@@ -86,6 +86,9 @@ namespace LuanShi.Engine
                     return result;
                 }
                 result = InvestigationManual.Lookup(topic, _options, _observation.Balance);
+                if (result.Ok && InvestigationCurrentContextBuilder.IsExactTopic(topic, result.TopicId))
+                    result.CurrentContext = InvestigationCurrentContextBuilder.Build(
+                        result.TopicId, _observation, _expectedSeatId);
                 return result;
             }
             finally

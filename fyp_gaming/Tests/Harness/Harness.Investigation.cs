@@ -24,6 +24,7 @@ internal static partial class Harness
         InvestigationContextFailClosed();
         InvestigationResponseBounds();
         InvestigationManualTopicsExpansion();
+        RunInvestigationCurrentContext();
     }
 
     // ---- fixtures ----------------------------------------------------------

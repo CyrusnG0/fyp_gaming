@@ -303,6 +303,8 @@ namespace LuanShi.Engine
         public bool LlmActionExposed;
         public int CommandPointCost = -1;   // -1 = this topic is not an action
         internal bool IsTopicIndex;
+        /// <summary>Optional live, seat-filtered facts added only for exact research/diplomacy topics.</summary>
+        internal ManualLookupCurrentContext CurrentContext;
 
         public IReadOnlyList<ManualFact> Facts
         {
@@ -343,12 +345,14 @@ namespace LuanShi.Engine
             sb.Append(",\"facts\":").Append(ObjectArray(facts));
             sb.Append(",\"notes\":").Append(MiniJson.StrArray(_notes));
             sb.Append(",\"topics\":").Append(ObjectArray(topics));
+            if (CurrentContext != null)
+                sb.Append(",\"current_context\":").Append(CurrentContext.ToJson());
             sb.Append('}');
             return sb.ToString();
         }
 
-        // The redundant index goes first for a detailed topic; then optional prose and, finally,
-        // whole facts. Every step keeps the JSON structural and flips the explicit truncation flag.
+        // Keep a rule fact for detail responses before trimming the optional current context.
+        // Every step keeps the JSON structural and marks the result incomplete.
         protected override bool TrimForResponse(InvestigationOptions options)
         {
             if (_topics.Count > 0)
@@ -364,9 +368,15 @@ namespace LuanShi.Engine
                 Truncated = true;
                 return true;
             }
-            if (_facts.Count > 0)
+            if (_facts.Count > (CurrentContext == null ? 0 : 1))
             {
                 _facts.RemoveAt(_facts.Count - 1);
+                Truncated = true;
+                return true;
+            }
+            if (CurrentContext != null)
+            {
+                if (!CurrentContext.TrimForResponse()) CurrentContext = null;
                 Truncated = true;
                 return true;
             }
