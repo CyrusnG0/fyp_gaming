@@ -274,7 +274,10 @@ internal static partial class Harness
             + " and the other arrives adjacent (documented first-move effect)");
 
         // Side swap: same geography, the first-moving seat now plays the other faction.
-        var swappedScenario = scenario.WithSeatsSwapped();
+        ScnCheck(CompactScenario.TryGet(CompactScenario.CompactContactSwappedId, out var swappedScenario)
+                 && swappedScenario.ScenarioId == CompactScenario.CompactContactSwappedId,
+            "the host can select the registered swapped scenario key");
+        if (swappedScenario == null) return;
         var swapped = ScenarioEngine(swappedScenario, BalanceProfile.Standard, 24681);
         ScnCheck(swapped.State.FindFaction("seat-0").Name == "Shu"
                  && swapped.State.FindFaction("seat-1").Name == "Wei",
@@ -282,15 +285,14 @@ internal static partial class Harness
         var (swappedCaptureSeason, swappedCaptureSeat, swappedAdjacent, swappedLog) = RunRace(swapped);
         foreach (string line in swappedLog) Console.WriteLine("    " + line);
         string firstChair = SeatRotation.PlayOrder(swapped.State)[0];
-        ScnCheck(firstChair == "seat-1",
-            "after the swap the first-move chair belongs to seat-1 (it now plays Wei)");
+        ScnCheck(firstChair == "seat-0" && swapped.State.FindFaction(firstChair).Name == "Shu",
+            "after the swap Shu takes the first move");
         ScnCheck(swappedCaptureSeason == 3 && swappedCaptureSeat == firstChair && swappedAdjacent == 3,
             "the same season-3 outcome follows the first-move chair, now seat " + swappedCaptureSeat
             + " playing " + swapped.State.FindFaction(swappedCaptureSeat).Name
             + "; the second seat arrives adjacent");
-        ScnCheck(swapped.State.FindCity("city-neutral").OwnerSeatId == "seat-1",
-            "the swapped match transfers the neutral city to the first-move chair, so alternating sides"
-            + " gives each seat the opening advantage in one of two matches");
+        ScnCheck(swapped.State.FindCity("city-neutral").OwnerSeatId == firstChair,
+            "the swapped match gives the opening advantage to the other faction");
     }
 
     /// <summary>

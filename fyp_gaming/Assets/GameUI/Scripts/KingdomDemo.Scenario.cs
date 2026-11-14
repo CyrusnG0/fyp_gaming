@@ -22,8 +22,14 @@ namespace LuanShi
             if (!CompactScenario.TryGet(scenarioKey, out CompactScenario chosen))
                 throw new Exception("Unknown scenario: " + scenarioKey);
 
-            HideSceneRosterMarkers();
             chosen.Apply(engine, faction => ControlOf(faction.SeatId));
+            if (chosen.ScenarioId == CompactScenario.CompactContactSwappedId)
+            {
+                Color weiColor = factionColors[SeatA];
+                factionColors[SeatA] = factionColors[SeatB];
+                factionColors[SeatB] = weiColor;
+            }
+            HideSceneRosterMarkers();
             BuildScenarioMarkers();
 
             Debug.Log("[KingdomDemo] scenario: " + engine.State.ScenarioId

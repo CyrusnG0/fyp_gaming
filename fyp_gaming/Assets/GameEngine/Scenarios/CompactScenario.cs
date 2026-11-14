@@ -79,6 +79,7 @@ namespace LuanShi.Engine
     public sealed class CompactScenario
     {
         public const string CompactContactId = "compact-contact-v1";
+        public const string CompactContactSwappedId = CompactContactId + "-swapped";
         public const int MaxFactions = 8;                // AGENTS.md #6: never hardcode more than the engine allows
 
         /// <summary>
@@ -190,12 +191,14 @@ namespace LuanShi.Engine
         public static bool TryGet(string key, out CompactScenario scenario)
         {
             if (key == CompactContactId) { scenario = CompactContact; return true; }
+            if (key == CompactContactSwappedId) { scenario = CompactContact.WithSeatsSwapped(); return true; }
             scenario = null;
             return false;
         }
 
         /// <summary>All selectable scenario keys, for a host's picker and for evidence.</summary>
-        public static IReadOnlyList<string> Keys { get; } = new[] { CompactContactId };
+        public static IReadOnlyList<string> Keys { get; } =
+            Array.AsReadOnly(new[] { CompactContactId, CompactContactSwappedId });
 
         /// <summary>
         /// The same geography with the two seats exchanged (seat-0 plays what seat-1 played and vice
@@ -216,11 +219,14 @@ namespace LuanShi.Engine
             }
 
             var factions = new List<ScenarioFaction>();
-            foreach (var f in Factions)
+            for (int i = Factions.Count - 1; i >= 0; i--)
+            {
+                var f = Factions[i];
                 factions.Add(new ScenarioFaction
                 {
                     SeatId = Map(f.SeatId), Name = f.Name, DefaultController = f.DefaultController,
                 });
+            }
 
             var cities = new List<ScenarioCity>();
             foreach (var c in Cities)
