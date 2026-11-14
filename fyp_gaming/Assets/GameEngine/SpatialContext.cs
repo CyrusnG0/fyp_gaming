@@ -159,13 +159,14 @@ namespace LuanShi.Engine
         }
     }
 
-    /// <summary>Current-sight coverage vs unseen space, plus explicit history limitations.</summary>
+    /// <summary>Current-sight coverage vs currently unseen space, plus explicit history limitations.</summary>
     public sealed class SpatialFrontierSummary
     {
         public int VisibleCellCount;
         public int TotalCellCount;
-        public int UnexploredCellCount;
-        public bool HasUnexplored;
+        public int CurrentlyUnseenCellCount;
+        public int SightBoundaryCellCount;
+        public bool HasCurrentlyUnseen;
         public int UnseenMinX = -1, UnseenMaxX = -1, UnseenMinZ = -1, UnseenMaxZ = -1;
         public string FrontierDirectionsFromOwn;
         public string HistoryLimitationNote;
@@ -176,8 +177,9 @@ namespace LuanShi.Engine
             sb.Append('{');
             sb.Append("\"visible_cells\":").Append(MiniJson.Num(VisibleCellCount));
             sb.Append(",\"total_cells\":").Append(MiniJson.Num(TotalCellCount));
-            sb.Append(",\"unexplored_cells\":").Append(MiniJson.Num(UnexploredCellCount));
-            sb.Append(",\"has_unexplored\":").Append(HasUnexplored ? "true" : "false");
+            sb.Append(",\"currently_unseen_cells\":").Append(MiniJson.Num(CurrentlyUnseenCellCount));
+            sb.Append(",\"sight_boundary_cells\":").Append(MiniJson.Num(SightBoundaryCellCount));
+            sb.Append(",\"has_currently_unseen\":").Append(HasCurrentlyUnseen ? "true" : "false");
             sb.Append(",\"unseen_min_x\":").Append(MiniJson.Num(UnseenMinX));
             sb.Append(",\"unseen_max_x\":").Append(MiniJson.Num(UnseenMaxX));
             sb.Append(",\"unseen_min_z\":").Append(MiniJson.Num(UnseenMinZ));
@@ -293,6 +295,55 @@ namespace LuanShi.Engine
                 if (!engine.InSight(seatId, nx, nz)) unseen++;
             }
             return unseen;
+        }
+
+        /// <summary>
+        /// Shortest path cost traversing only currently in-sight walkable cells within
+        /// <paramref name="maxCost"/>, or -1 if unreachable along visible terrain.
+        /// Checks sight before reading Walkable or Cost so unseen terrain never leaks.
+        /// </summary>
+        public static int VisiblePathCost(GameEngine engine, string seatId, MapData map,
+            int fromX, int fromZ, int toX, int toZ, int maxCost)
+        {
+            if (engine == null || map == null || !map.InBounds(fromX, fromZ) || !map.InBounds(toX, toZ))
+                return -1;
+            if (!engine.InSight(seatId, fromX, fromZ) || !engine.InSight(seatId, toX, toZ))
+                return -1;
+            if (!map.IsWalkable(toX, toZ)) return -1;
+            if (fromX == toX && fromZ == toZ) return 0;
+
+            int n = map.Width * map.Height;
+            int start = map.Index(fromX, fromZ);
+            int goal = map.Index(toX, toZ);
+            var dist = new int[n];
+            var done = new bool[n];
+            for (int i = 0; i < n; i++) dist[i] = int.MaxValue;
+            dist[start] = 0;
+
+            for (;;)
+            {
+                int cur = -1, best = int.MaxValue;
+                for (int i = 0; i < n; i++)
+                    if (!done[i] && dist[i] < best) { best = dist[i]; cur = i; }
+                if (cur < 0 || best > maxCost) return -1;
+                if (cur == goal) return best;
+                done[cur] = true;
+
+                int[] nbs = map.Neighbors != null ? map.Neighbors[cur] : null;
+                if (nbs == null) continue;
+                for (int i = 0; i < nbs.Length; i++)
+                {
+                    int nb = nbs[i];
+                    if (nb < 0 || nb >= n || done[nb]) continue;
+                    int nx = nb % map.Width;
+                    int nz = nb / map.Width;
+                    if (!engine.InSight(seatId, nx, nz)) continue;
+                    if (!map.IsWalkable(nx, nz)) continue;
+                    int stepCost = map.Cost != null ? map.Cost[nb] : 1;
+                    int nd = best + stepCost;
+                    if (nd <= maxCost && nd < dist[nb]) dist[nb] = nd;
+                }
+            }
         }
     }
 }

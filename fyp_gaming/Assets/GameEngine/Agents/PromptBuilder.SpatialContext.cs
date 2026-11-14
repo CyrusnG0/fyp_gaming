@@ -25,16 +25,17 @@ namespace LuanShi.Engine
         };
 
         /// <summary>
-        /// Rules explaining map coordinates, live sight vs stale memory vs unexplored cells, and
+        /// Rules explaining map coordinates, live sight vs stale memory vs currently unseen cells, and
         /// diversified movement tags. Never claims unseen space is empty or reveals hidden forces.
         /// </summary>
         public static string SpatialContextAddendum()
         {
-            return "\n\nSPATIAL CONTEXT AND FRONTIER EXPLORATION (opt-in; fog-filtered):\n" +
+            return "\n\nSPATIAL CONTEXT AND SIGHT BOUNDARIES (opt-in; fog-filtered):\n" +
                    "- Map coordinates use x (0=West to width-1=East) and z (0=South to height-1=North), with 8 compass directions (W, NW, N, NE, E, SE, S, SW).\n" +
                    "- Entities tagged [visible] are inside your current sight radii; positions tagged [stale] come from active scout reports or prior out-of-sight events and may be outdated.\n" +
-                   "- Unseen cells outside live sight are unexplored. The engine tracks current sight only, not a lifetime per-hex explored map; never assume unexplored cells are empty, passable, or free of hidden forces.\n" +
-                   "- MOVEMENT OPTIONS may present a directionally varied subset (marked selection=diversified) with dir=<compass>, [frontier] when bordering unseen cells, and (goal: ...) toward known objectives. These remain advisory: you may submit any legal march or other order, and the engine revalidates every command.";
+                   "- Cells outside live sight are labelled currently unseen: the engine does not track whether a hex has ever been explored. Never assume currently unseen cells are empty, passable, or free of hidden forces.\n" +
+                   "- Any direction or option labelled frontier (including [frontier] tags) is derived strictly from the current sight boundary (visible cells bordering currently unseen cells).\n" +
+                   "- MOVEMENT OPTIONS may present a directionally varied subset (marked selection=diversified) along visible terrain with dir=<compass>, [frontier], and (goal: ...) toward known objectives. These remain advisory: you may submit any legal march or other order, and the engine revalidates every command.";
         }
 
         public static string VersionForSpatial(bool planning, bool inquiry = false,
@@ -104,8 +105,9 @@ namespace LuanShi.Engine
             {
                 sb.Append("frontier: visible=").Append(NumStr(view.Frontier.VisibleCellCount))
                   .Append('/').Append(NumStr(view.Frontier.TotalCellCount))
-                  .Append(" cells unexplored=").Append(NumStr(view.Frontier.UnexploredCellCount));
-                if (view.Frontier.HasUnexplored)
+                  .Append(" cells currently_unseen=").Append(NumStr(view.Frontier.CurrentlyUnseenCellCount))
+                  .Append(" sight_boundary_cells=").Append(NumStr(view.Frontier.SightBoundaryCellCount));
+                if (view.Frontier.HasCurrentlyUnseen)
                 {
                     sb.Append(" unseen_bbox=[").Append(NumStr(view.Frontier.UnseenMinX))
                       .Append("..").Append(NumStr(view.Frontier.UnseenMaxX))

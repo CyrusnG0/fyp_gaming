@@ -16,6 +16,8 @@ internal static partial class Harness
         SpatialDirectionalDiversityAndObjectives();
         SpatialLabelsAndFrontierHonesty();
         SpatialCrowdedMapAndPromptBound();
+        SpatialReachableUnseenShortcutInvariance();
+        SpatialSightBoundaryCornerCheck();
     }
 
     private static MapData SpatialStaggeredHexMap(int width, int height)
@@ -350,59 +352,16 @@ internal static partial class Harness
                 if (o.ObjectiveHint != null && o.ObjectiveHint.Contains("army-wei-1"))
                     targetsGoneHex = true;
 
-        bool honestLimitation = spStale.Frontier != null && spStale.Frontier.HasUnexplored
-            && spStale.Frontier.UnexploredCellCount > 0
-            && spStale.Frontier.HistoryLimitationNote.Contains("Current InSight boundary only")
-            && spStale.Frontier.HistoryLimitationNote.Contains("does not retain a lifetime per-hex explored mask")
-            && spText.Contains("[stale]") && spText.Contains("unexplored=");
+        bool honestLimitation = spStale.Frontier != null && spStale.Frontier.HasCurrentlyUnseen
+            && spStale.Frontier.CurrentlyUnseenCellCount > 0
+            && spStale.Frontier.SightBoundaryCellCount > 0
+            && spStale.Frontier.HistoryLimitationNote.Contains("current sight boundary only")
+            && spStale.Frontier.HistoryLimitationNote.Contains("does not track whether a hex has ever been explored")
+            && spText.Contains("[stale]") && spText.Contains("currently_unseen=")
+            && spText.Contains("sight_boundary_cells=") && !spText.Contains("unexplored");
 
         Check(weiMoved && sawVisible && shuSteppedAway && hasScouted && hasLastSeenOut
             && weiLeft && marksNoLongerVisible && !targetsGoneHex && honestLimitation,
-            "labels and frontier honesty: visible, stale (scouted + last-seen), no-longer-visible, and history limitation");
-    }
-
-    private static void SpatialCrowdedMapAndPromptBound()
-    {
-        var e = SpatialDemoWorld(706, withFrontierSample: true);
-        int added = 0;
-        for (int z = 1; z < 16 && added < 44; z += 2)
-        {
-            for (int x = 18; x < 26 && added < 44; x++)
-            {
-                if (e.State.ArmyAt(x, z) != null || !e.State.Map.IsWalkable(x, z)) continue;
-                added++;
-                e.State.Armies.Add(new ArmyState
-                {
-                    Id = "army-shu-crowd-" + added.ToString("D2"),
-                    Name = "Crowd " + added,
-                    OwnerSeatId = "seat-shu",
-                    UnitType = UnitTypes.Cavalry,
-                    Troops = 1000,
-                    X = x,
-                    Z = z,
-                });
-            }
-        }
-
-        Observation obs = e.Observe(SeatShu);
-        SpatialContextView sp = SpatialContextBuilder.Build(e, "seat-shu", obs);
-        MovementView mv = MovementPlanner.BuildDiversified(e, "seat-shu", 10, sp);
-        List<ActionOption> opts = ActionCatalogue.Build(obs);
-
-        string sys = PromptBuilder.SystemPromptForSpatial(true, inquiry: true, persona: null, attack: true, spatial: true);
-        string user1 = PromptBuilder.UserPromptWithSpatial(obs, opts, null, 4, 3, mv, sp, true,
-            inquiryEnabled: true, attackEnabled: true);
-        string user2 = PromptBuilder.UserPromptWithSpatial(obs, opts, null, 4, 3, mv, sp, true,
-            inquiryEnabled: true, attackEnabled: true);
-        int totalLen = sys.Length + user1.Length;
-
-        Check(totalLen <= PromptBuilder.MaxPromptChars
-            && user1 == user2
-            && user1.Contains("[truncated:")
-            && user1.Contains("SPATIAL CONTEXT")
-            && user1.Contains("map: width=26 height=17")
-            && PromptBuilder.VersionForSpatial(true, true, true, true, true)
-                == PromptBuilder.SpatialContextPromptVersion,
-            $"crowded map bounded prompt: total={totalLen} <= {PromptBuilder.MaxPromptChars}, truncated and deterministic");
+            "labels and frontier honesty: visible, stale (scouted + last-seen), no-longer-visible, and current-sight frontier");
     }
 }

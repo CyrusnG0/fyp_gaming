@@ -239,7 +239,9 @@ namespace LuanShi.Engine
                     if (cityAtDest != null && !cityAtDest.IsNeutral && cityAtDest.OwnerSeatId != fac.SeatId)
                         continue;
 
-                    int cost = map.PathCost(army.X, army.Z, x, z, plan.Budget);
+                    int cost = diversify
+                        ? SpatialGeometry.VisiblePathCost(engine, fac.SeatId, map, army.X, army.Z, x, z, plan.Budget)
+                        : map.PathCost(army.X, army.Z, x, z, plan.Budget);
                     if (cost < 0) continue;
 
                     // Destination-only facts; every cell here is in sight, so this is observable.

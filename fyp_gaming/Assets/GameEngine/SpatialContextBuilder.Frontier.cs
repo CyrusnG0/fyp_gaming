@@ -11,8 +11,9 @@ namespace LuanShi.Engine
             List<SpatialArmyFrontier> armyFrontiers)
         {
             const string limitation =
-                "Current InSight boundary only (city=3, army=2, tower=5 hexes); engine does not retain a " +
-                "lifetime per-hex explored mask. Unseen cells are unexplored, never assumed empty or passable.";
+                "Frontier is derived from the current sight boundary only (city=3, army=2, tower=5 hexes); " +
+                "the engine does not track whether a hex has ever been explored. Cells outside live sight " +
+                "are currently unseen, never assumed empty or passable.";
 
             if (map == null || map.Width <= 0 || map.Height <= 0)
             {
@@ -56,16 +57,35 @@ namespace LuanShi.Engine
             }
 
             var dirCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-            if (unseenCount > 0)
+            int boundaryCount = 0;
+            for (int z = 0; z < h; z++)
             {
-                for (int z = 0; z < h; z++)
+                for (int x = 0; x < w; x++)
                 {
-                    for (int x = 0; x < w; x++)
+                    if (!visible[x, z]) continue;
+                    int unseenAdj = SpatialGeometry.CountUnseenNeighbors(engine, seatId, map, x, z);
+                    if (unseenAdj <= 0) continue;
+                    boundaryCount++;
+                    if (x != cx || z != cz)
                     {
-                        if (visible[x, z]) continue;
                         string dir = SpatialGeometry.CompassDirection(x - cx, z - cz);
-                        if (dir == "here") continue;
-                        dirCounts[dir] = dirCounts.TryGetValue(dir, out int c) ? c + 1 : 1;
+                        if (dir != "here")
+                            dirCounts[dir] = dirCounts.TryGetValue(dir, out int c) ? c + 1 : 1;
+                    }
+                    else
+                    {
+                        int[] nbs = map.Neighbors != null ? map.Neighbors[map.Index(x, z)] : null;
+                        if (nbs == null) continue;
+                        for (int i = 0; i < nbs.Length; i++)
+                        {
+                            int nb = nbs[i];
+                            if (nb < 0 || nb >= w * h) continue;
+                            int nx = nb % w, nz = nb / w;
+                            if (visible[nx, nz]) continue;
+                            string dir = SpatialGeometry.CompassDirection(nx - x, nz - z);
+                            if (dir != "here")
+                                dirCounts[dir] = dirCounts.TryGetValue(dir, out int c) ? c + 1 : 1;
+                        }
                     }
                 }
             }
@@ -91,15 +111,16 @@ namespace LuanShi.Engine
             {
                 VisibleCellCount = visibleCount,
                 TotalCellCount = w * h,
-                UnexploredCellCount = unseenCount,
-                HasUnexplored = unseenCount > 0,
+                CurrentlyUnseenCellCount = unseenCount,
+                SightBoundaryCellCount = boundaryCount,
+                HasCurrentlyUnseen = unseenCount > 0,
                 UnseenMinX = unseenCount > 0 ? minX : -1,
                 UnseenMaxX = unseenCount > 0 ? maxX : -1,
                 UnseenMinZ = unseenCount > 0 ? minZ : -1,
                 UnseenMaxZ = unseenCount > 0 ? maxZ : -1,
                 FrontierDirectionsFromOwn = unseenCount == 0
                     ? "(full map in current sight)"
-                    : string.Join(", ", globalDirs),
+                    : (globalDirs.Count == 0 ? "(none)" : string.Join(", ", globalDirs)),
                 HistoryLimitationNote = limitation,
             };
         }
@@ -118,7 +139,9 @@ namespace LuanShi.Engine
                 for (int x = minX; x <= maxX; x++)
                 {
                     if (!visible[x, z] || !map.IsWalkable(x, z)) continue;
-                    if (map.HexDistance(army.X, army.Z, x, z, range) < 0) continue;
+                    bool reachableOnVisible = (x == army.X && z == army.Z)
+                        || SpatialGeometry.VisiblePathCost(engine, seatId, map, army.X, army.Z, x, z, range) >= 0;
+                    if (!reachableOnVisible) continue;
 
                     int unseenNeighbors = SpatialGeometry.CountUnseenNeighbors(engine, seatId, map, x, z);
                     if (unseenNeighbors <= 0) continue;
