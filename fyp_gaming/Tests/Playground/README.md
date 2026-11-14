@@ -110,3 +110,57 @@ The Unity host needs no change to compile: new constructor parameters are option
 default in-memory note store and lazy ledger require no scene hookup. To persist notes or share one
 ledger across separately-created runners for the same match, the host may inject
 `ILlmStrategicNoteStore` / `DeliberationBudgetLedger` through the existing constructor.
+
+## Two-season fake rehearsal recipe (deliberation, fake provider only)
+
+Everything below is **rehearsal evidence**: scripted replies prove the plumbing (tool results, note
+privacy, budget accounting), never how a model plays. Do not report them as model decisions.
+
+Automated (`dotnet run -c Release -- test`, no network): `ProductionRehearsalTwoSeasonNoteAndInquiries`
+and `ProductionRehearsalSixRequestBoundary` drive the real `LlmTurnRunner` through `SpectatorSession`.
+
+Fake reply sequence (one queue, consumed in dispatch order; seat-a = Wei, seat-b = Shu):
+
+| # | Season / seat | Reply | Expected |
+| --- | --- | --- | --- |
+| 1 | 1 / Wei | `{"tool":"manual_lookup","topic":"research"}` | inquiry 1; CP and accepted slots unchanged |
+| 2 | 1 / Wei | `{"note":"REHEARSAL-NOTE-WEI-<unique id> ..."}` | note saved; prompt 3 carries it; CP unchanged |
+| 3 | 1 / Wei | `{"type":"levy_tax","target_id":"city-a"}` | accepted; CP -1, gold +levy; accepted action 1 |
+| 4 | 1 / Wei | `{"type":"end_turn"}` | turn ends `ModelEndedTurn` |
+| 5 | 1 / Shu | `{"tool":"manual_lookup","topic":"diplomacy"}` | inquiry 2; Wei's research result absent |
+| 6 | 1 / Shu | `{"type":"end_turn"}` | `ModelEndedTurn` |
+| 7 | 2 / Wei | `{"type":"end_turn"}` | prompt 7 has "STRATEGIC NOTE FROM YOUR PREVIOUS TURN" and the unique id |
+| 8 | 2 / Shu | `{"type":"end_turn"}` | prompt 8 has no note section and no Wei marker |
+
+Expected totals: 8 requests, 2 inquiries, 1 accepted action, 4 `ModelEndedTurn`, 0 rejected.
+Request-log marker strings: research result contains `level_costs`, diplomacy result contains
+`treaty_types` (each appears in only its own topic).
+
+Six-request boundary (same eight-reply fixture, one Wei turn): replies 1-6 are inquiries and a
+note, 7 a legal levy, 8 `end_turn`. With `max_requests_per_turn=6` request 7 never dispatches
+(`RequestLimit`, 6 calls, 0 accepted actions). With `8` the engine accepts the levy and the model
+ends the turn (`ModelEndedTurn`, 8 calls, 1 accepted action). The test raises
+`max_inquiries_per_turn`/`max_turn_seconds`/`max_actions_per_turn` so nothing else ends the turn;
+shipped defaults (`6` requests per turn, `4` inquiries per turn) are unchanged.
+
+Unity recipe (needs a small host hookup, see the report: the spectator fake queue currently only
+builds `FakeTurnPlan` turns, so this sequence cannot be injected from the inspector yet):
+
+1. Temporary settings in the untracked `fyp_gaming/llm.local.json` (restore afterwards):
+   `enable_deliberation=true`, `max_requests_per_turn=8`, `max_inquiries_per_turn=8`,
+   `max_total_requests=60`; keep a note of the original file. On the KingdomDemo inspector set
+   `useFakeLlm=true`, `spectatorMode=true`, `spectatorSeasons=2`. Do not save the scene.
+2. Prove the fake provider: the run log lines carry `"provider":"fake"`, the summary run id matches,
+   and `DebugSpectatorStatus()` shows the request count with no key sent anywhere.
+3. Enqueue the eight replies above in order (the hookup), press Play, wait for `Completed`.
+4. Reconcile: summary `totals.requests` = number of `"request":{` lines in the run's exchange file
+   = fake transport call count = ledger session requests. Summary `deliberation_enabled` must be
+   `true` and `prompt_version`/`schema_hash` must equal those on the request lines.
+5. Missing versus zero: a run-log line with `"inquiry_tool"` is one answered inquiry. Zero
+   inquiries means request lines exist and none carries `inquiry_tool`. A missing observation is a
+   run with no exchange file, no `provider` field, a feature-off summary, or fewer lines than
+   `totals.requests`: report it as unknown, never as 0. Note saves have no dedicated log field; the
+   evidence is the next prompt's note section.
+6. Reset: stop Play, restore `llm.local.json`, delete the rehearsal run files, and clear
+   `runs/memory` first: `LocalLlmMemoryStore` persists between runs and would alter `recall_memory`
+   results and prompts. The strategic note store is in memory and is empty on each Play.

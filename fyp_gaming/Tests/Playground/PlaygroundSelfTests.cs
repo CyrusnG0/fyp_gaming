@@ -61,6 +61,8 @@ namespace LuanShi.Playground
             ProductionDeliberationWallTimeStopsInFlight(log);
             ProductionDeliberationRecordsRequestOnlyAfterDispatch(log);
             ProductionDeliberationSpectatorSummary(log);
+            ProductionRehearsalTwoSeasonNoteAndInquiries(log);
+            ProductionRehearsalSixRequestBoundary(log);
 
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;
