@@ -50,6 +50,15 @@ namespace LuanShi.Playground
             DispatchDenialStopsBeforeProvider(log);
             FailedPrecheckStopsBeforeSubmit(log);
 
+            // Actual production LlmTurnRunner deliberation path (fake provider).
+            ProductionDeliberationLoop(log);
+            ProductionDeliberationInquiriesAreReadOnly(log);
+            ProductionDeliberationNoteIsPrivate(log);
+            ProductionDeliberationBudgetLimits(log);
+            ProductionDeliberationDispatchAndCancellation(log);
+            ProductionDeliberationTwoPlayerAccounting(log);
+            ProductionDeliberationFeatureOffIsLegacy(log);
+
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;
         }

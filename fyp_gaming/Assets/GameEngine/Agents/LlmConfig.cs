@@ -42,6 +42,53 @@ namespace LuanShi.Engine
         /// </summary>
         public bool EnableAttack;
 
+        /// <summary>
+        /// Opt-in production deliberation, default OFF. When true the runner accepts the four strict
+        /// read-only inquiry tools (manual_lookup, inspect_entity, search_history, recall_memory) and a
+        /// bounded private strategic note, and enforces one shared per-match
+        /// <see cref="DeliberationBudgetLedger"/> instead of only the legacy request counters. Reads
+        /// spend no command point and no accepted-action slot. When false every existing prompt,
+        /// default and runner path is unchanged.
+        /// </summary>
+        public bool EnableDeliberation;
+
+        // ---- deliberation-only bounds (read only when EnableDeliberation is true) ----------
+        /// <summary>Read-only inquiry admissions allowed per seat turn.</summary>
+        public int MaxInquiriesPerTurn = 4;
+
+        /// <summary>Read-only inquiry admissions allowed across all seats in one ledger/session.</summary>
+        public int MaxInquiriesPerSession = 20;
+
+        /// <summary>
+        /// Accepted game actions allowed across all seats in one ledger/session. Zero or negative
+        /// means "no session action cap" (the per-turn accepted-action cap still applies). This is
+        /// separate from <see cref="MaxActionsPerTurn"/>, which is the per-turn accepted-action cap.
+        /// </summary>
+        public int MaxAcceptedActionsPerSession;
+
+        /// <summary>Maximum characters in one stored strategic note.</summary>
+        public int MaxNoteChars = 400;
+
+        /// <summary>How many earlier inquiry results stay in the private per-seat retention window.</summary>
+        public int MaxRetainedInquiryResults = 4;
+
+        /// <summary>Hard character cap for one serialized inquiry result before it reaches a prompt.</summary>
+        public int InquiryMaxResponseChars = InvestigationOptions.Defaults().MaxResponseChars;
+
+        /// <summary>
+        /// Optional host-supplied input-token bound for one request, used only to reserve ledger
+        /// budget. Zero means "no bound supplied"; request-limited policies do not require one.
+        /// </summary>
+        public int DeliberationInputTokenBound;
+
+        /// <summary>
+        /// Optional per-turn wall-time cap in milliseconds for the deliberation ledger. Zero or
+        /// negative means the ledger adds no wall-time cap; <see cref="MaxTurnSeconds"/> still
+        /// bounds the runner itself. A positive value allows the ledger to deny work that arrives
+        /// after its turn window (for example a delayed dispatch).
+        /// </summary>
+        public int MaxDeliberationTurnMillis;
+
         public int MaxRequestsPerTurn = 6;
         public int MaxActionsPerTurn = 5;
         public int MaxInvalidPerTurn = 2;
@@ -105,7 +152,11 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
-        /// enable_personas, enable_attack, personas.
+        /// enable_personas, enable_attack, personas, and the deliberation-only keys
+        /// enable_deliberation, max_inquiries_per_turn, max_inquiries_per_session,
+        /// max_accepted_actions_per_session, max_note_chars, max_retained_inquiry_results,
+        /// inquiry_max_response_chars, deliberation_input_token_bound,
+        /// max_deliberation_turn_millis.
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
         {
@@ -155,6 +206,20 @@ namespace LuanShi.Engine
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
+            // Only enabled deliberation adds text, so the legacy diagnostic stays byte-identical.
+            if (EnableDeliberation)
+            {
+                sb.Append("; deliberation=true");
+                sb.Append("; inquiries/turn=").Append(MaxInquiriesPerTurn.ToString(CultureInfo.InvariantCulture));
+                sb.Append("; inquiries/session=").Append(MaxInquiriesPerSession.ToString(CultureInfo.InvariantCulture));
+                sb.Append("; accepted_actions/session=").Append(
+                    MaxAcceptedActionsPerSession > 0
+                        ? MaxAcceptedActionsPerSession.ToString(CultureInfo.InvariantCulture)
+                        : "none");
+                sb.Append("; note_chars=").Append(MaxNoteChars.ToString(CultureInfo.InvariantCulture));
+                sb.Append("; retained_inquiries=").Append(
+                    MaxRetainedInquiryResults.ToString(CultureInfo.InvariantCulture));
+            }
             return sb.ToString();
         }
 
@@ -190,6 +255,24 @@ namespace LuanShi.Engine
                         EnablePersonas = Bool(field.Value, EnablePersonas); break;
                     case "enable_attack":
                         EnableAttack = Bool(field.Value, EnableAttack); break;
+                    case "enable_deliberation":
+                        EnableDeliberation = Bool(field.Value, EnableDeliberation); break;
+                    case "max_inquiries_per_turn":
+                        MaxInquiriesPerTurn = Int(field.Value, MaxInquiriesPerTurn); break;
+                    case "max_inquiries_per_session":
+                        MaxInquiriesPerSession = Int(field.Value, MaxInquiriesPerSession); break;
+                    case "max_accepted_actions_per_session":
+                        MaxAcceptedActionsPerSession = Int(field.Value, MaxAcceptedActionsPerSession); break;
+                    case "max_note_chars":
+                        MaxNoteChars = Int(field.Value, MaxNoteChars); break;
+                    case "max_retained_inquiry_results":
+                        MaxRetainedInquiryResults = Int(field.Value, MaxRetainedInquiryResults); break;
+                    case "inquiry_max_response_chars":
+                        InquiryMaxResponseChars = Int(field.Value, InquiryMaxResponseChars); break;
+                    case "deliberation_input_token_bound":
+                        DeliberationInputTokenBound = Int(field.Value, DeliberationInputTokenBound); break;
+                    case "max_deliberation_turn_millis":
+                        MaxDeliberationTurnMillis = Int(field.Value, MaxDeliberationTurnMillis); break;
                     case "personas":
                         if (field.Value is JsonObject personasObj)
                         {

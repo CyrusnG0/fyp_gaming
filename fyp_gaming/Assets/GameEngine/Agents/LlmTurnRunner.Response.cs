@@ -24,6 +24,12 @@ namespace LuanShi.Engine
         TransportError,
         GameOver,
         Cancelled,
+        /// <summary>The deliberation inquiry allowance denied a read-only tool call.</summary>
+        InquiryLimit,
+        /// <summary>A deliberation admission, binding, ledger or prompt-shape failure stopped the turn.</summary>
+        DeliberationLimit,
+        /// <summary>The ledger refused the one-time dispatch permission for admitted work.</summary>
+        DispatchDenied,
     }
 
     public sealed partial class LlmTurnRunner
@@ -37,8 +43,11 @@ namespace LuanShi.Engine
                 {
                     case EndReason.ModelEndedTurn: return "Finished - model ended turn";
                     case EndReason.ActionLimit:
+                        // In deliberation mode the enforced action counter is accepted actions;
+                        // feature-off keeps the historical attempt-based display exactly.
                         return "Finished - action limit ("
-                            + ActionsThisTurn + "/" + _config.MaxActionsPerTurn + ")";
+                            + (DeliberationActive ? _acceptedActionsThisTurn : ActionsThisTurn)
+                            + "/" + _config.MaxActionsPerTurn + ")";
                     case EndReason.RequestLimit:
                         return "Finished - request limit ("
                             + RequestsThisTurn + "/" + _config.MaxRequestsPerTurn + ")";
@@ -64,6 +73,12 @@ namespace LuanShi.Engine
                     case EndReason.GameOver: return "Finished - game over";
                     case EndReason.Cancelled:
                         return "Cancelled - " + (FailureReason ?? "by host");
+                    case EndReason.InquiryLimit:
+                        return "Stopped - inquiry limit";
+                    case EndReason.DeliberationLimit:
+                        return "Stopped - " + (FailureReason ?? "deliberation limit");
+                    case EndReason.DispatchDenied:
+                        return "Stopped - " + (FailureReason ?? "dispatch denied");
                     default: return "Turn not finished";
                 }
             }
@@ -108,9 +123,22 @@ namespace LuanShi.Engine
                 return;
             }
 
-            // Opt-in only: an inquiry-shaped reply is classified before the action parser. The
-            // disabled path below is untouched, so legacy replies are handled exactly as before.
-            if (_config.EnableManualLookup && IsInquiryCandidate(response.Text))
+            // Opt-in only: an inquiry- or note-shaped reply is classified before the action parser.
+            // The disabled path below is untouched, so legacy replies are handled exactly as before.
+            if (DeliberationActive)
+            {
+                if (IsInquiryCandidate(response.Text))
+                {
+                    HandleDeliberationInquiry(flight, response);
+                    return;
+                }
+                if (IsNoteCandidate(response.Text))
+                {
+                    HandleDeliberationNote(flight, response);
+                    return;
+                }
+            }
+            else if (_config.EnableManualLookup && IsInquiryCandidate(response.Text))
             {
                 HandleInquiry(flight, response);
                 return;
@@ -203,6 +231,32 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // Deliberation admits the action before the engine sees it and settles exactly once
+            // afterwards. The ledger counts accepted actions; a rejected order releases its slot.
+            DeliberationAdmission actionAdmission = null;
+            if (DeliberationActive)
+            {
+                if (!TryAdmitDeliberationAction(out actionAdmission, out string actionDenied))
+                {
+                    LastResult = "action budget: " + actionDenied;
+                    AddActivity("validation", "Action denied by the deliberation budget.");
+                    FinishDeliberationActionDenied(actionAdmission, actionDenied);
+                    WriteRecord(flight, response, true, null, null, actionDenied);
+                    return;
+                }
+                DeliberationBindingResult actionDispatch =
+                    _deliberationLedger.MarkDispatched(actionAdmission.ReservationId);
+                if (!actionDispatch.Ok)
+                {
+                    _deliberationLedger.Cancel(actionAdmission.ReservationId,
+                        DeliberationCancelReason.Aborted);
+                    FinishFailed("deliberation action dispatch denied: " + actionDispatch.Code,
+                        EndReason.DispatchDenied);
+                    WriteRecord(flight, response, true, null, null, actionDispatch.Code);
+                    return;
+                }
+            }
+
             ActionCommand command = LlmActionParser.ToCommand(action);
             ActionsThisTurn++;
             bool accepted = false;
@@ -218,6 +272,18 @@ namespace LuanShi.Engine
             catch (Exception)
             {
                 resultError = "host submit failed";
+            }
+
+            if (DeliberationActive && actionAdmission != null)
+            {
+                // Engine rejection is not a provider/tool failure; the reservation is released.
+                _deliberationLedger.Settle(actionAdmission.ReservationId, new DeliberationSettlement
+                {
+                    Accepted = accepted,
+                    Failed = false,
+                    ElapsedMillis = 0,
+                });
+                if (accepted) _acceptedActionsThisTurn++;
             }
 
             commandJson = Redact(command == null ? null : command.ToJson());
@@ -263,6 +329,21 @@ namespace LuanShi.Engine
                 WriteRecord(flight, response, true, commandJson, resultOk, resultError);
             }
 
+            else if (DeliberationActive)
+            {
+                // Accepted actions, not attempts, exhaust the deliberation action allowance. A
+                // rejected order keeps thinking legal without spending that slot.
+                if (accepted && _acceptedActionsThisTurn >= _config.MaxActionsPerTurn)
+                {
+                    FinishLimit("action limit reached", EndReason.ActionLimit);
+                    WriteRecord(flight, response, true, commandJson, resultOk, resultError);
+                }
+                else
+                {
+                    WriteRecord(flight, response, true, commandJson, resultOk, resultError);
+                    StartRequest();
+                }
+            }
             else if (ActionsThisTurn >= _config.MaxActionsPerTurn)
             {
                 FinishLimit("action limit reached", EndReason.ActionLimit);

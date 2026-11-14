@@ -45,6 +45,8 @@ namespace LuanShi.Engine
             public string PromptVersion;
             public string SchemaHash;
             public int MaxOutputTokens;
+            /// <summary>Ledger reservation held for this provider round-trip (null when deliberation is off).</summary>
+            public string DeliberationReservationId;
         }
 
         private readonly ILlmTransport _transport;
@@ -105,12 +107,20 @@ namespace LuanShi.Engine
         public IReadOnlyList<LlmMemory> Memories => _memories.AsReadOnly();
 
         public LlmTurnRunner(ILlmTransport transport, LlmConfig config, ILlmRunRecorder recorder,
-            ILlmMemoryStore memoryStore = null)
+            ILlmMemoryStore memoryStore = null,
+            ILlmStrategicNoteStore strategicNoteStore = null,
+            DeliberationBudgetLedger deliberationLedger = null,
+            IDeliberationClock deliberationClock = null)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _config = config ?? new LlmConfig();
             _recorder = recorder;
             _memoryStore = memoryStore;
+            // Optional deliberation plumbing. All defaults preserve the legacy path exactly; the
+            // note store is only created when the opt-in feature actually runs.
+            _strategicNoteStore = strategicNoteStore;
+            _injectedDeliberationLedger = deliberationLedger;
+            _deliberationClock = deliberationClock;
             _runId = "run-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "-"
                    + Guid.NewGuid().ToString("N").Substring(0, 8);
             if (recorder is LlmRunRecorder fileRecorder) fileRecorder.UseRunId(_runId);
@@ -135,6 +145,7 @@ namespace LuanShi.Engine
             _memorySeason = -1;
             _memories.Clear();
             _pendingInquiryResult = null;
+            ResetDeliberationTurnState();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
             // seats must not leak either seat's action feedback into the other's prompt. A seed
             // change starts a genuinely new session and clears every seat.
@@ -189,6 +200,7 @@ namespace LuanShi.Engine
             _memorySeason = -1;
             _memories.Clear();
             _pendingInquiryResult = null;
+            ResetDeliberationTurnState();
             RequestsThisTurn = 0;
             ActionsThisTurn = 0;
             InvalidThisTurn = 0;
@@ -214,6 +226,7 @@ namespace LuanShi.Engine
             {
                 var expired = LlmResponse.Failure(LlmErrorKind.Timeout, "turn time limit reached",
                     ElapsedMs(flight));
+                SettleDeliberationProvider(flight, null);
                 FinishLimit("turn time limit reached", EndReason.TurnTimeLimit);
                 // No provider response arrived: finish reason and usage are recorded as unknown.
                 WriteRecord(flight, expired, false, null, null, "turn time limit reached");
@@ -223,6 +236,7 @@ namespace LuanShi.Engine
             {
                 var timeout = LlmResponse.Failure(LlmErrorKind.Timeout, "request timed out",
                     ElapsedMs(flight));
+                SettleDeliberationProvider(flight, null);
                 FinishFailed("request timed out", EndReason.RequestTimeout);
                 WriteRecord(flight, timeout, false, null, null, "request timed out");
                 return;
@@ -238,6 +252,9 @@ namespace LuanShi.Engine
             if (response == null)
                 response = LlmResponse.Failure(LlmErrorKind.Network, "transport returned no response", latency);
             TrackUsage(response);
+            // One completed provider round-trip settles its ledger reservation exactly once, before
+            // any parse, action or inquiry work. Feature-off flights carry no reservation id.
+            SettleDeliberationProvider(flight, response);
             HandleResponse(flight, response);
         }
 
@@ -259,6 +276,7 @@ namespace LuanShi.Engine
             {
                 // Record the abandoned request with explicitly unknown provider fields. A late
                 // response is inert and must not be mistaken for this request's result.
+                AbandonDeliberationProvider(flight, DeliberationCancelReason.Cancelled);
                 var cancelled = LlmResponse.Failure(LlmErrorKind.Cancelled, FailureReason,
                     ElapsedMs(flight));
                 WriteRecord(flight, cancelled, false, null, null, FailureReason);
@@ -271,12 +289,18 @@ namespace LuanShi.Engine
         {
             if (!IsRunning) return;
             if (TurnTimeExpired()) { FinishLimit("turn time limit reached", EndReason.TurnTimeLimit); return; }
-            if (_config.MaxRequestsPerTurn <= 0 || RequestsThisTurn >= _config.MaxRequestsPerTurn)
-            { FinishLimit("request limit reached", EndReason.RequestLimit); return; }
-            if (_config.MaxActionsPerTurn <= 0 || ActionsThisTurn >= _config.MaxActionsPerTurn)
-            { FinishLimit("action limit reached", EndReason.ActionLimit); return; }
-            if (_config.MaxTotalRequests <= 0 || TotalRequests >= _config.MaxTotalRequests)
-            { FinishLimit("session request limit reached", EndReason.SessionRequestLimit); return; }
+            // Deliberation mode delegates request/action/session admission to the shared per-match
+            // ledger. The legacy counters remain display evidence only in that mode. Feature-off
+            // keeps the exact historical checks below.
+            if (!DeliberationActive)
+            {
+                if (_config.MaxRequestsPerTurn <= 0 || RequestsThisTurn >= _config.MaxRequestsPerTurn)
+                { FinishLimit("request limit reached", EndReason.RequestLimit); return; }
+                if (_config.MaxActionsPerTurn <= 0 || ActionsThisTurn >= _config.MaxActionsPerTurn)
+                { FinishLimit("action limit reached", EndReason.ActionLimit); return; }
+                if (_config.MaxTotalRequests <= 0 || TotalRequests >= _config.MaxTotalRequests)
+                { FinishLimit("session request limit reached", EndReason.SessionRequestLimit); return; }
+            }
             if (_config.MaxUsd.HasValue)
             {
                 // Fail closed: a configured dollar cap that cannot be measured must not be skipped.
@@ -318,6 +342,12 @@ namespace LuanShi.Engine
             // Chat attribution comes from the seat-filtered observation, never canonical state.
             _factionName = observation.Faction(_seatId)?.Name;
 
+            // Opt-in deliberation: bind one shared ledger per match and load this seat's private
+            // note before any prompt or provider work. Failure here is a bounded stop, never a
+            // silent fallback to a different accounting scheme.
+            if (DeliberationActive && !PrepareDeliberation(observation, out string deliberationFailure))
+            { FinishFailed(deliberationFailure, EndReason.DeliberationLimit); return; }
+
             MovementView movement = null;
             if (planning && !TryPlanMovement(out movement, out string movementFailure))
             { FinishFailed(movementFailure, EndReason.HostError); return; }
@@ -333,29 +363,66 @@ namespace LuanShi.Engine
             // The private result is consumed by exactly this prompt; it never survives into a
             // later seat's request or a recreated turn.
             string inquiryResult = TakePendingInquiryResult();
-            bool inquiry = _config.EnableManualLookup;
+            bool deliberation = DeliberationActive;
+            // In deliberation mode the full tool addendum replaces the legacy manual-only addendum.
+            bool inquiry = _config.EnableManualLookup && !deliberation;
+            string strategicNote = deliberation ? _strategicNote : null;
+            IReadOnlyList<string> earlierResults = deliberation
+                ? EarlierRetainedInquiryResults(inquiryResult) : null;
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
             CurrentPersonaId = persona?.Id;
-            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn);
+            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn,
+                deliberation);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
-            string user = planning
+            int requestsLeft = RemainingRequests();
+            // In deliberation mode the action budget means accepted actions, not attempts.
+            int actionsLeft = deliberation
+                ? Math.Max(0, _config.MaxActionsPerTurn - _acceptedActionsThisTurn)
+                : RemainingActions();
+            // Deliberation uses the richer builder even for a non-planning host: with a null
+            // movement view and no attacks it emits the same domestic body plus the private note,
+            // retained results and the deliberation identity.
+            string user = planning || deliberation
                 ? PromptBuilder.UserPrompt(observation, options, _history,
-                    RemainingRequests(), RemainingActions(), movement, relevantMemories,
-                    inquiryResult, inquiry, persona, attackOn, attacks)
+                    requestsLeft, actionsLeft, movement, relevantMemories,
+                    inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
+                    earlierResults, deliberation)
                 : PromptBuilder.UserPrompt(observation, options, _history,
-                    RemainingRequests(), RemainingActions(), relevantMemories, inquiryResult,
+                    requestsLeft, actionsLeft, relevantMemories, inquiryResult,
                     inquiry, persona);
             if (system.Length + user.Length > MaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
-            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn);
-            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn);
+            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn,
+                deliberation);
+            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn,
+                deliberation);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
+
+            // Admit and mark dispatched before the provider is called. A denial sends nothing; a
+            // dispatch denial releases the undispatched reservation and stops the turn.
+            DeliberationAdmission requestAdmission = null;
+            if (deliberation)
+            {
+                if (!TryAdmitDeliberationRequest(out requestAdmission, out string deniedReason))
+                { FinishDeliberationRequestDenied(requestAdmission, deniedReason); return; }
+                DeliberationBindingResult dispatch =
+                    _deliberationLedger.MarkDispatched(requestAdmission.ReservationId);
+                if (!dispatch.Ok)
+                {
+                    _deliberationLedger.Cancel(requestAdmission.ReservationId,
+                        DeliberationCancelReason.Aborted);
+                    FinishFailed("deliberation request dispatch denied: " + dispatch.Code,
+                        EndReason.DispatchDenied);
+                    return;
+                }
+            }
+
             var cts = new CancellationTokenSource();
             if (_config.RequestTimeoutMs > 0) cts.CancelAfter(_config.RequestTimeoutMs);
 
@@ -364,6 +431,7 @@ namespace LuanShi.Engine
             catch (Exception)
             {
                 cts.Dispose();
+                AbandonDeliberationAdmission(requestAdmission);
                 CaptureExchangeDispatchFailure(index, observation.Season, promptVersion, schemaHash,
                     "transport failed to start");
                 FinishFailed("transport failed to start", EndReason.TransportError);
@@ -372,6 +440,7 @@ namespace LuanShi.Engine
             if (task == null)
             {
                 cts.Dispose();
+                AbandonDeliberationAdmission(requestAdmission);
                 CaptureExchangeDispatchFailure(index, observation.Season, promptVersion, schemaHash,
                     "transport returned no task");
                 FinishFailed("transport returned no task", EndReason.TransportError);
@@ -397,6 +466,7 @@ namespace LuanShi.Engine
                 SchemaHash = schemaHash,
                 // Match the transport's effective fallback when the configured cap is zero.
                 MaxOutputTokens = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400,
+                DeliberationReservationId = requestAdmission?.ReservationId,
             };
             State = RunnerState.Requesting;
             Status = "requesting response " + index;
@@ -457,8 +527,11 @@ namespace LuanShi.Engine
                 try { cts.Cancel(); } catch (Exception) { }
                 cts.Dispose();
             }
-            Task<LlmResponse> task = _inflight?.Task;
+            InFlight abandoned = _inflight;
+            Task<LlmResponse> task = abandoned?.Task;
             _inflight = null;
+            // A flight dropped by Finish/Begin must not leave a ledger reservation holding budget.
+            if (abandoned != null) AbandonDeliberationProvider(abandoned, DeliberationCancelReason.Aborted);
             if (task != null)
             {
                 if (task.IsFaulted)
