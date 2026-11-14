@@ -241,6 +241,19 @@ namespace LuanShi.Playground
                 }
 
                 request.Admission = "allowed";
+                DeliberationBindingResult dispatch = _ledger.MarkDispatched(admission.ReservationId);
+                if (!dispatch.Ok)
+                {
+                    _ledger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
+                    request.Admission = "dispatch_denied:" + dispatch.Code;
+                    request.ResponseKind = "not_sent";
+                    request.Outcome = "request_dispatch_denied:" + dispatch.Code;
+                    request.Detail = dispatch.Message;
+                    _record.Requests.Add(request);
+                    endReason = "request_dispatch:" + dispatch.Code;
+                    break;
+                }
+
                 LlmResponse response = Send(context, out long elapsedMs);
                 requests++;
                 request.ElapsedMs = elapsedMs;

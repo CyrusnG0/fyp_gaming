@@ -105,6 +105,60 @@ namespace LuanShi.Playground
                 "wall-time exhaustion executes no action and changes no state");
         }
 
+        private static void DispatchDenialStopsBeforeProvider(TestLog log)
+        {
+            PlaygroundConfig config = FaultConfig();
+            config.MaxWallMillisPerTurn = 5;
+            config.MaxRequestsPerSession = 1;
+            var fake = new FakeLlmTransport();
+            fake.EnqueueSuccess(EndTurnJson("must not be sent"), 0, 1200, 60);
+            var clock = new PlaygroundClock { AdvanceOnRead = 4, AdvanceMillisOnRead = 5 };
+            var session = new PlaygroundSession(config, null, fake, clock,
+                new InMemoryLlmMemoryStore(), new InMemoryPlaygroundNoteStore());
+
+            PlaygroundRunRecord record = session.Run();
+            PlaygroundRequestRecord request = null;
+            foreach (PlaygroundRequestRecord candidate in record.Requests)
+                if (candidate.SeatId == "seat-a") { request = candidate; break; }
+            PlaygroundTurnRecord turn = record.FindTurn("seat-a", 1);
+            log.Check(fake.Requests.Count == 0,
+                "dispatch denied at the wall-time boundary never calls the provider");
+            log.Check(request != null && request.ResponseKind == "not_sent"
+                && request.Outcome.StartsWith("request_dispatch_denied:", StringComparison.Ordinal)
+                && turn != null && turn.EndReason.StartsWith("request_dispatch:", StringComparison.Ordinal),
+                "dispatch denial is recorded with a bounded stop reason",
+                request == null ? "no request" : request.Outcome);
+            DeliberationBudgetSnapshot budget = session.Ledger.Snapshot();
+            log.Check(budget.Session.Requests == 1 && budget.Session.ReservedInputTokens == 0
+                && budget.Session.ReservedOutputTokens == 0,
+                "dispatch denial cancels the undispatched token reservation");
+        }
+
+        private static void FailedPrecheckStopsBeforeSubmit(TestLog log)
+        {
+            PlaygroundConfig config = FaultConfig();
+            var engine = PlaygroundScenario.Create(config);
+            engine.State.FindCity("city-a").Food += 17;
+            var fake = new FakeLlmTransport();
+            fake.EnqueueSuccess(CaptureMarchJson(config.Seed, config.GameId), 0, 1200, 60);
+            var session = new PlaygroundSession(config, engine, fake, new PlaygroundClock(),
+                new InMemoryLlmMemoryStore(), new InMemoryPlaygroundNoteStore());
+
+            PlaygroundRunRecord record = session.Run();
+            PlaygroundActionRecord action = null;
+            foreach (PlaygroundActionRecord candidate in record.Actions)
+                if (candidate.SeatId == "seat-a") { action = candidate; break; }
+            PlaygroundTurnRecord turn = record.FindTurn("seat-a", 1);
+            log.Check(action != null && action.CheckRan && !action.ReplayMatched
+                && !action.CheckOk && !action.Executed,
+                "a replay-mismatched precheck refuses the action before live submit",
+                action == null ? "no action" : action.CheckError);
+            log.Check(turn != null && turn.EndReason == "check_rejected"
+                && SameTurnHashes(turn),
+                "failed precheck stops with a bounded reason and preserves live state",
+                turn == null ? "no turn" : turn.EndReason);
+        }
+
         private static void AssertFaultTurn(TestLog log, PlaygroundRunRecord record,
             string label, string expectedEndReason, string expectedOutcome)
         {

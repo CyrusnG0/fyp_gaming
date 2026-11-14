@@ -47,6 +47,8 @@ namespace LuanShi.Playground
             ExhaustedInquiryBudgetExecutesNothing(log);
             ExhaustedRequestBudgetExecutesNothing(log);
             ExhaustedWallTimeBudgetExecutesNothing(log);
+            DispatchDenialStopsBeforeProvider(log);
+            FailedPrecheckStopsBeforeSubmit(log);
 
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;

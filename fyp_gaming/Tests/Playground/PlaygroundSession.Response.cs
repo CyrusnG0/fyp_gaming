@@ -85,6 +85,23 @@ namespace LuanShi.Playground
                 return TurnStep.StopWith("inquiry_budget:" + admission.Code);
             }
 
+            DeliberationBindingResult dispatch = _ledger.MarkDispatched(admission.ReservationId);
+            if (!dispatch.Ok)
+            {
+                _ledger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
+                _record.Inquiries.Add(new PlaygroundInquiryRecord
+                {
+                    RequestIndex = request.Index, SeatId = seatId, Season = observation.Season,
+                    Tool = inquiry.ToolName, RequestJson = text,
+                    Ok = false, ErrorCode = "dispatch_" + dispatch.Code,
+                    CpBefore = cpBefore, CpAfter = cpBefore,
+                    ActionAdmissionsBefore = actionsBefore, ActionAdmissionsAfter = actionsBefore,
+                });
+                request.Outcome = "inquiry_dispatch_denied:" + dispatch.Code;
+                request.Detail = dispatch.Message;
+                return TurnStep.StopWith("inquiry_dispatch:" + dispatch.Code);
+            }
+
             string resultJson;
             bool truncated = false;
             bool resultOk = false;
@@ -277,6 +294,20 @@ namespace LuanShi.Playground
                 return TurnStep.StopWith(record.CheckOk ? "check_only" : "check_rejected");
             }
 
+            if (runCheck && (!record.CheckOk || !record.ReplayMatched))
+            {
+                record.Executed = false;
+                record.Accepted = false;
+                record.LiveStateHashBeforeExecute = liveBefore;
+                record.LiveStateHashAfterExecute = liveBefore;
+                _record.Actions.Add(record);
+                string failure = record.CheckError ?? "check_rejected";
+                AddHistory(seatId, "check failed -> " + failure);
+                request.Outcome = "action_check_rejected";
+                request.Detail = failure;
+                return TurnStep.StopWith("check_rejected");
+            }
+
             DeliberationAdmission admission = _ledger.TryAdmitGameAction();
             if (!admission.Allowed)
             {
@@ -288,6 +319,20 @@ namespace LuanShi.Playground
                 request.Outcome = "action_denied:" + admission.Code;
                 request.Detail = admission.Message;
                 return TurnStep.StopWith("action_budget:" + admission.Code);
+            }
+
+            DeliberationBindingResult dispatch = _ledger.MarkDispatched(admission.ReservationId);
+            if (!dispatch.Ok)
+            {
+                _ledger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
+                record.Executed = false;
+                record.Accepted = false;
+                record.LiveStateHashBeforeExecute = liveBefore;
+                record.LiveStateHashAfterExecute = liveBefore;
+                _record.Actions.Add(record);
+                request.Outcome = "action_dispatch_denied:" + dispatch.Code;
+                request.Detail = dispatch.Message;
+                return TurnStep.StopWith("action_dispatch:" + dispatch.Code);
             }
 
             ValidationResult validation;
