@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using LuanShi.Engine;
 
@@ -80,13 +81,15 @@ internal static partial class Harness
         return map;
     }
 
-    private static GameEngine BuildUnseenShortcutWorld(int seed, bool shortcutOpen)
+    private static GameEngine BuildUnseenShortcutWorld(int seed, bool shortcutOpen,
+        string unitType = null, bool extraSlope52 = false)
     {
         var e = new GameEngine(seed);
         var map = SpatialOrtho4Map(8, 8);
         // Visible obstacles: river at (3,4) (dist 2 from city) and forest at (4,3) (Cost=2, dist 2 from city).
         map.Walkable[map.Index(3, 4)] = false;
         map.Cost[map.Index(4, 3)] = 2;
+        if (extraSlope52) map.Cost[map.Index(5, 2)] = 2;
         // Currently unseen cell (2,5): dist 3 from army (2,2), dist 4 from city (5,4).
         if (!shortcutOpen)
         {
@@ -109,7 +112,7 @@ internal static partial class Harness
         e.State.Armies.Add(new ArmyState
         {
             Id = ShortcutArmyId, Name = "Shu 1", OwnerSeatId = SeatShu,
-            UnitType = UnitTypes.Infantry, Troops = 2000, X = 2, Z = 2,
+            UnitType = unitType ?? UnitTypes.Infantry, Troops = 2000, X = 2, Z = 2,
         });
         e.BeginSeason();
         return e;
@@ -220,6 +223,109 @@ internal static partial class Harness
 
         Check(unseenCheck && defShowsLeak && noLeak && promptMatch && legalOpen && legalBlk,
             $"reachable unseen shortcut invariance: unseen={unseenCheck} def={defShowsLeak} noLeak={noLeak} prompt={promptMatch} legal={legalOpen}/{legalBlk}");
+
+        VerifyPostMarchShortcutLeak(eOpen, eBlocked);
+        VerifyPostMarchStillUnseenShortcutLeak();
+    }
+
+    private static string DiffWindow(string a, string b, out int index)
+    {
+        int len = Math.Min(a.Length, b.Length);
+        index = len;
+        for (int i = 0; i < len; i++)
+        {
+            if (a[i] != b[i]) { index = i; break; }
+        }
+        int start = Math.Max(0, index - 24);
+        int take = Math.Min(64, a.Length - start);
+        return a.Substring(start, take);
+    }
+
+    private static void VerifyPostMarchShortcutLeak(GameEngine eOpen, GameEngine eBlocked)
+    {
+        bool marched = eOpen.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 4, 5)).Ok
+            && eBlocked.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 4, 5)).Ok;
+
+        Observation obsOpen = eOpen.Observe(SeatShu);
+        Observation obsBlk = eBlocked.Observe(SeatShu);
+        var histOpen = new InvestigationService(obsOpen.GameId, SeatShu, obsOpen, null).SearchHistory("", 10, 0);
+        var histBlk = new InvestigationService(obsBlk.GameId, SeatShu, obsBlk, null).SearchHistory("", 10, 0);
+
+        string hJsonOpen = histOpen.ToJson(), hJsonBlk = histBlk.ToJson();
+        string hSnippet = DiffWindow(hJsonOpen, hJsonBlk, out int hIdx);
+        bool searchLeak = histOpen.Ok && histBlk.Ok && histOpen.Hits.Count == 3
+            && histOpen.Hits[0].EventType == "action" && histOpen.Hits[0].ToJson() == histBlk.Hits[0].ToJson()
+            && histOpen.Hits[1].EventType == "army_moved"
+            && histOpen.Hits[1].Payload["cost"] == "5" && histBlk.Hits[1].Payload["cost"] == "6"
+            && hSnippet.Contains("\"cost\":\"5\"")
+            && hJsonOpen.Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == hJsonBlk;
+
+        string uOpen = PromptBuilder.UserPrompt(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
+            MovementPlanner.Build(eOpen, SeatShu, 8), null, null, inquiryEnabled: true, attackEnabled: true);
+        string uBlk = PromptBuilder.UserPrompt(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
+            MovementPlanner.Build(eBlocked, SeatShu, 8), null, null, inquiryEnabled: true, attackEnabled: true);
+        string uSnippet = DiffWindow(uOpen, uBlk, out int uIdx);
+        bool obsLeak = obsOpen.ToJson().Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == obsBlk.ToJson()
+            && uSnippet.Contains("\"cost\":\"5\"")
+            && uOpen.Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == uBlk;
+
+        // Arriving at (4,5) puts (2,5) at dist 2 <= FogArmyRange, so spatial frontier also sees the new cell.
+        SpatialContextView spOpen = SpatialContextBuilder.Build(eOpen, SeatShu, obsOpen);
+        SpatialContextView spBlk = SpatialContextBuilder.Build(eBlocked, SeatShu, obsBlk);
+        bool sightRevealed = eOpen.InSight(SeatShu, 2, 5) && eBlocked.InSight(SeatShu, 2, 5)
+            && spOpen.ArmyFrontiers[0].FrontierCellCount != spBlk.ArmyFrontiers[0].FrontierCellCount;
+        string pOpen = PromptBuilder.UserPromptWithSpatial(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
+            MovementPlanner.BuildDiversified(eOpen, SeatShu, 8, spOpen), spOpen,
+            spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
+        string pBlk = PromptBuilder.UserPromptWithSpatial(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
+            MovementPlanner.BuildDiversified(eBlocked, SeatShu, 8, spBlk), spBlk,
+            spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
+        string pSnippet = DiffWindow(pOpen, pBlk, out int pIdx);
+        bool spatialDiffsFirstAtFrontier = sightRevealed && pIdx < uIdx && pSnippet.Contains("adj_unseen=")
+            && pOpen.Contains("\"cost\":\"5\"") && pBlk.Contains("\"cost\":\"6\"");
+
+        Check(marched && searchLeak && obsLeak && spatialDiffsFirstAtFrontier,
+            $"post-march shortcut leak (4,5): hIdx={hIdx} uIdx={uIdx} pIdx={pIdx} adj={spOpen.ArmyFrontiers[0].FrontierCellCount}/{spBlk.ArmyFrontiers[0].FrontierCellCount}");
+    }
+
+    private static void VerifyPostMarchStillUnseenShortcutLeak()
+    {
+        GameEngine cOpen = BuildUnseenShortcutWorld(707, true, UnitTypes.Cavalry, extraSlope52: true);
+        GameEngine cBlk = BuildUnseenShortcutWorld(707, false, UnitTypes.Cavalry, extraSlope52: true);
+
+        bool preUnseen = !cOpen.InSight(SeatShu, 2, 5) && !cBlk.InSight(SeatShu, 2, 5);
+        MovementView preDivOpen = MovementPlanner.BuildDiversified(cOpen, SeatShu, 40);
+        MovementView preDivBlk = MovementPlanner.BuildDiversified(cBlk, SeatShu, 40);
+        bool advSame = TryFindOption(preDivOpen, ShortcutArmyId, 5, 5, out int co) && co == 7
+            && TryFindOption(preDivBlk, ShortcutArmyId, 5, 5, out int cb) && cb == 7;
+
+        bool marched = cOpen.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 5, 5)).Ok
+            && cBlk.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 5, 5)).Ok;
+        bool stillUnseen = !cOpen.InSight(SeatShu, 2, 5) && !cBlk.InSight(SeatShu, 2, 5);
+
+        Observation obsOpen = cOpen.Observe(SeatShu);
+        Observation obsBlk = cBlk.Observe(SeatShu);
+        SpatialContextView spOpen = SpatialContextBuilder.Build(cOpen, SeatShu, obsOpen);
+        SpatialContextView spBlk = SpatialContextBuilder.Build(cBlk, SeatShu, obsBlk);
+        MovementView divOpen = MovementPlanner.BuildDiversified(cOpen, SeatShu, 40, spOpen);
+        MovementView divBlk = MovementPlanner.BuildDiversified(cBlk, SeatShu, 40, spBlk);
+        bool spatialAndMovesIdentical = spOpen.ToJson() == spBlk.ToJson() && divOpen.ToJson() == divBlk.ToJson();
+
+        var histOpen = new InvestigationService(obsOpen.GameId, SeatShu, obsOpen, null).SearchHistory("", 10, 0);
+        var histBlk = new InvestigationService(obsBlk.GameId, SeatShu, obsBlk, null).SearchHistory("", 10, 0);
+        bool histCostOnly = histOpen.Hits[1].Payload["cost"] == "6" && histBlk.Hits[1].Payload["cost"] == "7"
+            && histOpen.ToJson().Replace("\"cost\":\"6\"", "\"cost\":\"7\"") == histBlk.ToJson();
+
+        string pOpen = PromptBuilder.UserPromptWithSpatial(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
+            divOpen, spOpen, spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
+        string pBlk = PromptBuilder.UserPromptWithSpatial(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
+            divBlk, spBlk, spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
+        string pSnippet = DiffWindow(pOpen, pBlk, out _);
+        bool promptCostOnly = pOpen != pBlk && pSnippet.Contains("\"cost\":\"6\"")
+            && pOpen.Replace("\"cost\":\"6\"", "\"cost\":\"7\"") == pBlk;
+
+        Check(preUnseen && advSame && marched && stillUnseen && spatialAndMovesIdentical && histCostOnly && promptCostOnly,
+            "post-march still-unseen shortcut leak (5,5): next spatial prompt and search_history differ solely at payload.cost (6 vs 7)");
     }
 
     private static HashSet<string> SplitCsvTokens(string raw)
