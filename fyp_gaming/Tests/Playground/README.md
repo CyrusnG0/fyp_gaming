@@ -74,8 +74,8 @@ Deliberation-only settings (all ignored while the feature is off):
 | `max_note_chars` | `400` | One strategic note |
 | `max_retained_inquiry_results` | `4` | Earlier bounded inquiry results kept per seat |
 | `inquiry_max_response_chars` | `16000` | Serialized result cap; too-large results are replaced, never retried blindly |
-| `deliberation_input_token_bound` | `0` | Optional ledger token reservation; `0` = none |
-| `max_deliberation_turn_millis` | `0` | Optional ledger wall-time cap; `0` = ledger adds none |
+| `deliberation_input_token_bound` | `0` | Reservation hint for the ledger only; **not an enforced token cap** (nothing is truncated or refused because of it; real usage is settled from the provider report) |
+| `max_deliberation_turn_millis` | `0` | Per-turn wall-time cap; also stops an in-flight request (`TurnTimeLimit`); `0` = none |
 
 Accounting semantics:
 

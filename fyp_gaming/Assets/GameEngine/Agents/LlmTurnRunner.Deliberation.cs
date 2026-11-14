@@ -151,6 +151,11 @@ namespace LuanShi.Engine
 
         private static int NonNegative(int value) => value < 0 ? 0 : value;
 
+        /// <summary>
+        /// Reservation hint only: <see cref="LlmConfig.DeliberationInputTokenBound"/> and the output cap
+        /// size the ledger reservation. Neither is an enforced token cap; real usage is whatever the
+        /// provider reports and is settled afterwards. Request counts and wall time are the limits.
+        /// </summary>
         private DeliberationTokenBounds DeliberationRequestBounds()
         {
             int input = Math.Max(0, _config.DeliberationInputTokenBound);
@@ -170,6 +175,22 @@ namespace LuanShi.Engine
             admission = _deliberationLedger.TryAdmitRequest(DeliberationRequestBounds());
             if (admission.Allowed) return true;
             failure = admission.Code;
+            return false;
+        }
+
+        /// <summary>
+        /// Admits one provider request and marks it dispatched, before any provider work. On a denial
+        /// the turn is finished here: an admission denial sends nothing, and a dispatch denial first
+        /// cancels the undispatched reservation. Returns true only when the request may be sent.
+        /// </summary>
+        private bool TryDispatchDeliberationRequest(out DeliberationAdmission admission)
+        {
+            if (!TryAdmitDeliberationRequest(out admission, out string deniedReason))
+            { FinishDeliberationRequestDenied(admission, deniedReason); return false; }
+            DeliberationBindingResult dispatch = _deliberationLedger.MarkDispatched(admission.ReservationId);
+            if (dispatch.Ok) return true;
+            _deliberationLedger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
+            FinishFailed("deliberation request dispatch denied: " + dispatch.Code, EndReason.DispatchDenied);
             return false;
         }
 

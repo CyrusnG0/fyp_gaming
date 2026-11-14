@@ -78,14 +78,16 @@ namespace LuanShi.Engine
         /// <summary>
         /// Optional host-supplied input-token bound for one request, used only to reserve ledger
         /// budget. Zero means "no bound supplied"; request-limited policies do not require one.
+        /// This is a reservation hint, NOT an enforced token cap: the runner never truncates a prompt
+        /// or refuses a response because of it, and settlement records the provider's reported usage.
         /// </summary>
         public int DeliberationInputTokenBound;
 
         /// <summary>
         /// Optional per-turn wall-time cap in milliseconds for the deliberation ledger. Zero or
         /// negative means the ledger adds no wall-time cap; <see cref="MaxTurnSeconds"/> still
-        /// bounds the runner itself. A positive value allows the ledger to deny work that arrives
-        /// after its turn window (for example a delayed dispatch).
+        /// bounds the runner itself. A positive value also stops the turn, including an in-flight
+        /// provider request, once the turn clock reaches it (end reason TurnTimeLimit).
         /// </summary>
         public int MaxDeliberationTurnMillis;
 
