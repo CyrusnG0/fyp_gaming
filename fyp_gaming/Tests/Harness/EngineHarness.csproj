@@ -18,6 +18,9 @@
   <ItemGroup>
     <Compile Include="*.cs" />
     <Compile Include="../../Assets/GameEngine/**/*.cs" />
+    <!-- The shipped demo scene's TBTK grid, exported once; the compact-scenario checks place
+         themselves on the real map rather than a synthetic corridor. -->
+    <None Include="demo-map.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
