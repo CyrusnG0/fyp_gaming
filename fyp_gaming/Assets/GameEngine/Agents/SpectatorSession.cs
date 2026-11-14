@@ -175,10 +175,11 @@ namespace LuanShi.Engine
         public int VoluntaryEndTurns => CountEndings(EndReason.ModelEndedTurn);
         public int LimitEndings => CountEndings(EndReason.ActionLimit, EndReason.RequestLimit,
             EndReason.InvalidResponseLimit, EndReason.TurnTimeLimit,
-            EndReason.SessionRequestLimit, EndReason.UsdBudgetLimit);
+            EndReason.SessionRequestLimit, EndReason.UsdBudgetLimit,
+            EndReason.InquiryLimit, EndReason.DeliberationLimit);
         public int FailedEndings => CountEndings(EndReason.ProviderError, EndReason.RequestTimeout,
             EndReason.HostError, EndReason.PromptTooLarge, EndReason.TransportError,
-            EndReason.UsdBudgetUnknown);
+            EndReason.UsdBudgetUnknown, EndReason.DispatchDenied);
         public int CancelledEndings => CountEndings(EndReason.Cancelled);
         public int GameOverEndings => CountEndings(EndReason.GameOver);
 

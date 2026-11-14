@@ -140,6 +140,15 @@ namespace LuanShi.Engine
             return _clock != null && _clock.Elapsed.TotalSeconds >= seconds;
         }
 
+        /// <summary>
+        /// Opt-in deliberation wall-time cap, polled only while a provider request is in flight so a
+        /// slow reply cannot outlive it. Zero/negative adds no extra limit. Admission-time wall checks
+        /// stay with the ledger and its clock.
+        /// </summary>
+        private bool DeliberationWallExpired()
+            => DeliberationActive && _config.MaxDeliberationTurnMillis > 0 && _clock != null
+               && _clock.ElapsedMilliseconds >= _config.MaxDeliberationTurnMillis;
+
         private bool RequestTimedOut(InFlight flight)
             => _config.RequestTimeoutMs > 0 && ElapsedMs(flight) >= _config.RequestTimeoutMs;
 
