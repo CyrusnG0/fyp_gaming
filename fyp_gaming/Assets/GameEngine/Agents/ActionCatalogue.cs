@@ -18,6 +18,12 @@ namespace LuanShi.Engine
         /// <summary>Target hex for coordinate orders (attack_army, attack_city); null otherwise.</summary>
         public int? ParamA;
         public int? ParamB;
+
+        /// <summary>
+        /// Fixed string arguments for a targetless order (research: <c>line</c>). Null for every
+        /// order that carries no args.
+        /// </summary>
+        public Dictionary<string, string> Args;
     }
 
     /// <summary>
@@ -45,7 +51,7 @@ namespace LuanShi.Engine
         /// then end_turn. The result is deterministic for the same observation.
         /// </summary>
         public static List<ActionOption> Build(Observation observation)
-            => Build(observation, null);
+            => Build(observation, null, false);
 
         /// <summary>
         /// As <see cref="Build(Observation)"/>, plus the seat-safe attack and assault candidates from
@@ -54,6 +60,17 @@ namespace LuanShi.Engine
         /// observation already shows and are never authorization: the engine revalidates the order.
         /// </summary>
         public static List<ActionOption> Build(Observation observation, AttackView attacks)
+            => Build(observation, attacks, false);
+
+        /// <summary>
+        /// Adds only candidates authorized by the flags and supported by this seat's observation.
+        /// Research entries (opt-in) have no target, carry <c>args.line</c> and sit after the domestic
+        /// blocks and before the attack entries. A line is advertised only while it is below the
+        /// maximum level and affordable in both research points and command points, so the list never
+        /// promises an order the validator will refuse for a reason the seat could have seen.
+        /// </summary>
+        public static List<ActionOption> Build(Observation observation, AttackView attacks,
+            bool includeResearch)
         {
             var options = new List<ActionOption>();
             if (observation == null) return options;
@@ -85,6 +102,7 @@ namespace LuanShi.Engine
                 }
             }
 
+            if (hasSeat && includeResearch) AppendResearch(options, observation);
             if (hasSeat) AppendAttacks(options, observation, attacks);
 
             options.Add(new ActionOption
@@ -111,6 +129,7 @@ namespace LuanShi.Engine
                 sb.Append("- type=").Append(option.Type);
                 if (!string.IsNullOrEmpty(option.TargetId))
                     sb.Append(" target_id=").Append(Sanitize(option.TargetId));
+                AppendArgs(sb, option.Args);
                 if (option.ParamA.HasValue && option.ParamB.HasValue)
                     sb.Append(" param_a=").Append(option.ParamA.Value.ToString(CultureInfo.InvariantCulture))
                       .Append(" param_b=").Append(option.ParamB.Value.ToString(CultureInfo.InvariantCulture));
@@ -122,6 +141,54 @@ namespace LuanShi.Engine
                     sb.Append(" note=\"").Append(Sanitize(option.Note)).Append('"');
             }
             return sb.ToString();
+        }
+
+        /// <summary>Renders fixed args in ordinal key order, so the text is byte-stable per observation.</summary>
+        private static void AppendArgs(StringBuilder sb, Dictionary<string, string> args)
+        {
+            if (args == null || args.Count == 0) return;
+            var keys = new List<string>(args.Keys);
+            keys.Sort(StringComparer.Ordinal);
+            sb.Append(" args={");
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(MiniJson.Str(keys[i])).Append(':').Append(MiniJson.Str(args[keys[i]]));
+            }
+            sb.Append('}');
+        }
+
+        /// <summary>
+        /// Research candidates: one per line that is below the maximum level and affordable in both
+        /// research points and command points. The command-point budget is seat-wide, so an
+        /// unaffordable order drops every line, not just some. Every number is read from the seat's
+        /// own observation and <see cref="BalanceConfig"/>, never from canonical state.
+        /// </summary>
+        private static void AppendResearch(List<ActionOption> options, Observation observation)
+        {
+            int commandCost = BalanceConfig.CommandPointCost(ActionType.Research);
+            if (observation.CommandPoints < commandCost) return;
+
+            foreach (string line in ResearchLine.All)
+            {
+                int level = observation.ResearchLevel(line);
+                if (level >= BalanceConfig.ResearchMaxLevel) continue;
+                int pointCost = BalanceConfig.ResearchLevelCost(level + 1);
+                if (observation.ResearchPoints < pointCost) continue;
+
+                options.Add(new ActionOption
+                {
+                    Type = ActionType.Research,
+                    TargetId = null,
+                    Label = "Research " + ResearchLine.Label(line) + " to level "
+                        + (level + 1).ToString(CultureInfo.InvariantCulture) + " for "
+                        + pointCost.ToString(CultureInfo.InvariantCulture) + " research points",
+                    CommandPointCost = commandCost,
+                    LikelyAffordable = true,
+                    Note = CandidateNote,
+                    Args = new Dictionary<string, string>(StringComparer.Ordinal) { { "line", line } },
+                });
+            }
         }
 
         private static void Evaluate(Observation observation, CityView city, string type, int cost,
