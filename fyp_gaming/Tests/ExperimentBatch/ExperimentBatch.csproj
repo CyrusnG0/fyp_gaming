@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Offline experiment-batch facility. It drives the PRODUCTION runner, spectator session, recorder and
+    summary writer with a scripted fake provider, so a later real-provider batch is repeatable and
+    auditable. No network, no credential, no Unity assembly. Commands: see BatchProgram.cs.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.ExperimentBatch</AssemblyName>
+    <RootNamespace>LuanShi.ExperimentBatch</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+    <!-- The shipped demo map (exported once by the engine harness); compact-contact-v1 places on it. -->
+    <None Include="../Harness/demo-map.json" Link="demo-map.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="examples/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

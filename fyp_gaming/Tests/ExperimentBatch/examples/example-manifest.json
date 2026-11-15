@@ -1,0 +1,48 @@
+{
+  "schema": "luanshi-experiment-batch/1",
+  "batch_id": "spatial-pair-offline-demo",
+  "pinned_commit": "e93f7f2",
+  "scenario": "compact-contact-v1",
+  "balance_profile": "food-easy",
+  "seasons": 2,
+  "first_mover": "seat-0",
+  "factions": { "seat-0": "Wei", "seat-1": "Shu" },
+  "personas": { "enabled": false, "by_seat": {} },
+  "provider": { "kind": "fake", "model": "fake-model", "faults": [] },
+  "features": {
+    "deliberation": true,
+    "rich_profile": true,
+    "research": true,
+    "spatial_context": false,
+    "visible_march_routes": true,
+    "attack": false,
+    "manual_lookup": false
+  },
+  "setup": { "research_points": 100 },
+  "ceilings": {
+    "max_requests_per_turn": 12,
+    "max_total_requests": 80,
+    "max_actions_per_turn": 6,
+    "max_accepted_actions_per_session": 40,
+    "max_inquiries_per_turn": 6,
+    "max_inquiries_per_session": 30,
+    "max_turn_seconds": 60,
+    "max_session_seconds": 600,
+    "request_timeout_ms": 5000,
+    "max_output_tokens": 4000,
+    "max_session_input_tokens": 2000000,
+    "max_session_output_tokens": 200000,
+    "max_prompt_chars": 200000
+  },
+  "batch_ceilings": {
+    "max_matches": 4,
+    "max_total_requests": 400,
+    "max_total_input_tokens": 5000000,
+    "max_total_output_tokens": 500000,
+    "max_batch_wall_seconds": 300,
+    "max_match_wall_seconds": 60,
+    "unknown_usage_policy": "stop_batch"
+  },
+  "seeds": [4242],
+  "experiment": { "variable": "spatial_context", "control": false, "treatment": true }
+}
