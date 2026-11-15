@@ -60,16 +60,29 @@ namespace LuanShi.Engine
         /// <summary>attack_army and attack_city, in catalogue order. Not part of <see cref="SupportedTypes"/>.</summary>
         public static IReadOnlyCollection<string> AttackTypes => AttackVocabularyView;
 
-        /// <summary>The unchanged demo vocabulary: an attack type here is an "unsupported action type".</summary>
-        public static ParseResult Parse(string modelText) => Parse(modelText, false);
+        /// <summary>The opt-in research order, accepted only with allowResearch. Not part of <see cref="SupportedTypes"/>.</summary>
+        private static readonly string[] ResearchVocabulary = { ActionType.Research };
+
+        private static readonly ReadOnlyCollection<string> ResearchVocabularyView =
+            Array.AsReadOnly(ResearchVocabulary);
+
+        /// <summary>The single opt-in research order. Not part of <see cref="SupportedTypes"/>.</summary>
+        public static IReadOnlyCollection<string> ResearchTypes => ResearchVocabularyView;
+
+        /// <summary>The unchanged demo vocabulary: an attack or research type here is "unsupported action type".</summary>
+        public static ParseResult Parse(string modelText) => Parse(modelText, false, false);
+
+        /// <summary>Attacks may be opted in; research stays disabled.</summary>
+        public static ParseResult Parse(string modelText, bool allowAttack)
+            => Parse(modelText, allowAttack, false);
 
         /// <summary>
-        /// With <paramref name="allowAttack"/> the two attack orders join the vocabulary; they take the
-        /// same fixed shape as march (own army id plus two small integer coordinates). The flag only
-        /// widens the vocabulary — the host must also have advertised the order, and the engine
+        /// The opt-in flags widen the vocabulary only. Attacks take the same fixed shape as march
+        /// (own army id plus two small integer coordinates); research has no target and requires
+        /// exactly <c>args.line</c>. The host must also have advertised the order, and the engine
         /// still decides legality.
         /// </summary>
-        public static ParseResult Parse(string modelText, bool allowAttack)
+        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch)
         {
             if (!UnwrapFence(modelText, out string json, out string error))
                 return ParseResult.Failure(error);
@@ -131,11 +144,20 @@ namespace LuanShi.Engine
 
             if (type == null) return ParseResult.Failure("type is required");
             bool attackType = AttackSet.Contains(type);
-            if (!VocabularySet.Contains(type) && !(allowAttack && attackType))
+            bool researchType = type == ActionType.Research;
+            if (!VocabularySet.Contains(type) && !(allowAttack && attackType)
+                && !(allowResearch && researchType))
                 return ParseResult.Failure("unsupported action type");
 
             bool endTurn = type == EndTurnType;
-            if (endTurn)
+            if (researchType)
+            {
+                // args.line identifies the order, so research carries no target at all: an omitted,
+                // empty or null target_id and a real id are all schema violations, not a no-op.
+                if (hasTarget) return ParseResult.Failure("invalid field");
+                target = null;
+            }
+            else if (endTurn)
             {
                 // end_turn carries no target. Empty/null/omitted are equivalent; a real target is a
                 // schema violation, not a no-op, so the model gets an explicit correction.
@@ -157,6 +179,9 @@ namespace LuanShi.Engine
                 if (paramA < 0 || paramA > 255 || paramB < 0 || paramB > 255)
                     return ParseResult.Failure("coordinates out of range");
             }
+            // Research has no hex: a coordinate field is a schema violation even when it is 0.
+            if (researchType && (hasParamA || hasParamB))
+                return ParseResult.Failure("invalid field");
 
             // Defaults are explicit here so an omitted field is not confused with a value of 0.
             if (!hasParamA) paramA = 0;
@@ -174,9 +199,13 @@ namespace LuanShi.Engine
                         return ParseResult.Failure(error);
                     if (type == ActionType.Recruit && argValue != UnitTypes.Infantry)
                         return ParseResult.Failure("unsupported unit type");
+                    if (researchType && !ResearchLine.IsValid(argValue))
+                        return ParseResult.Failure("unsupported research line");
                     args.Add(arg.Key, argValue);
                 }
             }
+            if (researchType && (args == null || !args.ContainsKey("line")))
+                return ParseResult.Failure("line is required");
 
             return new ParseResult
             {
@@ -219,6 +248,7 @@ namespace LuanShi.Engine
         private static bool ArgKeyAllowed(string type, string key)
         {
             if (type == ActionType.Recruit) return key == "unit_type";
+            if (type == ActionType.Research) return key == "line";
             return false;
         }
 
