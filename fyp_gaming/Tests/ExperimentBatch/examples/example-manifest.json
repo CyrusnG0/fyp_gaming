@@ -18,6 +18,7 @@
     "attack": false,
     "manual_lookup": false
   },
+  "spatial": { "level": "standard" },
   "setup": { "research_points": 100 },
   "ceilings": {
     "max_requests_per_turn": 12,

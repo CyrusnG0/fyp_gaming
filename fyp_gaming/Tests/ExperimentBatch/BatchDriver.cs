@@ -21,6 +21,10 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("incomplete_reason")] public string IncompleteReason { get; set; }
         [JsonPropertyName("final_state_differs")] public bool? FinalStateDiffers { get; set; }
         [JsonPropertyName("both_audits_ok")] public bool BothAuditsOk { get; set; }
+        /// <summary>For a spatial_context pair: problems with the claim "same game, only the production spatial context differs". Null for any other variable.</summary>
+        [JsonPropertyName("spatial_problems")] public List<string> SpatialProblems { get; set; }
+        /// <summary>The arms' final canonical worlds are identical. Expected with the scripted fake (same orders); a real model would diverge.</summary>
+        [JsonPropertyName("final_world_identical")] public bool? FinalWorldIdentical { get; set; }
     }
 
     public sealed class BatchResult
@@ -47,7 +51,7 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("token_ceiling_note")] public string TokenCeilingNote { get; set; } =
             "Input-token ceilings are checked against usage already reported before each request, so one request can overshoot the ceiling; batch totals can exceed a batch ceiling by up to one request per started match. Output ceilings are strict.";
         [JsonPropertyName("note")] public string Note { get; set; } =
-            "Offline scripted fake provider. Outcomes are plumbing evidence, never model behaviour. Spatial context is a fake switch, not integrated in production.";
+            "Offline scripted fake provider. Outcomes are plumbing evidence, never model behaviour. The scripted replies are identical in both arms and ignore the spatial setting; only the production prompt differs.";
     }
 
     /// <summary>
@@ -173,7 +177,11 @@ namespace LuanShi.ExperimentBatch
                     pair.SystemPromptsIdentical = CompareSystemPrompts(c.Captures, t.Captures, out string how);
                     pair.SystemPromptComparison = how;
                     pair.FinalStateDiffers = string.Join("|", c.FinalState) != string.Join("|", t.FinalState);
+                    if (c.Spatial != null && t.Spatial != null) pair.FinalWorldIdentical = c.Spatial.WorldFinalDigest == t.Spatial.WorldFinalDigest;
+                    // Only a pair whose arms both reached the end of their seasons is judged: a stopped or failed arm makes the pair incomplete, not inconsistent.
+                    if (manifest.Experiment.Variable == "spatial_context" && Ran(c) && Ran(t)) pair.SpatialProblems = BatchSpatial.CheckPair(c, t);
                 }
+                if (pair.SpatialProblems != null && pair.SpatialProblems.Count > 0) allOk = false;
                 pair.Complete = Ran(c) && Ran(t) && pair.SettingsCheck.Ok;
                 if (!pair.Complete)
                 {

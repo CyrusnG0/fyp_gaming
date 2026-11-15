@@ -36,6 +36,12 @@ namespace LuanShi.ExperimentBatch
             config.EnableResearch = f.Research;
             config.EnableAttack = f.Attack;
             config.RequireVisibleMarchRoutes = f.VisibleMarchRoutes;
+            // The production switch: LlmConfig.SpatialContext.Level (off by default). Nothing else about the arm changes.
+            config.SpatialContext = new SpatialContextOptions
+            {
+                Level = !f.SpatialContext ? SpatialDetailLevel.Off
+                    : m.Spatial != null && m.Spatial.Level == "rich" ? SpatialDetailLevel.Rich : SpatialDetailLevel.Standard,
+            };
             config.EnablePersonas = m.Personas.Enabled;
             foreach (KeyValuePair<string, string> kv in m.Personas.BySeat) config.SetPersonaOverride(kv.Key, kv.Value);
             config.MaxRequestsPerTurn = c.MaxRequestsPerTurn.Value;
@@ -52,6 +58,26 @@ namespace LuanShi.ExperimentBatch
             config.MaxSessionOutputTokens = c.MaxSessionOutputTokens.Value;
             config.MaxPromptChars = c.MaxPromptChars.Value;
             return config;
+        }
+
+        /// <summary>
+        /// SHA-256 over the whole canonical world, hidden parts included (every city, army, faction and the season).
+        /// Researcher-side only: it proves two arms saw the same world, never a prompt input.
+        /// </summary>
+        public static string WorldDigest(GameEngine engine)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("season=").Append(engine.State.Season).Append(" map=").Append(engine.State.Map.Width).Append('x').Append(engine.State.Map.Height).Append('\n');
+            foreach (CityState c in engine.State.Cities)
+                sb.Append("city ").Append(c.Id).Append(' ').Append(c.OwnerSeatId ?? "-").Append(' ').Append(c.X).Append(',').Append(c.Z)
+                  .Append(" pop=").Append(c.Population).Append(" food=").Append(c.Food).Append(" gold=").Append(c.Gold).Append(" garrison=").Append(c.Garrison).Append('\n');
+            foreach (ArmyState a in engine.State.Armies)
+                sb.Append("army ").Append(a.Id).Append(' ').Append(a.OwnerSeatId).Append(' ').Append(a.X).Append(',').Append(a.Z)
+                  .Append(" troops=").Append(a.Troops).Append(" morale=").Append(a.Morale).Append('\n');
+            foreach (FactionState f in engine.State.Factions)
+                sb.Append("faction ").Append(f.SeatId).Append(" cp=").Append(f.CommandPoints).Append(" rp=").Append(f.ResearchPoints)
+                  .Append(" agri=").Append(f.ResearchLevel(ResearchLine.Agri)).Append('\n');
+            return BatchPlan.Sha256(sb.ToString());
         }
 
         /// <summary>Researcher-side end-of-match facts, read directly from canonical state (never a prompt input).</summary>

@@ -29,11 +29,18 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("deliberation")] public bool Deliberation { get; set; }
         [JsonPropertyName("rich_profile")] public bool RichProfile { get; set; }
         [JsonPropertyName("research")] public bool Research { get; set; }
-        /// <summary>Not integrated in production yet: honoured only by the fake switch (see SpatialSwitch).</summary>
+        /// <summary>Production spatial map context: off in the arm that has it false, <c>spatial.level</c> in the other.</summary>
         [JsonPropertyName("spatial_context")] public bool SpatialContext { get; set; }
         [JsonPropertyName("visible_march_routes")] public bool VisibleMarchRoutes { get; set; }
         [JsonPropertyName("attack")] public bool Attack { get; set; }
         [JsonPropertyName("manual_lookup")] public bool ManualLookup { get; set; }
+    }
+
+    /// <summary>How the production spatial context is configured when it is on. Identical in both arms of a pair.</summary>
+    public sealed class SpatialSettings
+    {
+        /// <summary>standard | rich (the production presets). The off arm never reads it.</summary>
+        [JsonPropertyName("level")] public string Level { get; set; } = "standard";
     }
 
     public sealed class PersonaSettings
@@ -113,6 +120,7 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("personas")] public PersonaSettings Personas { get; set; } = new PersonaSettings();
         [JsonPropertyName("provider")] public ProviderSettings Provider { get; set; } = new ProviderSettings();
         [JsonPropertyName("features")] public FeatureFlags Features { get; set; } = new FeatureFlags();
+        [JsonPropertyName("spatial")] public SpatialSettings Spatial { get; set; } = new SpatialSettings();
         [JsonPropertyName("setup")] public ScenarioSetup Setup { get; set; } = new ScenarioSetup();
         [JsonPropertyName("ceilings")] public MatchCeilings Ceilings { get; set; } = new MatchCeilings();
         [JsonPropertyName("batch_ceilings")] public BatchCeilings BatchCeilings { get; set; } = new BatchCeilings();

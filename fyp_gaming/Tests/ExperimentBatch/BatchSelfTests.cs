@@ -48,6 +48,11 @@ namespace LuanShi.ExperimentBatch
             Entry("review: system prompts compared by request identity", SystemPromptsAreComparedByRequestIdentity),
             Entry("review: wall-clock limits stop a running match", WallClockLimitsStopAMatch),
             Entry("review: input-token ceiling overshoots by one request then stops", InputTokenCeilingStopsAfterTheCrossingRequest),
+            Entry("spatial: arms are configured through the production switch only", SpatialConfigurationIsTheProductionSwitch),
+            Entry("spatial: the fake provider receives the production prompts, versions, hashes and truncation", SpatialPairSendsProductionPrompts),
+            Entry("spatial: hidden-world equivalence and privacy across the pair", SpatialPairKeepsTheHiddenWorldAndPrivacy),
+            Entry("spatial: a broken pair is caught", SpatialPairCheckCatchesABrokenPair),
+            Entry("spatial: rich preset goes through production", SpatialRichLevelRunsThroughProduction),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

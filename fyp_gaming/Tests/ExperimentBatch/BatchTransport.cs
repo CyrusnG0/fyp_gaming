@@ -6,20 +6,6 @@ using LuanShi.Engine;
 
 namespace LuanShi.ExperimentBatch
 {
-    /// <summary>
-    /// Stand-in for the spatial-context feature, which is NOT integrated in the production runner or
-    /// prompt. The switch only steers the scripted responder (which march it picks) and is recorded in
-    /// every result as "fake-switch, not integrated". It never changes a production prompt, so the
-    /// arms' prompts stay identical and a difference in outcome is scripting, not model behaviour.
-    /// </summary>
-    public sealed class SpatialSwitch
-    {
-        public const string AdapterId = "fake-switch";
-        public const bool ProductionIntegrated = false;
-        public bool On;
-        public SpatialSwitch(bool on) { On = on; }
-    }
-
     /// <summary>One dispatched request and the reply the fake returned, captured independently of the recorder.</summary>
     public sealed class ExchangeCapture
     {
