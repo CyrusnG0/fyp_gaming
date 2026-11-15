@@ -20,6 +20,8 @@ internal static partial class Harness
         SpatialSingleLlmHostReachesDispatchedPrompt();
         SpatialSpectatorSummaryMatchesDispatchedVersionAndHash();
         SpatialTruncationPersistedInRichAndNonRichModes();
+        SpatialEnabledWithRequireVisibleFalseOnSingleLlmHost();
+        SpatialEnabledWithRequireVisibleFalseOnSpectatorHost();
     }
 
     private static void SpatialSingleLlmHostReachesDispatchedPrompt()
@@ -261,6 +263,134 @@ internal static partial class Harness
               && !offRecorder.ExchangeLines[0].Contains("\"spatial_truncation\":", StringComparison.Ordinal)
               && !offRecorder.ExchangeLines[1].Contains("\"spatial_truncation\":", StringComparison.Ordinal),
             "spatial Off omits spatial_truncation from run record and exchange capture");
+    }
+
+    private static void SpatialEnabledWithRequireVisibleFalseOnSingleLlmHost()
+    {
+        GameEngine engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 76);
+        engine.BeginSeason();
+        string shuSeat = engine.State.Factions[1].SeatId;
+        int token = engine.BeginSeatTurn(shuSeat);
+        var cfg = new LlmConfig
+        {
+            Provider = "fake",
+            Model = "fake-single-novis",
+            RequireVisibleMarchRoutes = false,
+            MaxPromptChars = 25000,
+            SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Standard },
+            MaxRequestsPerTurn = 4,
+            MaxActionsPerTurn = 2,
+        };
+        var host = new SingleLlmTurnHost(
+            engine,
+            cfg,
+            shuSeat,
+            () => engine.Observe(shuSeat),
+            cmd => engine.SubmitAs(shuSeat, token, cmd),
+            () => { });
+        var fake = new CombinedFakeTransport();
+        fake.EnqueueOk("{\"type\":\"end_turn\"}");
+        var recorder = new MemoryRecorderSink();
+        var runner = new LlmTurnRunner(fake, cfg, recorder);
+        runner.Begin(host, token, shuSeat, 76);
+        LlmDrain(runner);
+        engine.EndSeatTurn(token);
+
+        string expectedVer = PromptBuilder.CombinedVersionFor(true, false, null, false, false, false, false, true);
+        string expectedHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, false, false, false, true);
+        string reqVer = ExtractJsonStringField(recorder.ExchangeLines[0], "prompt_version");
+        string reqHash = ExtractJsonStringField(recorder.ExchangeLines[0], "schema_hash");
+
+        Check(runner.State == RunnerState.Finished
+              && fake.Requests.Count == 1
+              && fake.Requests[0].System.Contains("SPATIAL CONTEXT AND SIGHT BOUNDARIES", StringComparison.Ordinal)
+              && fake.Requests[0].User.Contains("SPATIAL CONTEXT (seat-filtered map", StringComparison.Ordinal)
+              && fake.Requests[0].User.Contains("MOVEMENT OPTIONS", StringComparison.Ordinal)
+              && fake.Requests[0].User.Contains("dir=", StringComparison.Ordinal)
+              && fake.Requests[0].User.Contains("dist=", StringComparison.Ordinal)
+              && reqVer == expectedVer
+              && reqHash == expectedHash,
+            "single-LLM host with spatial enabled and require_visible_march_routes=false dispatches seat-safe spatial prompt and identity");
+
+        // Hidden-world equivalence with require_visible_march_routes=false
+        GameEngine alt = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 76);
+        ArmyState hiddenWei = alt.State.Armies.Find(a => a != null && a.OwnerSeatId != shuSeat);
+        if (hiddenWei != null) hiddenWei.Troops += 500;
+        alt.BeginSeason();
+        int altToken = alt.BeginSeatTurn(shuSeat);
+        var altHost = new SingleLlmTurnHost(
+            alt,
+            cfg,
+            shuSeat,
+            () => alt.Observe(shuSeat),
+            cmd => alt.SubmitAs(shuSeat, altToken, cmd),
+            () => { });
+        var altFake = new CombinedFakeTransport();
+        altFake.EnqueueOk("{\"type\":\"end_turn\"}");
+        var altRunner = new LlmTurnRunner(altFake, cfg, null);
+        altRunner.Begin(altHost, altToken, shuSeat, 76);
+        LlmDrain(altRunner);
+        alt.EndSeatTurn(altToken);
+
+        Check(altRunner.State == RunnerState.Finished
+              && altFake.Requests.Count == 1
+              && fake.Requests[0].System == altFake.Requests[0].System
+              && fake.Requests[0].User == altFake.Requests[0].User,
+            "single-LLM host with spatial enabled and require_visible_march_routes=false preserves hidden-world equivalence");
+    }
+
+    private static void SpatialEnabledWithRequireVisibleFalseOnSpectatorHost()
+    {
+        var cfg = new LlmConfig
+        {
+            Provider = "fake",
+            Model = "fake-spec-novis",
+            RequireVisibleMarchRoutes = false,
+            EnableResearch = true,
+            MaxPromptChars = 25000,
+            SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Standard },
+            MaxRequestsPerTurn = 4,
+            MaxActionsPerTurn = 2,
+        };
+        var fake = new CombinedFakeTransport();
+        fake.EnqueueOk("{\"type\":\"end_turn\"}");
+        fake.EnqueueOk("{\"type\":\"end_turn\"}");
+        var recorder = new MemoryRecorderSink();
+        var runner = new LlmTurnRunner(fake, cfg, recorder);
+        var session = new SpectatorSession(
+            ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 77),
+            runner, 1, 77);
+        session.Start();
+        SpectatorDrain(session);
+
+        string tempDir = Path.Combine(Path.GetTempPath(), "luanshi-spatial-novis-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string summaryPath = SpectatorSummary.Write(tempDir, session, cfg, fake, runner);
+            string summaryJson = File.ReadAllText(summaryPath);
+
+            string expectedVer = PromptBuilder.CombinedVersionFor(true, false, null, false, false, false, true, true);
+            string expectedHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, false, false, true, true);
+            string reqVer = ExtractJsonStringField(recorder.ExchangeLines[0], "prompt_version");
+            string reqHash = ExtractJsonStringField(recorder.ExchangeLines[0], "schema_hash");
+            string sumVer = ExtractJsonStringField(summaryJson, "prompt_version");
+            string sumHash = ExtractJsonStringField(summaryJson, "schema_hash");
+
+            Check(session.State == SpectatorState.Completed
+                  && fake.Requests.Count == 2
+                  && fake.Requests[0].System.Contains("SPATIAL CONTEXT AND SIGHT BOUNDARIES", StringComparison.Ordinal)
+                  && fake.Requests[0].User.Contains("SPATIAL CONTEXT (seat-filtered map", StringComparison.Ordinal)
+                  && fake.Requests[0].User.Contains("MOVEMENT OPTIONS", StringComparison.Ordinal)
+                  && reqVer == expectedVer
+                  && reqHash == expectedHash
+                  && sumVer == reqVer
+                  && sumHash == reqHash,
+                "spectator host with spatial enabled and require_visible_march_routes=false dispatches spatial prompt and matches summary version/hash");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+        }
     }
 
     private static string ExtractJsonStringField(string json, string field)

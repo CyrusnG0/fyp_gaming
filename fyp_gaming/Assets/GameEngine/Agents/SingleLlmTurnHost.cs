@@ -49,10 +49,13 @@ namespace LuanShi.Engine
 
         /// <summary>Read-only, seat-filtered candidates honoring explicit per-run spatial options.</summary>
         public MovementView PlanMovement(SpatialContextOptions spatialOptions)
-            => _config != null && _config.RequireVisibleMarchRoutes
+        {
+            bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
+            return (_config != null && _config.RequireVisibleMarchRoutes) || spatialOn
                 ? MovementPlanner.BuildDiversified(_engine, _seatId,
                     MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
                 : MovementPlanner.Build(_engine, _seatId);
+        }
 
         /// <summary>Read-only, seat-filtered attack/assault candidates.</summary>
         public AttackView PlanAttacks() => AttackPlanner.Build(_engine, _seatId);

@@ -384,7 +384,9 @@ namespace LuanShi
         {
             if (agentFake == null) return;
             agentFake.Reset();
-            MovementView movement = agentConfig != null && agentConfig.RequireVisibleMarchRoutes
+            bool spatialOn = agentConfig != null && agentConfig.SpatialContext != null
+                && agentConfig.SpatialContext.IsEnabled;
+            MovementView movement = (agentConfig != null && agentConfig.RequireVisibleMarchRoutes) || spatialOn
                 ? MovementPlanner.BuildDiversified(engine, seatId,
                     MovementPlanner.DefaultMaxOptionsPerArmy, null, agentConfig.SpatialContext)
                 : MovementPlanner.Build(engine, seatId);

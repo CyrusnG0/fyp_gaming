@@ -76,10 +76,13 @@ namespace LuanShi.Engine
 
             /// <summary>Seat-safe candidates honoring explicit per-run spatial options.</summary>
             public MovementView PlanMovement(SpatialContextOptions spatialOptions)
-                => _session.Runner.RequireVisibleMarchRoutes
+            {
+                bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
+                return _session.Runner.RequireVisibleMarchRoutes || spatialOn
                     ? MovementPlanner.BuildDiversified(_engine, _seatId,
                         MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
                     : MovementPlanner.Build(_engine, _seatId);
+            }
 
             /// <summary>
             /// Seat-safe attack/assault candidates. Only consulted when the config opts in
