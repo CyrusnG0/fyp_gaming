@@ -36,14 +36,27 @@ namespace LuanShi.Engine
         /// Bounded form used by the prompt-size fallback: also keeps only the first
         /// <paramref name="maxArmies"/> armies (ordered by army id) and notes the remainder.
         /// Deterministic; captures stay first because they are first within each army's prefix.
-        /// When <see cref="MovementView.SpatialContext"/> is attached and
-        /// <see cref="ActiveSpatialOptions"/> is enabled, renders <c>SPATIAL CONTEXT</c> plus
-        /// spatial-tagged movement options and truncation accounting.
+        /// Legacy path: always renders without spatial context or tags so feature-off callers
+        /// remain byte-identical.
         /// </summary>
         public static string MovementOptionsText(MovementView view, int maxOptionsPerArmy, int maxArmies)
+            => RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags: false);
+
+        /// <summary>
+        /// Explicit-config spatial rendering: uses caller-supplied <paramref name="spatialOptions"/>
+        /// and returns per-request <paramref name="truncationReport"/> without global mutable state.
+        /// </summary>
+        public static string MovementOptionsText(
+            MovementView view,
+            int maxOptionsPerArmy,
+            int maxArmies,
+            SpatialContextOptions spatialOptions,
+            out SpatialTruncationReport truncationReport)
         {
-            if (view != null && view.SpatialContext != null && ActiveSpatialOptions.Level != SpatialDetailLevel.Off)
-                return RenderSpatialMovementSection(view, maxOptionsPerArmy, maxArmies);
+            if (view != null && view.SpatialContext != null && spatialOptions != null && spatialOptions.IsEnabled)
+                return RenderSpatialMovementSection(view, maxOptionsPerArmy, maxArmies, spatialOptions,
+                    out truncationReport);
+            truncationReport = null;
             return RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags: false);
         }
 

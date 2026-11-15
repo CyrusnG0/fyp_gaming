@@ -11,13 +11,14 @@ namespace LuanShi.Engine
     {
         public static List<MoveOption> SelectDiversified(GameEngine engine, string seatId,
             MapData map, ArmyState army, List<MoveOption> all, int cap,
-            List<SpatialObjectiveTarget> targets)
+            List<SpatialObjectiveTarget> targets, bool spatialContextEnabled = false)
         {
             var unseenByOption = new Dictionary<MoveOption, int>();
             for (int i = 0; i < all.Count; i++)
             {
                 MoveOption opt = all[i];
-                opt.GridDistance = SpatialGeometry.HexDistanceOrChebyshev(map, army.X, army.Z, opt.X, opt.Z);
+                if (spatialContextEnabled)
+                    opt.GridDistance = SpatialGeometry.HexDistanceOrChebyshev(map, army.X, army.Z, opt.X, opt.Z);
                 opt.Direction = SpatialGeometry.CompassDirection(opt.X - army.X, opt.Z - army.Z);
                 int unseen = SpatialGeometry.CountUnseenNeighbors(engine, seatId, map, opt.X, opt.Z);
                 opt.ExploresFrontier = unseen > 0;
@@ -93,7 +94,7 @@ namespace LuanShi.Engine
                         if (best.ExploresFrontier && string.IsNullOrEmpty(best.ObjectiveHint))
                         {
                             bool towardCenter = false;
-                            if (map != null && map.Width > 0 && map.Height > 0)
+                            if (spatialContextEnabled && map != null && map.Width > 0 && map.Height > 0)
                             {
                                 int cx = map.Width / 2, cz = map.Height / 2;
                                 int maxSteps = map.Width + map.Height;

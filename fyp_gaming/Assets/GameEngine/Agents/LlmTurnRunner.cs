@@ -91,6 +91,7 @@ namespace LuanShi.Engine
         public string LastResult { get; private set; }
         public string FailureReason { get; private set; }
         public EndReason EndReason { get; private set; }
+        public SpatialTruncationReport LastSpatialTruncation { get; private set; }
         public int RequestsThisTurn { get; private set; }
         public int ActionsThisTurn { get; private set; }
         public int InvalidThisTurn { get; private set; }
@@ -145,6 +146,7 @@ namespace LuanShi.Engine
             _memorySeason = -1;
             _memories.Clear();
             _pendingInquiryResult = null;
+            LastSpatialTruncation = null;
             ResetDeliberationTurnState();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
             // seats must not leak either seat's action feedback into the other's prompt. A seed
@@ -312,8 +314,14 @@ namespace LuanShi.Engine
                 ? EarlierRetainedInquiryResults(inquiryResult) : null;
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
             CurrentPersonaId = persona?.Id;
+            SpatialContextOptions spatialOpts = _config?.SpatialContext;
+            bool spatialOn = planning && spatialOpts != null && spatialOpts.IsEnabled
+                && movement != null && movement.SpatialContext != null;
+            int promptLimit = spatialOn && spatialOpts.ProviderCharLimit > 0
+                ? Math.Min(MaxPromptChars, spatialOpts.ProviderCharLimit)
+                : MaxPromptChars;
             string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, spatialOn);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
@@ -325,22 +333,29 @@ namespace LuanShi.Engine
             // Deliberation uses the richer builder even for a non-planning host: with a null
             // movement view and no attacks it emits the same domestic body plus the private note,
             // retained results and the deliberation identity.
+            SpatialTruncationReport spatialReport = null;
             string user = planning || deliberation
-                ? PromptBuilder.UserPrompt(observation, options, _history,
-                    requestsLeft, actionsLeft, movement, relevantMemories,
-                    inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
-                    earlierResults, deliberation)
+                ? (spatialOn
+                    ? PromptBuilder.UserPromptWithSpatial(observation, options, _history,
+                        requestsLeft, actionsLeft, movement, movement.SpatialContext, spatialOpts,
+                        out spatialReport, promptLimit, relevantMemories, inquiryResult, inquiry,
+                        persona, attackOn, attacks, strategicNote, earlierResults, deliberation)
+                    : PromptBuilder.UserPrompt(observation, options, _history,
+                        requestsLeft, actionsLeft, movement, relevantMemories,
+                        inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
+                        earlierResults, deliberation))
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     requestsLeft, actionsLeft, relevantMemories, inquiryResult,
                     inquiry, persona);
-            if (system.Length + user.Length > MaxPromptChars)
+            LastSpatialTruncation = spatialReport;
+            if (system.Length + user.Length > promptLimit)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
             string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, spatialOn);
             string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, spatialOn);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // Admit and mark dispatched before the provider is called. A denial sends nothing and
             // records no provider request.

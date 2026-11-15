@@ -38,49 +38,64 @@ namespace LuanShi.Engine
                    "- MOVEMENT OPTIONS include dir=<compass> and dist=<hexes> along visible terrain, plus any truncation counts (spatial_truncation:). Advisory only: any legal order is revalidated by the engine.";
         }
 
-        public static string VersionForSpatial(bool planning, bool inquiry = false,
-            bool personaEnabled = false, bool attack = false, bool spatial = false)
+        public static string VersionFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool spatial)
         {
-            if (_activeVersion == LegacyPromptVersion) return LegacyPromptVersion;
-            if (_activeVersion == DomesticPromptVersion) return DomesticPromptVersion;
-            if (spatial && planning) return SpatialContextPromptVersion;
-            return VersionFor(planning, inquiry, personaEnabled, attack);
+            string baseVer = VersionFor(planning, inquiry, persona != null, attack, deliberation);
+            if (!spatial || !planning || _activeVersion == LegacyPromptVersion
+                || _activeVersion == DomesticPromptVersion)
+                return baseVer;
+            return baseVer == PromptVersion ? SpatialContextPromptVersion : baseVer + "+spatial";
         }
 
-        public static string SystemPromptForSpatial(bool planning, bool inquiry = false,
-            LlmPersona persona = null, bool attack = false, bool spatial = false)
+        public static string SystemPromptFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool spatial)
         {
-            if (!spatial) return SystemPromptFor(planning, inquiry, persona, attack);
-            if (_activeVersion == LegacyPromptVersion) return LegacySystem;
-            if (_activeVersion == DomesticPromptVersion) return DomesticSystem;
-            string text = planning ? System : DomesticSystem;
-            if (inquiry) text += InquiryAddendum;
-            if (attack && planning) text += AttackAddendum();
-            if (planning) text += SpatialContextAddendum();
-            if (persona != null) text += PersonaAddendum(persona);
-            return text;
+            string text = SystemPromptFor(planning, inquiry, persona, attack, deliberation);
+            if (!spatial || !planning || _activeVersion == LegacyPromptVersion
+                || _activeVersion == DomesticPromptVersion)
+                return text;
+            return text + SpatialContextAddendum();
         }
 
-        public static string SchemaHashForSpatial(bool planning, bool inquiry = false,
-            LlmPersona persona = null, bool attack = false, bool spatial = false)
+        public static string SchemaHashFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool spatial)
         {
+            if (!spatial) return SchemaHashFor(planning, inquiry, persona, attack, deliberation);
             byte[] bytes = Encoding.UTF8.GetBytes(
-                SystemPromptForSpatial(planning, inquiry, persona, attack, spatial));
+                SystemPromptFor(planning, inquiry, persona, attack, deliberation, true));
             byte[] hash;
             using (SHA256 sha = SHA256.Create())
                 hash = sha.ComputeHash(bytes);
-
             var sb = new StringBuilder(16);
             for (int i = 0; i < 8; i++)
                 sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
             return sb.ToString();
         }
 
+        public static string VersionForSpatial(bool planning, bool inquiry = false,
+            bool personaEnabled = false, bool attack = false, bool spatial = false)
+        {
+            if (_activeVersion == LegacyPromptVersion) return LegacyPromptVersion;
+            if (_activeVersion == DomesticPromptVersion) return DomesticPromptVersion;
+            if (spatial && planning) return SpatialContextPromptVersion;
+            return VersionFor(planning, inquiry, personaEnabled, attack, false);
+        }
+
+        public static string SystemPromptForSpatial(bool planning, bool inquiry = false,
+            LlmPersona persona = null, bool attack = false, bool spatial = false)
+            => SystemPromptFor(planning, inquiry, persona, attack, false, spatial);
+
+        public static string SchemaHashForSpatial(bool planning, bool inquiry = false,
+            LlmPersona persona = null, bool attack = false, bool spatial = false)
+            => SchemaHashFor(planning, inquiry, persona, attack, false, spatial);
+
         /// <summary>Bounded, deterministic text rendering of a <see cref="SpatialContextView"/>.</summary>
         public static string SpatialContextText(SpatialContextView view, int maxOwn = 24,
             int maxVisible = 16, int maxStale = 8, int maxObjectives = 12, int maxArmyFrontiers = 16,
             bool includeVisibleRanges = false,
-            int maxVisibleRows = SpatialContextOptions.StandardVisibleRangesCap)
+            int maxVisibleRows = SpatialContextOptions.StandardVisibleRangesCap,
+            SpatialContextOptions spatialOptions = null)
         {
             var sb = new StringBuilder(1024);
             sb.Append(SpatialHeader);
@@ -90,7 +105,7 @@ namespace LuanShi.Engine
                 return sb.ToString();
             }
 
-            SpatialContextOptions cfg = _spatialOptions ?? new SpatialContextOptions();
+            SpatialContextOptions cfg = spatialOptions ?? new SpatialContextOptions { Level = SpatialDetailLevel.Standard };
             sb.Append(cfg.ToSummaryLine());
 
             if (view.Map != null)
@@ -172,12 +187,45 @@ namespace LuanShi.Engine
                     movement, memories, inquiryResult, inquiryEnabled, persona, attackEnabled, attacks);
             }
 
+            var opts = new SpatialContextOptions { Level = SpatialDetailLevel.Standard };
+            return UserPromptWithSpatial(observation, options, recentHistory, requestsLeft, actionsLeft,
+                movement, spatial, opts, out _, MaxPromptChars, memories, inquiryResult, inquiryEnabled,
+                persona, attackEnabled, attacks);
+        }
+
+        /// <summary>
+        /// Explicit-config, global-state-free spatial prompt builder for production runners.
+        /// </summary>
+        public static string UserPromptWithSpatial(Observation observation, IReadOnlyList<ActionOption> options,
+            IReadOnlyList<string> recentHistory, int requestsLeft, int actionsLeft,
+            MovementView movement, SpatialContextView spatial, SpatialContextOptions spatialOptions,
+            out SpatialTruncationReport truncationReport, int maxPromptChars = 0,
+            IReadOnlyList<LlmMemory> memories = null, string inquiryResult = null,
+            bool inquiryEnabled = false, LlmPersona persona = null,
+            bool attackEnabled = false, AttackView attacks = null,
+            string strategicNote = null, IReadOnlyList<string> retainedInquiryResults = null,
+            bool deliberationEnabled = false)
+        {
+            if (spatialOptions == null || !spatialOptions.IsEnabled)
+            {
+                truncationReport = null;
+                return deliberationEnabled
+                    ? UserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
+                        movement, memories, inquiryResult, inquiryEnabled, persona, attackEnabled,
+                        attacks, strategicNote, retainedInquiryResults, true)
+                    : UserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
+                        movement, memories, inquiryResult, inquiryEnabled, persona, attackEnabled,
+                        attacks);
+            }
+
             string attackNotice = attackEnabled ? ActionCatalogue.AttackNotice(attacks) : null;
-            string version = VersionForSpatial(true, inquiryEnabled, persona != null, attackEnabled, true);
-            int sysLen = SystemPromptForSpatial(true, inquiryEnabled, persona, attackEnabled, true).Length;
+            string note = deliberationEnabled ? strategicNote : null;
+            IReadOnlyList<string> retained = deliberationEnabled ? retainedInquiryResults : null;
+            string version = VersionFor(true, inquiryEnabled, persona, attackEnabled, deliberationEnabled, true);
+            int sysLen = SystemPromptFor(true, inquiryEnabled, persona, attackEnabled, deliberationEnabled, true).Length;
             return AssembleBoundedSpatialPrompt(observation, options, recentHistory, requestsLeft,
-                actionsLeft, movement, spatial, version, sysLen, memories, inquiryResult, persona,
-                attackNotice);
+                actionsLeft, movement, spatial, spatialOptions, maxPromptChars, version, sysLen,
+                memories, inquiryResult, persona, attackNotice, retained, note, out truncationReport);
         }
 
         private static void AppendOwnEntitiesSection(StringBuilder sb,

@@ -27,7 +27,9 @@ namespace LuanShi.Engine
         public const int StandardArmyFrontiersCap = 16;
         public const int StandardVisibleRangesCap = 12;
 
-        public SpatialDetailLevel Level = SpatialDetailLevel.Standard;
+        public static readonly SpatialContextOptions OffDefault = new SpatialContextOptions();
+
+        public SpatialDetailLevel Level = SpatialDetailLevel.Off;
         public int MaxMoveOptionsPerArmy;
         public int MaxOwnEntities;
         public int MaxVisibleOthers;
@@ -38,6 +40,8 @@ namespace LuanShi.Engine
         public bool IncludeVisibleCellRanges;
         public int ProviderCharLimit;
         public int MaxSectionChars;
+
+        public bool IsEnabled => Level != SpatialDetailLevel.Off;
 
         public string LevelKey()
         {
@@ -202,7 +206,7 @@ namespace LuanShi.Engine
             int staleTot = spatial?.StaleIntel?.Count ?? 0;
             int objTot = spatial?.ObjectiveBearings?.Count ?? 0;
             int frTot = spatial?.ArmyFrontiers?.Count ?? 0;
-            int rowTot = includeRows && spatial?.Frontier?.VisibleRowRanges != null
+            int rowTot = opts.EffectiveIncludeVisibleRanges() && spatial?.Frontier?.VisibleRowRanges != null
                 ? spatial.Frontier.VisibleRowRanges.Count : 0;
 
             int ownDrop = Math.Max(0, ownTot - Math.Min(ownTot, Math.Max(0, caps[0])));
@@ -210,7 +214,8 @@ namespace LuanShi.Engine
             int staleDrop = Math.Max(0, staleTot - Math.Min(staleTot, Math.Max(0, caps[2])));
             int objDrop = Math.Max(0, objTot - Math.Min(objTot, Math.Max(0, caps[3])));
             int frDrop = Math.Max(0, frTot - Math.Min(frTot, Math.Max(0, caps[4])));
-            int rowDrop = includeRows ? Math.Max(0, rowTot - Math.Min(rowTot, Math.Max(0, maxRows))) : 0;
+            int rowShown = includeRows ? Math.Min(rowTot, Math.Max(0, maxRows)) : 0;
+            int rowDrop = Math.Max(0, rowTot - rowShown);
 
             int moveDrop = 0, armiesDrop = 0;
             if (movement != null && movement.Armies != null)
