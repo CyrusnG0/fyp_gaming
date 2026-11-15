@@ -1,7 +1,7 @@
 {
   "schema": "luanshi-experiment-batch/1",
   "batch_id": "spatial-pair-offline-demo",
-  "pinned_commit": "e93f7f2",
+  "pinned_commit": "18e5851",
   "scenario": "compact-contact-v1",
   "balance_profile": "food-easy",
   "seasons": 2,
