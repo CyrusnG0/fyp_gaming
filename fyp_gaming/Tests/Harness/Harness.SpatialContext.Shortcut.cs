@@ -224,52 +224,52 @@ internal static partial class Harness
         Check(unseenCheck && defShowsLeak && noLeak && promptMatch && legalOpen && legalBlk,
             $"reachable unseen shortcut invariance: unseen={unseenCheck} def={defShowsLeak} noLeak={noLeak} prompt={promptMatch} legal={legalOpen}/{legalBlk}");
 
-        VerifyPostMarchShortcutLeak(eOpen, eBlocked);
-        VerifyPostMarchStillUnseenShortcutLeak();
+        VerifyPostMarchRevealedTerrainAndCostPrivacy(eOpen, eBlocked);
+        VerifyPostMarchStillUnseenShortcutRegression();
     }
 
-    private static string DiffWindow(string a, string b, out int index)
+    private static string FindCanonicalMoveCost(GameEngine engine, string armyId)
     {
-        int len = Math.Min(a.Length, b.Length);
-        index = len;
-        for (int i = 0; i < len; i++)
+        foreach (var rec in engine.Log.Records)
         {
-            if (a[i] != b[i]) { index = i; break; }
+            if (rec.EventType == "army_moved"
+                && rec.Payload != null
+                && rec.Payload.TryGetValue("army_id", out string movedArmy)
+                && movedArmy == armyId
+                && rec.Payload.TryGetValue("cost", out string cost))
+                return cost;
         }
-        int start = Math.Max(0, index - 24);
-        int take = Math.Min(64, a.Length - start);
-        return a.Substring(start, take);
+        return null;
     }
 
-    private static void VerifyPostMarchShortcutLeak(GameEngine eOpen, GameEngine eBlocked)
+    private static void VerifyPostMarchRevealedTerrainAndCostPrivacy(GameEngine eOpen, GameEngine eBlocked)
     {
         bool marched = eOpen.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 4, 5)).Ok
             && eBlocked.Submit(SpatialMarchCmd(SeatShu, ShortcutArmyId, 4, 5)).Ok;
 
         Observation obsOpen = eOpen.Observe(SeatShu);
         Observation obsBlk = eBlocked.Observe(SeatShu);
+        string exportOpen = HistoryExport.ToJsonLines(obsOpen);
+        string exportBlk = HistoryExport.ToJsonLines(obsBlk);
+        bool obsAndExportMatch = obsOpen.ToJson() == obsBlk.ToJson()
+            && exportOpen == exportBlk
+            && !exportOpen.Contains("\"cost\"");
+
         var histOpen = new InvestigationService(obsOpen.GameId, SeatShu, obsOpen, null).SearchHistory("", 10, 0);
         var histBlk = new InvestigationService(obsBlk.GameId, SeatShu, obsBlk, null).SearchHistory("", 10, 0);
-
-        string hJsonOpen = histOpen.ToJson(), hJsonBlk = histBlk.ToJson();
-        string hSnippet = DiffWindow(hJsonOpen, hJsonBlk, out int hIdx);
-        bool searchLeak = histOpen.Ok && histBlk.Ok && histOpen.Hits.Count == 3
-            && histOpen.Hits[0].EventType == "action" && histOpen.Hits[0].ToJson() == histBlk.Hits[0].ToJson()
+        bool searchMatch = histOpen.Ok && histBlk.Ok && histOpen.Hits.Count == 3
             && histOpen.Hits[1].EventType == "army_moved"
-            && histOpen.Hits[1].Payload["cost"] == "5" && histBlk.Hits[1].Payload["cost"] == "6"
-            && hSnippet.Contains("\"cost\":\"5\"")
-            && hJsonOpen.Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == hJsonBlk;
+            && !histOpen.Hits[1].Payload.ContainsKey("cost")
+            && !histBlk.Hits[1].Payload.ContainsKey("cost")
+            && histOpen.ToJson() == histBlk.ToJson();
 
         string uOpen = PromptBuilder.UserPrompt(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
             MovementPlanner.Build(eOpen, SeatShu, 8), null, null, inquiryEnabled: true, attackEnabled: true);
         string uBlk = PromptBuilder.UserPrompt(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
             MovementPlanner.Build(eBlocked, SeatShu, 8), null, null, inquiryEnabled: true, attackEnabled: true);
-        string uSnippet = DiffWindow(uOpen, uBlk, out int uIdx);
-        bool obsLeak = obsOpen.ToJson().Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == obsBlk.ToJson()
-            && uSnippet.Contains("\"cost\":\"5\"")
-            && uOpen.Replace("\"cost\":\"5\"", "\"cost\":\"6\"") == uBlk;
+        bool defaultPromptMatch = uOpen == uBlk && !uOpen.Contains("\"cost\"");
 
-        // Arriving at (4,5) puts (2,5) at dist 2 <= FogArmyRange, so spatial frontier also sees the new cell.
+        // Arriving at (4,5) puts (2,5) at dist 2 <= FogArmyRange, so visible spatial context may now reflect (2,5).
         SpatialContextView spOpen = SpatialContextBuilder.Build(eOpen, SeatShu, obsOpen);
         SpatialContextView spBlk = SpatialContextBuilder.Build(eBlocked, SeatShu, obsBlk);
         bool sightRevealed = eOpen.InSight(SeatShu, 2, 5) && eBlocked.InSight(SeatShu, 2, 5)
@@ -280,15 +280,19 @@ internal static partial class Harness
         string pBlk = PromptBuilder.UserPromptWithSpatial(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
             MovementPlanner.BuildDiversified(eBlocked, SeatShu, 8, spBlk), spBlk,
             spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
-        string pSnippet = DiffWindow(pOpen, pBlk, out int pIdx);
-        bool spatialDiffsFirstAtFrontier = sightRevealed && pIdx < uIdx && pSnippet.Contains("adj_unseen=")
-            && pOpen.Contains("\"cost\":\"5\"") && pBlk.Contains("\"cost\":\"6\"");
+        bool spatialReflectsSight = sightRevealed && pOpen != pBlk
+            && !pOpen.Contains("\"cost\"") && !pBlk.Contains("\"cost\"");
 
-        Check(marched && searchLeak && obsLeak && spatialDiffsFirstAtFrontier,
-            $"post-march shortcut leak (4,5): hIdx={hIdx} uIdx={uIdx} pIdx={pIdx} adj={spOpen.ArmyFrontiers[0].FrontierCellCount}/{spBlk.ArmyFrontiers[0].FrontierCellCount}");
+        bool canonicalPreserved = FindCanonicalMoveCost(eOpen, ShortcutArmyId) == "5"
+            && FindCanonicalMoveCost(eBlocked, ShortcutArmyId) == "6"
+            && eOpen.Log.ToJsonLines().Contains("\"cost\":\"5\"")
+            && eBlocked.Log.ToJsonLines().Contains("\"cost\":\"6\"");
+
+        Check(marched && obsAndExportMatch && searchMatch && defaultPromptMatch && spatialReflectsSight && canonicalPreserved,
+            $"post-march revealed terrain & cost privacy (4,5): obsExport={obsAndExportMatch} search={searchMatch} prompt={defaultPromptMatch} sightDiff={spatialReflectsSight} canonical={canonicalPreserved} adj={spOpen.ArmyFrontiers[0].FrontierCellCount}/{spBlk.ArmyFrontiers[0].FrontierCellCount}");
     }
 
-    private static void VerifyPostMarchStillUnseenShortcutLeak()
+    private static void VerifyPostMarchStillUnseenShortcutRegression()
     {
         GameEngine cOpen = BuildUnseenShortcutWorld(707, true, UnitTypes.Cavalry, extraSlope52: true);
         GameEngine cBlk = BuildUnseenShortcutWorld(707, false, UnitTypes.Cavalry, extraSlope52: true);
@@ -305,6 +309,9 @@ internal static partial class Harness
 
         Observation obsOpen = cOpen.Observe(SeatShu);
         Observation obsBlk = cBlk.Observe(SeatShu);
+        string exportOpen = HistoryExport.ToJsonLines(obsOpen);
+        string exportBlk = HistoryExport.ToJsonLines(obsBlk);
+
         SpatialContextView spOpen = SpatialContextBuilder.Build(cOpen, SeatShu, obsOpen);
         SpatialContextView spBlk = SpatialContextBuilder.Build(cBlk, SeatShu, obsBlk);
         MovementView divOpen = MovementPlanner.BuildDiversified(cOpen, SeatShu, 40, spOpen);
@@ -313,19 +320,33 @@ internal static partial class Harness
 
         var histOpen = new InvestigationService(obsOpen.GameId, SeatShu, obsOpen, null).SearchHistory("", 10, 0);
         var histBlk = new InvestigationService(obsBlk.GameId, SeatShu, obsBlk, null).SearchHistory("", 10, 0);
-        bool histCostOnly = histOpen.Hits[1].Payload["cost"] == "6" && histBlk.Hits[1].Payload["cost"] == "7"
-            && histOpen.ToJson().Replace("\"cost\":\"6\"", "\"cost\":\"7\"") == histBlk.ToJson();
+        bool histIdentical = histOpen.Ok && histBlk.Ok
+            && histOpen.Hits.Count >= 2 && histOpen.Hits[1].EventType == "army_moved"
+            && !histOpen.Hits[1].Payload.ContainsKey("cost")
+            && !histBlk.Hits[1].Payload.ContainsKey("cost")
+            && histOpen.ToJson() == histBlk.ToJson();
 
+        string uOpen = PromptBuilder.UserPrompt(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
+            divOpen, null, null, inquiryEnabled: true, attackEnabled: true);
+        string uBlk = PromptBuilder.UserPrompt(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
+            divBlk, null, null, inquiryEnabled: true, attackEnabled: true);
         string pOpen = PromptBuilder.UserPromptWithSpatial(obsOpen, ActionCatalogue.Build(obsOpen), null, 4, 2,
             divOpen, spOpen, spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
         string pBlk = PromptBuilder.UserPromptWithSpatial(obsBlk, ActionCatalogue.Build(obsBlk), null, 4, 2,
             divBlk, spBlk, spatialContextEnabled: true, inquiryEnabled: true, attackEnabled: true);
-        string pSnippet = DiffWindow(pOpen, pBlk, out _);
-        bool promptCostOnly = pOpen != pBlk && pSnippet.Contains("\"cost\":\"6\"")
-            && pOpen.Replace("\"cost\":\"6\"", "\"cost\":\"7\"") == pBlk;
 
-        Check(preUnseen && advSame && marched && stillUnseen && spatialAndMovesIdentical && histCostOnly && promptCostOnly,
-            "post-march still-unseen shortcut leak (5,5): next spatial prompt and search_history differ solely at payload.cost (6 vs 7)");
+        bool obsMatch = obsOpen.ToJson() == obsBlk.ToJson();
+        bool exportMatch = exportOpen == exportBlk && !exportOpen.Contains("\"cost\"");
+        bool uMatch = uOpen == uBlk && !uOpen.Contains("\"cost\"");
+        bool pMatch = pOpen == pBlk && !pOpen.Contains("\"cost\"");
+        bool canonMatch = FindCanonicalMoveCost(cOpen, ShortcutArmyId) == "6"
+            && FindCanonicalMoveCost(cBlk, ShortcutArmyId) == "7"
+            && cOpen.Log.ToJsonLines().Contains("\"cost\":\"6\"")
+            && cBlk.Log.ToJsonLines().Contains("\"cost\":\"7\"");
+
+        Check(preUnseen && advSame && marched && stillUnseen && obsMatch && exportMatch && spatialAndMovesIdentical
+                && histIdentical && uMatch && pMatch && canonMatch,
+            "post-march still-unseen shortcut regression (5,5): prompts, export and search_history match while canonical cost stays 6 vs 7");
     }
 
     private static HashSet<string> SplitCsvTokens(string raw)

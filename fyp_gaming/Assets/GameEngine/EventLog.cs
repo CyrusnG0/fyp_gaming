@@ -40,13 +40,17 @@ namespace LuanShi.Engine
         /// <summary>
         /// The detached copy of this record a seat's observation carries. The actor, named parties and
         /// entitled subject witnesses get the canonical payload; every other recipient gets the frozen
-        /// limited projection, with command extras and free text removed. Payload and args are copied, so
-        /// the returned view can never reach this canonical record.
+        /// limited projection, with command extras and free text removed. Full-map march cost on
+        /// <c>army_moved</c> is stripped from all seat-facing views so unseen terrain cannot be inferred
+        /// from movement cost, while canonical <see cref="Payload"/> preserves it for replay/audit.
+        /// Payload and args are copied, so the returned view can never reach this canonical record.
         /// </summary>
         internal EventView ForSeat(string seatId)
         {
             bool limited = LimitedPayload != null && !HasFullPayload(seatId);
             var payload = new Dictionary<string, string>(limited ? LimitedPayload : Payload);
+            if (EventType == "army_moved")
+                payload.Remove("cost");
             var args = limited || Args == null
                 ? null
                 : new Dictionary<string, string>(Args);
