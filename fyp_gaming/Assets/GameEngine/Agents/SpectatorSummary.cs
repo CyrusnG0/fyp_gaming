@@ -91,14 +91,15 @@ namespace LuanShi.Engine
             bool attack = config != null && config.EnableAttack;
             bool rich = config != null && config.ExperimentActive;
             bool research = config != null && config.EnableResearch;
+            bool spatial = config != null && config.SpatialContext != null && config.SpatialContext.IsEnabled;
+            LlmPersona versionPersona = personas ? new LlmPersona("summary", "summary", "", "", false) : null;
             Field(sb, "prompt_version",
-                research || rich
-                    ? PromptBuilder.CombinedVersionFor(true, inquiry, null, attack, deliberation, rich, research)
-                    : PromptBuilder.VersionFor(true, inquiry, personas, attack, deliberation), config, true);
+                PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial),
+                config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
-                    : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research),
+                    : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);

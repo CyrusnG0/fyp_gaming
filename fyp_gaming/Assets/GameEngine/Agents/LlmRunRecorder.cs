@@ -290,6 +290,8 @@ namespace LuanShi.Engine
                     if (LastContextReportJson != null)
                         parts.Add("\"context_report\":" + LastContextReportJson);
                 }
+                if (flight.SpatialTruncation != null)
+                    parts.Add("\"spatial_truncation\":" + flight.SpatialTruncation.ToJson());
                 _recorder.Record(_runId, "{" + string.Join(",", parts) + "}");
             }
             catch (Exception)

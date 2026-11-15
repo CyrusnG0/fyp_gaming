@@ -45,6 +45,7 @@ namespace LuanShi.Engine
             public string PromptVersion;
             public string SchemaHash;
             public int MaxOutputTokens;
+            public SpatialTruncationReport SpatialTruncation;
             /// <summary>Ledger reservation held for this provider round-trip (null when deliberation is off).</summary>
             public string DeliberationReservationId;
         }
@@ -385,9 +386,11 @@ namespace LuanShi.Engine
             if (deliberation && !TryDispatchDeliberationRequest(out requestAdmission)) return;
 
             RecordExperimentSettings(promptVersion, schemaHash);
+            SpatialTruncationReport requestSpatialTruncation = LastSpatialTruncation;
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             // It is recorded only once dispatch is approved: a denied request never reached a provider.
-            CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
+            CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash,
+                requestSpatialTruncation);
 
             var cts = new CancellationTokenSource();
             if (_config.RequestTimeoutMs > 0) cts.CancelAfter(_config.RequestTimeoutMs);
@@ -432,6 +435,7 @@ namespace LuanShi.Engine
                 SchemaHash = schemaHash,
                 // Match the transport's effective fallback when the configured cap is zero.
                 MaxOutputTokens = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400,
+                SpatialTruncation = requestSpatialTruncation,
                 DeliberationReservationId = requestAdmission?.ReservationId,
             };
             State = RunnerState.Requesting;
