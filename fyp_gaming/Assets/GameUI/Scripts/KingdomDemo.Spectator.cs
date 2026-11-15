@@ -183,8 +183,12 @@ namespace LuanShi
                 plan = FakeTurnPlan.DeliberationRehearsal(seatObs, seatId, openingSeason, firstFaction);
             else
             {
-                MovementView movement = agentConfig != null && agentConfig.RequireVisibleMarchRoutes
-                    ? MovementPlanner.BuildDiversified(engine, seatId) : MovementPlanner.Build(engine, seatId);
+                bool spatialOn = agentConfig != null && agentConfig.SpatialContext != null
+                    && agentConfig.SpatialContext.IsEnabled;
+                MovementView movement = (agentConfig != null && agentConfig.RequireVisibleMarchRoutes) || spatialOn
+                    ? MovementPlanner.BuildDiversified(engine, seatId,
+                        MovementPlanner.DefaultMaxOptionsPerArmy, null, agentConfig.SpatialContext)
+                    : MovementPlanner.Build(engine, seatId);
                 plan = FakeTurnPlan.Build(movement, seatObs, seatId, agentConfig != null && agentConfig.EnableManualLookup);
             }
             foreach (string command in plan)

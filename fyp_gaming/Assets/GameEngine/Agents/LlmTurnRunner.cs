@@ -45,6 +45,7 @@ namespace LuanShi.Engine
             public string PromptVersion;
             public string SchemaHash;
             public int MaxOutputTokens;
+            public SpatialTruncationReport SpatialTruncation;
             /// <summary>Ledger reservation held for this provider round-trip (null when deliberation is off).</summary>
             public string DeliberationReservationId;
         }
@@ -91,6 +92,7 @@ namespace LuanShi.Engine
         public string LastResult { get; private set; }
         public string FailureReason { get; private set; }
         public EndReason EndReason { get; private set; }
+        public SpatialTruncationReport LastSpatialTruncation { get; private set; }
         public int RequestsThisTurn { get; private set; }
         public int ActionsThisTurn { get; private set; }
         public int InvalidThisTurn { get; private set; }
@@ -145,6 +147,7 @@ namespace LuanShi.Engine
             _memorySeason = -1;
             _memories.Clear();
             _pendingInquiryResult = null;
+            LastSpatialTruncation = null;
             ResetDeliberationTurnState();
             ResetExperimentTurnState();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
@@ -319,8 +322,18 @@ namespace LuanShi.Engine
             CurrentPersonaId = persona?.Id;
             bool rich = ExperimentActive;
             bool research = _config.EnableResearch;
+            SpatialContextOptions spatialOpts = _config?.SpatialContext;
+            bool spatialOn = planning && spatialOpts != null && spatialOpts.IsEnabled
+                && movement != null && movement.SpatialContext != null;
+            int promptLimit = rich ? _config.EffectiveMaxPromptChars : MaxPromptChars;
+            if (spatialOn && spatialOpts.ProviderCharLimit > 0)
+                promptLimit = Math.Min(promptLimit, spatialOpts.ProviderCharLimit);
             string system = PromptBuilder.CombinedSystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research);
+                deliberation, rich, research, spatialOn);
+            string promptVersion = PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn,
+                deliberation, rich, research, spatialOn);
+            string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
+                deliberation, rich, research, spatialOn);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
@@ -338,28 +351,34 @@ namespace LuanShi.Engine
                 // Experiment: one seat-filtered, size-reported prompt. The recorded observation JSON
                 // is exactly the JSON this prompt carries, including its configured event cap.
                 if (!TryBuildRichPrompt(observation, options, movement, attacks, persona, inquiryResult,
-                        PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn, deliberation, true, research),
-                        system.Length, requestsLeft, actionsLeft, out user, out string richObservation))
+                        promptVersion, system.Length, requestsLeft, actionsLeft,
+                        out user, out string richObservation))
                     return;
                 observationJson = richObservation;
             }
             else
+            {
+                SpatialTruncationReport spatialReport = null;
                 user = planning || deliberation
-                ? PromptBuilder.UserPrompt(observation, options, _history,
-                    requestsLeft, actionsLeft, movement, relevantMemories,
-                    inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
-                    earlierResults, deliberation, research)
-                : PromptBuilder.UserPrompt(observation, options, _history,
-                    requestsLeft, actionsLeft, relevantMemories, inquiryResult,
-                    inquiry, persona, research);
-            if (system.Length + user.Length > _config.EffectiveMaxPromptChars)
+                    ? (spatialOn
+                        ? PromptBuilder.UserPromptWithSpatial(observation, options, _history,
+                            requestsLeft, actionsLeft, movement, movement.SpatialContext, spatialOpts,
+                            out spatialReport, promptLimit, relevantMemories, inquiryResult, inquiry,
+                            persona, attackOn, attacks, strategicNote, earlierResults, deliberation,
+                            research)
+                        : PromptBuilder.UserPrompt(observation, options, _history,
+                            requestsLeft, actionsLeft, movement, relevantMemories,
+                            inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
+                            earlierResults, deliberation, research))
+                    : PromptBuilder.UserPrompt(observation, options, _history,
+                        requestsLeft, actionsLeft, relevantMemories, inquiryResult,
+                        inquiry, persona, research);
+                LastSpatialTruncation = spatialReport;
+            }
+            if (system.Length + user.Length > promptLimit)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
-            string promptVersion = PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research);
-            string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // Admit and mark dispatched before the provider is called. A denial sends nothing and
             // records no provider request.
@@ -367,9 +386,11 @@ namespace LuanShi.Engine
             if (deliberation && !TryDispatchDeliberationRequest(out requestAdmission)) return;
 
             RecordExperimentSettings(promptVersion, schemaHash);
+            SpatialTruncationReport requestSpatialTruncation = LastSpatialTruncation;
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             // It is recorded only once dispatch is approved: a denied request never reached a provider.
-            CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
+            CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash,
+                requestSpatialTruncation);
 
             var cts = new CancellationTokenSource();
             if (_config.RequestTimeoutMs > 0) cts.CancelAfter(_config.RequestTimeoutMs);
@@ -414,6 +435,7 @@ namespace LuanShi.Engine
                 SchemaHash = schemaHash,
                 // Match the transport's effective fallback when the configured cap is zero.
                 MaxOutputTokens = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400,
+                SpatialTruncation = requestSpatialTruncation,
                 DeliberationReservationId = requestAdmission?.ReservationId,
             };
             State = RunnerState.Requesting;

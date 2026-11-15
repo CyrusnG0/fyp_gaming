@@ -74,7 +74,7 @@ namespace LuanShi.Engine
         private ILlmExchangeRecorder ExchangeRecorder => _recorder as ILlmExchangeRecorder;
 
         private void CaptureExchangeRequest(int requestIndex, int season, LlmRequest request,
-            string promptVersion, string schemaHash)
+            string promptVersion, string schemaHash, SpatialTruncationReport spatialTruncation = null)
         {
             ILlmExchangeRecorder sink = ExchangeRecorder;
             if (sink == null || request == null) return;
@@ -90,6 +90,8 @@ namespace LuanShi.Engine
                     Num("timeout_ms", request.TimeoutMs),
                     Bool("json_mode", _config.JsonMode),
                 }) + "}");
+                if (spatialTruncation != null)
+                    parts.Add("\"spatial_truncation\":" + spatialTruncation.ToJson());
                 sink.RecordExchange(_runId, "{" + string.Join(",", parts) + "}");
             }
             catch (Exception)
@@ -128,6 +130,8 @@ namespace LuanShi.Engine
                     if (LastContextReportJson != null)
                         outcome.Add("\"context_report\":" + LastContextReportJson);
                 }
+                if (flight.SpatialTruncation != null)
+                    outcome.Add("\"spatial_truncation\":" + flight.SpatialTruncation.ToJson());
                 parts.Add("\"outcome\":{" + string.Join(",", outcome) + "}");
                 sink.RecordExchange(_runId, "{" + string.Join(",", parts) + "}");
             }

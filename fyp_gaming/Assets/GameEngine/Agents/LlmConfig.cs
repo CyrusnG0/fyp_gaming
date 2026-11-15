@@ -47,6 +47,19 @@ namespace LuanShi.Engine
         public bool RequireVisibleMarchRoutes;
 
         /// <summary>
+        /// True when visible-route planning and admission are active — either explicitly via
+        /// <see cref="RequireVisibleMarchRoutes"/> or implicitly because <see cref="SpatialContext"/>
+        /// is enabled (which requires fog-safe visible-only pathing).
+        /// </summary>
+        public bool EffectiveVisibleMarchRoutes
+            => RequireVisibleMarchRoutes || (SpatialContext != null && SpatialContext.IsEnabled);
+
+        /// <summary>
+        /// Opt-in spatial map context configuration, default OFF (<see cref="SpatialDetailLevel.Off"/>).
+        /// </summary>
+        public SpatialContextOptions SpatialContext = new SpatialContextOptions();
+
+        /// <summary>
         /// Opt-in production deliberation, default OFF. When true the runner accepts the four strict
         /// read-only inquiry tools (manual_lookup, inspect_entity, search_history, recall_memory) and a
         /// bounded private strategic note, and enforces one shared per-match
@@ -217,6 +230,9 @@ namespace LuanShi.Engine
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
+            else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
+            if (SpatialContext != null && SpatialContext.IsEnabled)
+                sb.Append("; spatial=").Append(SpatialContext.LevelKey());
             // Only enabled deliberation adds text, so the legacy diagnostic stays byte-identical.
             if (EnableDeliberation)
             {
@@ -269,6 +285,32 @@ namespace LuanShi.Engine
                         RequireVisibleMarchRoutes = Bool(field.Value, RequireVisibleMarchRoutes); break;
                     case "enable_research":
                         EnableResearch = Bool(field.Value, EnableResearch); break;
+                    case "spatial_level":
+                        if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
+                        string lvl = Text(field.Value, null);
+                        if (string.Equals(lvl, "rich", StringComparison.OrdinalIgnoreCase))
+                            SpatialContext.Level = SpatialDetailLevel.Rich;
+                        else if (string.Equals(lvl, "standard", StringComparison.OrdinalIgnoreCase))
+                            SpatialContext.Level = SpatialDetailLevel.Standard;
+                        else if (string.Equals(lvl, "off", StringComparison.OrdinalIgnoreCase))
+                            SpatialContext.Level = SpatialDetailLevel.Off;
+                        break;
+                    case "spatial_provider_char_limit":
+                        if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
+                        SpatialContext.ProviderCharLimit = Int(field.Value, SpatialContext.ProviderCharLimit);
+                        break;
+                    case "spatial_max_section_chars":
+                        if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
+                        SpatialContext.MaxSectionChars = Int(field.Value, SpatialContext.MaxSectionChars);
+                        break;
+                    case "spatial_max_move_options_per_army":
+                        if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
+                        SpatialContext.MaxMoveOptionsPerArmy = Int(field.Value, SpatialContext.MaxMoveOptionsPerArmy);
+                        break;
+                    case "spatial_include_visible_rows":
+                        if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
+                        SpatialContext.IncludeVisibleCellRanges = Bool(field.Value, SpatialContext.IncludeVisibleCellRanges);
+                        break;
                     case "enable_attack":
                         EnableAttack = Bool(field.Value, EnableAttack); break;
                     case "enable_deliberation":

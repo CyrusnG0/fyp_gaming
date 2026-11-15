@@ -18,6 +18,7 @@ internal static partial class Harness
         SpatialCrowdedMapAndPromptBound();
         SpatialReachableUnseenShortcutInvariance();
         SpatialSightBoundaryCornerCheck();
+        RunSpatialProductionTests();
     }
 
     private static MapData SpatialStaggeredHexMap(int width, int height)

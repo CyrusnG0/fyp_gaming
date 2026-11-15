@@ -18,6 +18,7 @@ namespace LuanShi.Engine
         public string CityId;      // only for capture_neutral_city (the city is in sight => observable)
         public string TowerId;     // only for capture_tower
         public string Note;        // short, safe, terrain/visibility words only — never hidden facts
+        public int GridDistance;   // hex/grid distance from army origin when diversified
         public string Direction;   // W..SW compass bearing when diversified; null otherwise
         public bool ExploresFrontier;
         public string ObjectiveHint;
@@ -53,6 +54,7 @@ namespace LuanShi.Engine
         public int CommandPoints;
         public int MarchOrderCost;
         public IReadOnlyList<ArmyMovePlan> Armies;   // own armies only, ordered by army id
+        public SpatialContextView SpatialContext;    // populated by BuildDiversified when enabled
 
         /// <summary>Deterministic serialisation used by the harness for hidden-world equality checks.</summary>
         public string ToJson()
@@ -114,6 +116,8 @@ namespace LuanShi.Engine
             sb.Append(",\"note\":").Append(MiniJson.Str(option.Note));
             if (option.Direction != null)
             {
+                if (option.GridDistance > 0)
+                    sb.Append(",\"grid_distance\":").Append(MiniJson.Num(option.GridDistance));
                 sb.Append(",\"direction\":").Append(MiniJson.Str(option.Direction));
                 sb.Append(",\"explores_frontier\":").Append(option.ExploresFrontier ? "true" : "false");
                 sb.Append(",\"objective_hint\":").Append(MiniJson.Str(option.ObjectiveHint));
@@ -121,6 +125,15 @@ namespace LuanShi.Engine
             sb.Append('}');
             return sb.ToString();
         }
+    }
+
+    /// <summary>
+    /// Optional host interface allowing runners to pass per-run <see cref="SpatialContextOptions"/>
+    /// to movement planning without global mutable state.
+    /// </summary>
+    public interface ISpatialPlanningHost
+    {
+        MovementView PlanMovement(SpatialContextOptions spatialOptions);
     }
 
     /// <summary>
@@ -146,10 +159,24 @@ namespace LuanShi.Engine
         /// <summary>
         /// Opt-in directionally varied and objective/frontier-aware selection of legal movement
         /// candidates. Never changes legality or reads unseen terrain or hidden entities.
+        /// When <paramref name="spatialOptions"/> is null or Off, preserves the exact legacy
+        /// diversified movement offers without attaching spatial context.
         /// </summary>
         public static MovementView BuildDiversified(GameEngine engine, string seatId,
-            int maxOptionsPerArmy = DefaultMaxOptionsPerArmy, SpatialContextView spatial = null)
-            => BuildPlanSet(engine, seatId, maxOptionsPerArmy, true, spatial);
+            int maxOptionsPerArmy = DefaultMaxOptionsPerArmy, SpatialContextView spatial = null,
+            SpatialContextOptions spatialOptions = null)
+        {
+            bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
+            if (!spatialOn)
+                return BuildPlanSet(engine, seatId, maxOptionsPerArmy, true, spatial, false);
+
+            int cap = maxOptionsPerArmy == DefaultMaxOptionsPerArmy
+                ? spatialOptions.EffectiveMoveCap(maxOptionsPerArmy)
+                : maxOptionsPerArmy;
+            if (spatial == null && engine != null && engine.State != null && !string.IsNullOrEmpty(seatId))
+                spatial = SpatialContextBuilder.Build(engine, seatId);
+            return BuildPlanSet(engine, seatId, cap, true, spatial, true);
+        }
 
         /// <summary>Rejects LLM marches that require a route through terrain the faction cannot see.</summary>
         public static bool AllowsVisibleRoute(GameEngine engine, string seatId, ActionCommand command)
@@ -163,9 +190,12 @@ namespace LuanShi.Engine
         }
 
         private static MovementView BuildPlanSet(GameEngine engine, string seatId,
-            int maxOptionsPerArmy, bool diversify, SpatialContextView spatial)
+            int maxOptionsPerArmy, bool diversify, SpatialContextView spatial,
+            bool spatialContextEnabled = false)
         {
-            int cap = ClampCap(maxOptionsPerArmy);
+            int cap = diversify && spatialContextEnabled
+                ? (maxOptionsPerArmy < 1 ? 1 : maxOptionsPerArmy)
+                : ClampCap(maxOptionsPerArmy);
             var view = new MovementView
             {
                 SeatId = null,
@@ -182,6 +212,7 @@ namespace LuanShi.Engine
             view.SeatId = fac.SeatId;
             view.CommandPoints = fac.CommandPoints;
             view.Season = engine.State.Season;
+            view.SpatialContext = diversify ? spatial : null;
 
             List<SpatialObjectiveTarget> targets = diversify
                 ? SpatialContextBuilder.CollectMovementTargets(engine, fac.SeatId, spatial)
@@ -195,13 +226,14 @@ namespace LuanShi.Engine
 
             var plans = new List<ArmyMovePlan>(own.Count);
             foreach (var army in own)
-                plans.Add(BuildPlan(engine, fac, army, cap, marchCost, diversify, targets));
+                plans.Add(BuildPlan(engine, fac, army, cap, marchCost, diversify, targets, spatialContextEnabled));
             view.Armies = plans;
             return view;
         }
 
         private static ArmyMovePlan BuildPlan(GameEngine engine, FactionState fac, ArmyState army,
-            int cap, int marchCost, bool diversify, List<SpatialObjectiveTarget> targets)
+            int cap, int marchCost, bool diversify, List<SpatialObjectiveTarget> targets,
+            bool spatialContextEnabled)
         {
             int marches = UnitTypes.MarchesPerSeason(army.UnitType);
             int marchesLeft = Math.Max(0, marches - army.MarchCountThisSeason);
@@ -287,7 +319,8 @@ namespace LuanShi.Engine
             all.Sort(CompareOptions);
             plan.TotalReachable = all.Count;
             plan.Options = diversify
-                ? SpatialMovementDiversifier.SelectDiversified(engine, fac.SeatId, map, army, all, cap, targets)
+                ? SpatialMovementDiversifier.SelectDiversified(engine, fac.SeatId, map, army, all, cap,
+                    targets, spatialContextEnabled)
                 : TakePrefix(all, cap);
             plan.Truncated = all.Count > plan.Options.Count;
             return plan;

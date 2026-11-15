@@ -384,36 +384,46 @@ namespace LuanShi
         {
             if (agentFake == null) return;
             agentFake.Reset();
-            MovementView movement = agentConfig != null && agentConfig.RequireVisibleMarchRoutes
-                ? MovementPlanner.BuildDiversified(engine, seatId) : MovementPlanner.Build(engine, seatId);
+            bool spatialOn = agentConfig != null && agentConfig.SpatialContext != null
+                && agentConfig.SpatialContext.IsEnabled;
+            MovementView movement = (agentConfig != null && agentConfig.RequireVisibleMarchRoutes) || spatialOn
+                ? MovementPlanner.BuildDiversified(engine, seatId,
+                    MovementPlanner.DefaultMaxOptionsPerArmy, null, agentConfig.SpatialContext)
+                : MovementPlanner.Build(engine, seatId);
             var plan = FakeTurnPlan.Build(movement, seatObs, seatId,
                 agentConfig != null && agentConfig.EnableManualLookup);
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
-        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost
+        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
         {
-            private readonly KingdomDemo _owner;
-            private readonly string _seatId;
-            public AgentTurnHost(KingdomDemo owner, string seatId) { _owner = owner; _seatId = seatId; }
-            public string FactionKey => _owner.engine?.State?.FindFaction(_seatId)?.Name;
-            public Observation Observe() => _owner.ObserveAgentSeat(_seatId);
-            public ValidationResult Submit(ActionCommand cmd)
-                => _owner.agentConfig.RequireVisibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_owner.engine, _seatId, cmd)
-                    ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
-                    : _owner.SubmitAgentCommand(_seatId, cmd);
-            public void EndTurn() => _owner.AgentEndTurnRequested();
+            private readonly SingleLlmTurnHost _inner;
+            public AgentTurnHost(KingdomDemo owner, string seatId)
+            {
+                _inner = new SingleLlmTurnHost(
+                    owner.engine,
+                    owner.agentConfig,
+                    seatId,
+                    () => owner.ObserveAgentSeat(seatId),
+                    cmd => owner.SubmitAgentCommand(seatId, cmd),
+                    owner.AgentEndTurnRequested);
+            }
+            public string FactionKey => _inner.FactionKey;
+            public Observation Observe() => _inner.Observe();
+            public ValidationResult Submit(ActionCommand cmd) => _inner.Submit(cmd);
+            public void EndTurn() => _inner.EndTurn();
             /// <summary>Read-only, seat-filtered candidates for this agent seat.</summary>
-            public MovementView PlanMovement() => _owner.agentConfig.RequireVisibleMarchRoutes
-                ? MovementPlanner.BuildDiversified(_owner.engine, _seatId)
-                : MovementPlanner.Build(_owner.engine, _seatId);
+            public MovementView PlanMovement() => _inner.PlanMovement();
+            /// <summary>Read-only, seat-filtered candidates honoring explicit per-run spatial options.</summary>
+            public MovementView PlanMovement(SpatialContextOptions spatialOptions)
+                => _inner.PlanMovement(spatialOptions);
             /// <summary>
             /// Read-only, seat-filtered attack/assault candidates. Only consulted when the config
             /// opts in (<see cref="LlmConfig.EnableAttack"/>), so the default prompt is unchanged.
             /// </summary>
-            public AttackView PlanAttacks() => AttackPlanner.Build(_owner.engine, _seatId);
+            public AttackView PlanAttacks() => _inner.PlanAttacks();
             /// <summary>Authoritative terminal signal from the engine, not a cached observation.</summary>
-            public bool IsGameOver => _owner.engine != null && _owner.engine.State.WinnerSeatId != null;
+            public bool IsGameOver => _inner.IsGameOver;
         }
     }
 }
