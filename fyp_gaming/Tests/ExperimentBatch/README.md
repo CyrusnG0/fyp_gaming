@@ -76,8 +76,11 @@ pinned commit, **any tracked file is modified**, or **an untracked file would be
 batch project, `**/*.cs` under `Assets/GameEngine`, the `.csproj`, `Harness/demo-map.json` and MSBuild/NuGet config
 (`Directory.Build.*`, `Directory.Packages.props`, `global.json`, `nuget.config`) in the project's ancestor folders.
 Gitignored files count too, since an ignored `.cs` in a compiled path is still compiled. Other untracked files (runs,
-logs, notes, `bin/`, `obj/`) are ignored. `--allow-dirty` is the explicit override for both. Every `run` writes
+logs, notes, `bin/`, `obj/`) are ignored. Git is read with NUL-delimited output, so non-ASCII file names are not
+lost to Git's quoted display form. `--allow-dirty` is the explicit override for both. Every `run` writes
 `provenance.json` (HEAD, dirty files, untracked build inputs, flags) into the batch directory and the audit prints it.
+The check covers **repository inputs only**: external .NET configuration (user or machine NuGet config, `DOTNET_*`
+environment variables, the installed SDK and runtime) is separate environment evidence and is not verified here.
 `LUANSHI_BATCH_TEST_DELAY_MS` is a test-only seam that delays every fake reply; it is never set in a real run.
 
 ## Audit rules

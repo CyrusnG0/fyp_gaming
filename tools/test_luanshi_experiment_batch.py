@@ -145,11 +145,53 @@ class DirtyTreeChecks(unittest.TestCase):
         finally:
             tool.REPO = saved
 
+    def test_non_ascii_paths_are_not_lost_to_git_quoting(self):
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        self.git(repo, "init", "-q")
+        base = "fyp_gaming/Assets/GameEngine/"
+        ignored_name, untracked_name, staged_name = "\u5ffd\u7565.cs", "\u6e2c\u8a66.cs", "\u6e2c.cs"
+        self.put(repo, base + "Engine.cs", "class E {}")
+        self.put(repo, ".gitignore", "ignored/\n" + ignored_name + "\n")
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-q", "-m", "c")
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        path, directory = write_manifest(lambda m: m.update({"pinned_commit": head[:10]}))
+        self.addCleanup(shutil.rmtree, directory, True)
+        saved, tool.REPO = tool.REPO, repo
+
+        def check(**flags):
+            return tool.check_manifest(path, require_head=True, **flags)[1]
+        try:
+            self.put(repo, "ignored/" + untracked_name, "x")
+            self.put(repo, "runs/" + untracked_name, "x")
+            self.put(repo, base + "\u8aaa\u660e.md", "x")
+            self.assertEqual(check(), [], "non-ASCII files outside the compiled paths, or not .cs, are unrelated")
+
+            self.put(repo, base + untracked_name, "class T {}")
+            self.assertEqual(tool.git_state(repo)[2], [base + untracked_name])
+            self.assertTrue(any(base + untracked_name in x for x in check()), "an untracked non-ASCII .cs is refused, not hidden by Git's quoted display form")
+            self.assertEqual(check(allow_dirty=True), [])
+            os.remove(os.path.join(repo, *(base + untracked_name).split("/")))
+
+            self.put(repo, base + ignored_name, "class I {}")
+            self.assertEqual(tool.git_state(repo)[2], [base + ignored_name])
+            self.assertTrue(any(base + ignored_name in x for x in check()), "an ignored non-ASCII .cs in a compiled path is refused")
+            os.remove(os.path.join(repo, *(base + ignored_name).split("/")))
+
+            self.put(repo, base + "Engine.cs", "class E2 {}")
+            self.put(repo, base + staged_name, "class T {}")
+            self.git(repo, "add", base + staged_name)
+            self.assertEqual(sorted(tool.git_state(repo)[1]), sorted([base + "Engine.cs", base + staged_name]),
+                             "tracked changes keep their real non-ASCII names")
+        finally:
+            tool.REPO = saved
+
     @staticmethod
     def put(repo, relative, text):
         full = os.path.join(repo, *relative.split("/"))
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w") as handle:
+        with open(full, "w", encoding="utf-8") as handle:
             handle.write(text)
 
 

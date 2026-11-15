@@ -63,29 +63,34 @@ BUILD_CONFIG = ("Directory.Build.props", "Directory.Build.targets", "Directory.P
 
 
 def is_build_input(path):
-    """True for a repo-relative path ExperimentBatch.csproj would compile or load: *.cs directly in the batch project,
-    **/*.cs under Assets/GameEngine, the project file, the demo map, and MSBuild/NuGet config in the project's ancestor folders."""
+    """True for a repo-relative path the csproj would compile or load: batch-project *.cs, Assets/GameEngine/**/*.cs,
+    the project file, the demo map, and MSBuild/NuGet config in ancestor folders."""
     parts = path.split("/")
-    if path.startswith("fyp_gaming/Assets/GameEngine/") and path.endswith(".cs"):
-        return True
-    if path.startswith(BATCH_DIR + "/") and len(parts) == 4 and (path.endswith(".cs") or path.endswith(".csproj")):
-        return True
-    if path == "fyp_gaming/Tests/Harness/demo-map.json":
-        return True
-    return parts[-1] in BUILD_CONFIG and len(parts) <= 4
+    engine = path.startswith("fyp_gaming/Assets/GameEngine/") and path.endswith(".cs")
+    project = path.startswith(BATCH_DIR + "/") and len(parts) == 4 and path.endswith((".cs", ".csproj"))
+    return engine or project or path == "fyp_gaming/Tests/Harness/demo-map.json" or (parts[-1] in BUILD_CONFIG and len(parts) <= 4)
 
 
 def git_state(repo):
-    """(HEAD, tracked files with uncommitted changes, untracked files that can change the build).
-    Other untracked files (runs, logs, notes) cannot change what is built and are not counted. Gitignored files are
-    still listed, because an ignored .cs under a compiled path would be compiled all the same."""
+    """(HEAD, tracked files with uncommitted changes, untracked files that can change the build). Gitignored files are
+    listed too (an ignored .cs in a compiled path is still compiled); runs, logs and notes are not."""
     def git(*args):
-        return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True).stdout
-    status = git("status", "--porcelain", "--untracked-files=no")
+        return subprocess.run(["git", "-C", repo, *args], capture_output=True).stdout
+
+    def nul_paths(output):
+        # NUL-delimited output is never quoted or escaped, so non-ASCII and unusual names arrive as raw UTF-8.
+        return [item.decode("utf-8", "surrogateescape") for item in output.split(b"\0") if item]
+    dirty, entries = [], nul_paths(git("status", "--porcelain", "-z", "--untracked-files=no"))
+    skip = False
+    for entry in entries:
+        if skip:                                   # the original path that follows a rename or copy entry
+            skip = False
+            continue
+        dirty.append(entry[3:])
+        skip = entry[0] in "RC" or entry[1] in "RC"
     scope = ["fyp_gaming/Assets/GameEngine", BATCH_DIR, "fyp_gaming/Tests/Harness", ".", "fyp_gaming", "fyp_gaming/Tests"]
-    others = git("ls-files", "--others", "--", *scope).splitlines()
-    return (git("rev-parse", "HEAD").strip(), [line[3:] for line in status.splitlines() if line.strip()],
-            sorted(set(f for f in others if is_build_input(f))))
+    others = nul_paths(git("ls-files", "--others", "-z", "--", *scope))
+    return (git("rev-parse", "HEAD").decode("ascii", "replace").strip(), dirty, sorted(set(f for f in others if is_build_input(f))))
 
 
 def check_manifest(path, require_head=False, allow_dirty=False):
