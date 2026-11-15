@@ -65,7 +65,7 @@ namespace LuanShi.ExperimentBatch
 
             CompareRequests(a, outcome, records, exchangeRequests, exchangeResults, exchangeRequestHashes, totals);
             CompareTokens(a, outcome, records, totals);
-            CompareOrdersAndTurns(a, records, summary, totals);
+            CompareOrdersAndTurns(a, records, summary, totals, outcome.WallLimit != null);
             Report(a, records);
             a.Ok = a.Mismatches.Count == 0;
             return a;
@@ -80,8 +80,17 @@ namespace LuanShi.ExperimentBatch
             a.Counts["prompts_captured"] = o.Captures.Count;
             a.Counts["runner_total_requests"] = o.Requests;
             a.Counts["summary_requests"] = totals.GetProperty("requests").GetInt32();
+            // A match cut by a wall-clock limit between ticks can hold one request that was sent but whose reply was never
+            // recorded. That is the only tolerated gap: it is reported, and applies to a wall-stopped match alone.
+            int inFlight = o.WallLimit != null ? Math.Max(0, Math.Min(1, o.Captures.Count - records.Count)) : 0;
             foreach (KeyValuePair<string, long?> c in a.Counts)
-                if (c.Value != records.Count) a.Mismatches.Add("request count: " + c.Key + "=" + c.Value + " but " + records.Count + " per-request records");
+            {
+                bool sentSide = c.Key == "exchange_requests" || c.Key == "prompts_captured" || c.Key == "runner_total_requests" || c.Key == "summary_requests";
+                long expected = records.Count + (sentSide ? inFlight : 0);
+                if (c.Value != expected) a.Mismatches.Add("request count: " + c.Key + "=" + c.Value + " but " + expected + " expected from " + records.Count + " per-request records");
+            }
+            if (inFlight > 0)
+                a.Unknown.Add("match stopped by " + o.WallLimit + " mid-turn: " + inFlight + " request was sent but has no recorded reply (the summary counts it, its turn is absent from the summary list)");
             for (int i = 0; i < Math.Min(exchangeHashes.Count, o.Captures.Count); i++)
             {
                 ExchangeCapture cap = o.Captures[i];
@@ -112,7 +121,7 @@ namespace LuanShi.ExperimentBatch
             if (unknown > 0) a.Unknown.Add("token usage unknown for " + unknown + " of " + records.Count + " requests; match totals are unknown, not zero");
         }
 
-        private static void CompareOrdersAndTurns(MatchAudit a, List<JsonElement> records, JsonElement summary, JsonElement totals)
+        private static void CompareOrdersAndTurns(MatchAudit a, List<JsonElement> records, JsonElement summary, JsonElement totals, bool wallStopped)
         {
             var groups = new List<TurnAudit>();
             var byToken = new Dictionary<long, TurnAudit>();
@@ -162,7 +171,7 @@ namespace LuanShi.ExperimentBatch
                 if (t.RequestsInRecords != t.RequestsInSummary) a.Mismatches.Add("turn s" + t.Season + " " + t.Seat + ": records " + t.RequestsInRecords + " requests, summary " + t.RequestsInSummary);
                 if (t.AcceptedInRecords != t.AcceptedInSummary) a.Mismatches.Add("turn s" + t.Season + " " + t.Seat + ": records " + t.AcceptedInRecords + " accepted, summary " + t.AcceptedInSummary);
             }
-            if (index != groups.Count) a.Mismatches.Add("record turns (" + groups.Count + ") not all present in the summary (" + index + ")");
+            if (index != groups.Count && !(wallStopped && index == groups.Count - 1)) a.Mismatches.Add("record turns (" + groups.Count + ") not all present in the summary (" + index + ")");
             a.Turns = groups;
             int hidden = 0;
             foreach (TurnAudit t in groups) hidden += t.OrdersNotVisibleInSummaryCommands;

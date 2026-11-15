@@ -43,6 +43,11 @@ namespace LuanShi.ExperimentBatch
                 Entry("e2e: missing usage and truncation are reported as unknown/truncated", EndToEndUnknownAndTruncated),
                 Entry("batch: ceilings skip later matches but retain them", BatchCeilingsRetainSkipped),
                 Entry("batch: evidence holds no credential and refuses overwrite", EvidenceIsSecretFreeAndNotOverwritten),
+            Entry("review: skipped arm makes an incomplete pair, not a completed experiment", SkippedArmMakesAnIncompletePair),
+            Entry("review: unknown usage is counted per match", UnknownUsageIsCountedPerMatch),
+            Entry("review: system prompts compared by request identity", SystemPromptsAreComparedByRequestIdentity),
+            Entry("review: wall-clock limits stop a running match", WallClockLimitsStopAMatch),
+            Entry("review: input-token ceiling overshoots by one request then stops", InputTokenCeilingStopsAfterTheCrossingRequest),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

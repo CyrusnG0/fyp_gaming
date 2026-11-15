@@ -26,7 +26,12 @@ namespace LuanShi.ExperimentBatch
             {
                 if (command == "test") return BatchSelfTests.Run();
                 if (command == "validate" && args.Length == 2) return Validate(args[1]);
-                if (command == "run" && args.Length == 4 && args[2] == "--out") return Run(args[1], args[3]);
+                if (command == "run" && args.Length == 4 && args[2] == "--out")
+                {
+                    // Test seam for the Python tool's regression tests: holds every fake reply back so wall-clock limits can be exercised.
+                    if (int.TryParse(Environment.GetEnvironmentVariable("LUANSHI_BATCH_TEST_DELAY_MS"), out int delay) && delay > 0) ScriptedSeatTransport.DelayPerRequestMs = delay;
+                    return Run(args[1], args[3]);
+                }
             }
             catch (Exception e)
             {

@@ -39,8 +39,42 @@ hash), `<run>.jsonl` (per-request records), `<run>-exchanges.ndjson` (recorder's
 errored and **skipped** matches are all kept; an existing non-empty output directory is refused.
 
 Status words: `completed` = every turn ended by the model's own end_turn; `completed_with_stops` = the
-seasons finished but some turn was cut by a ceiling or provider error; `stopped` = per-match wall limit;
+seasons finished but some turn was cut by a ceiling or provider error; `stopped` = a match or batch wall-clock limit ended it mid-match;
 `failed` = the session did not complete; `error` = the harness threw; `skipped` = a batch ceiling forbade it.
+
+## Records consistent is not batch complete
+
+`batch-result.json` and the report keep two separate verdicts. `all_audits_ok` / "records internally
+consistent" means the evidence that exists agrees with itself. `matched_batch_complete` is true only when every
+planned pair ran BOTH arms to the end of their seasons (`completed` or `completed_with_stops`); a skipped,
+stopped, failed or errored arm leaves its pair in `incomplete_pairs` and the report says "not a completed
+experiment". The Python audit re-derives this from the saved files and exits **3** (records consistent, batch
+incomplete) rather than 0. A skipped arm keeps `settings.json` and `match.json`; the audit tolerates a missing
+`settings.json` and reports the pair incomplete.
+
+## Ceilings: what is and is not exact
+
+- **Match and batch wall-clock limits** are checked between session ticks, during a match (the earlier of the
+  match limit and the batch time remaining). One request in flight can overrun a limit by up to roughly
+  `request_timeout_ms`; this is not measured against a real provider. A match cut mid-turn is `stopped`, names the
+  limit (`wall_limit`), and the audit reports the one request that was sent without a recorded reply.
+- **Input-token ceilings** are checked before each request against usage already reported, so the request that
+  crosses the ceiling completes: a match can overshoot by up to one request's input, and the batch total by up
+  to one request per started match. Output ceilings are strict. The batch checks token ceilings before a match
+  using the per-match ceilings, so a ceiling below one match's own ceiling starts nothing.
+- `unknown_usage_policy`: `stop_batch` skips later matches once any match's usage is unknown;
+  `continue_on_unknown` keeps going and enforces token ceilings on known usage only. `matches_with_unknown_usage`
+  counts each ran match by its own usage.
+- **System prompts** are compared per request, aligned by (seat, nth request of that seat). The arms are
+  "identical" only with the same requests and equal prompts; otherwise the report gives aligned / differing /
+  one-sided counts.
+
+## Pinned commit and the working tree
+
+`python tools/luanshi_experiment_batch.py run <manifest> --out <dir> --require-head` refuses when HEAD is not the
+pinned commit **or any tracked file is modified** (untracked files are not counted). `--allow-dirty` is the
+explicit override. Every `run` writes `provenance.json` (HEAD, dirty files, flags) into the batch directory.
+`LUANSHI_BATCH_TEST_DELAY_MS` is a test-only seam that delays every fake reply; it is never set in a real run.
 
 ## Audit rules
 

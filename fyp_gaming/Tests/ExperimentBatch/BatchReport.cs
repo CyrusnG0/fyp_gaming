@@ -18,7 +18,10 @@ namespace LuanShi.ExperimentBatch
               .Append("; output tokens ").Append(r.OutputTokensTotal.HasValue ? r.OutputTokensTotal.Value.ToString() : "unknown")
               .Append(r.MatchesWithUnknownUsage > 0 ? " (" + r.MatchesWithUnknownUsage + " match(es) without full usage)" : "").Append('\n');
             if (r.BatchCeilingsHit.Count > 0) sb.Append("batch ceilings hit: ").Append(string.Join(", ", r.BatchCeilingsHit)).Append('\n');
-            sb.Append("all audits ok: ").Append(r.AllAuditsOk ? "yes" : "NO").Append("\n\n");
+            sb.Append("records internally consistent: ").Append(r.AllAuditsOk ? "yes" : "NO").Append('\n');
+            sb.Append("matched batch complete: ").Append(r.MatchedBatchComplete ? "yes" : "NO - not a completed experiment");
+            if (r.IncompletePairs.Count > 0) sb.Append(" (").Append(string.Join("; ", r.IncompletePairs)).Append(')');
+            sb.Append('\n').Append(r.WallClockNote).Append('\n').Append(r.TokenCeilingNote).Append("\n\n");
             foreach (MatchOutcome o in r.Matches)
             {
                 sb.Append(o.MatchId).Append(": ").Append(o.Status);
@@ -38,6 +41,8 @@ namespace LuanShi.ExperimentBatch
                   .Append(p.SettingsCheck.Ok ? "yes" : "NO").Append('\n');
                 foreach (string d in p.SettingsCheck.Differences) sb.Append("    ").Append(d).Append('\n');
                 foreach (string d in p.SettingsCheck.Problems) sb.Append("    problem: ").Append(d).Append('\n');
+                sb.Append("    complete: ").Append(p.Complete ? "yes" : "NO - " + p.IncompleteReason).Append('\n');
+                if (p.SystemPromptComparison != null) sb.Append("    system prompts: ").Append(p.SystemPromptComparison).Append('\n');
             }
             return sb.ToString();
         }

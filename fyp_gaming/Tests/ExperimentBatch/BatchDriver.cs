@@ -12,8 +12,13 @@ namespace LuanShi.ExperimentBatch
     {
         [JsonPropertyName("pair_id")] public string PairId { get; set; }
         [JsonPropertyName("settings_check")] public PairCheck SettingsCheck { get; set; }
-        /// <summary>True when every system prompt both arms sent is byte-identical. Expected while spatial context is a fake switch.</summary>
+        /// <summary>True only when both arms sent the same requests and every aligned system prompt is byte-identical.</summary>
         [JsonPropertyName("system_prompts_identical")] public bool? SystemPromptsIdentical { get; set; }
+        /// <summary>How the comparison was made: alignment key, counts, and any request that could not be aligned.</summary>
+        [JsonPropertyName("system_prompt_comparison")] public string SystemPromptComparison { get; set; }
+        /// <summary>Both arms ran their seasons (completed or completed_with_stops) and the settings check passed.</summary>
+        [JsonPropertyName("complete")] public bool Complete { get; set; }
+        [JsonPropertyName("incomplete_reason")] public string IncompleteReason { get; set; }
         [JsonPropertyName("final_state_differs")] public bool? FinalStateDiffers { get; set; }
         [JsonPropertyName("both_audits_ok")] public bool BothAuditsOk { get; set; }
     }
@@ -32,7 +37,15 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("matches_with_unknown_usage")] public int MatchesWithUnknownUsage { get; set; }
         [JsonPropertyName("batch_ceilings_hit")] public List<string> BatchCeilingsHit { get; set; } = new List<string>();
         [JsonPropertyName("status_counts")] public SortedDictionary<string, int> StatusCounts { get; set; } = new SortedDictionary<string, int>();
+        /// <summary>Records are internally consistent (audits, settings checks). Says nothing about whether the matched batch finished.</summary>
         [JsonPropertyName("all_audits_ok")] public bool AllAuditsOk { get; set; }
+        /// <summary>Every planned pair ran both arms to the end of its seasons. False for any skipped, errored, failed or stopped arm.</summary>
+        [JsonPropertyName("matched_batch_complete")] public bool MatchedBatchComplete { get; set; }
+        [JsonPropertyName("incomplete_pairs")] public List<string> IncompletePairs { get; set; } = new List<string>();
+        [JsonPropertyName("wall_clock_note")] public string WallClockNote { get; set; } =
+            "Batch and match wall-clock limits are checked between session ticks, so one in-flight request can overrun a limit by up to roughly request_timeout_ms; not measured against a real provider.";
+        [JsonPropertyName("token_ceiling_note")] public string TokenCeilingNote { get; set; } =
+            "Input-token ceilings are checked against usage already reported before each request, so one request can overshoot the ceiling; batch totals can exceed a batch ceiling by up to one request per started match. Output ceilings are strict.";
         [JsonPropertyName("note")] public string Note { get; set; } =
             "Offline scripted fake provider. Outcomes are plumbing evidence, never model behaviour. Spatial context is a fake switch, not integrated in production.";
     }
@@ -78,16 +91,21 @@ namespace LuanShi.ExperimentBatch
                     continue;
                 }
                 started++;
-                MatchOutcome outcome = BatchRunner.RunMatch(spec, dir, manifest.BatchId);
+                double remaining = Math.Max(0.0, ceiling.MaxBatchWallSeconds.Value - wall.Elapsed.TotalSeconds);
+                MatchOutcome outcome = BatchRunner.RunMatch(spec, dir, manifest.BatchId, remaining);
                 result.Matches.Add(outcome);
+                if (outcome.WallLimit == "max_batch_wall_seconds")
+                {
+                    stopped = "max_batch_wall_seconds";   // the batch limit expired mid-match: nothing later may start
+                    if (!result.BatchCeilingsHit.Contains(stopped)) result.BatchCeilingsHit.Add(stopped);
+                }
                 result.RequestsTotal += outcome.Requests;
                 knownInput += outcome.KnownInputTokens; knownOutput += outcome.KnownOutputTokens;
                 if (inputUsed.HasValue && outputUsed.HasValue && outcome.InputTokens.HasValue && outcome.OutputTokens.HasValue)
                 { inputUsed += outcome.InputTokens; outputUsed += outcome.OutputTokens; }
-                else { inputUsed = null; outputUsed = null; result.MatchesWithUnknownUsage++; }
+                else { inputUsed = null; outputUsed = null; }   // the running total is unknown from here on
             }
-            result.InputTokensTotal = inputUsed;
-            result.OutputTokensTotal = outputUsed;
+            Tally(result);
             Finish(result, specs, manifest);
             File.WriteAllText(Path.Combine(batchDir, "batch-result.json"),
                 JsonSerializer.Serialize(result, BatchManifest.WriteOptions), new UTF8Encoding(false));
@@ -109,6 +127,29 @@ namespace LuanShi.ExperimentBatch
             return null;
         }
 
+        /// <summary>
+        /// Token totals and the count of matches with unknown usage, each judged on the match's OWN usage.
+        /// A match that never ran (skipped) has no usage to be unknown about and is not counted.
+        /// </summary>
+        public static void Tally(BatchResult result)
+        {
+            long input = 0, output = 0;
+            bool known = true;
+            result.MatchesWithUnknownUsage = 0;
+            result.RequestsTotal = 0;
+            foreach (MatchOutcome o in result.Matches)
+            {
+                if (o.Status == "skipped") continue;
+                result.RequestsTotal += o.Requests;
+                if (o.InputTokens.HasValue && o.OutputTokens.HasValue) { input += o.InputTokens.Value; output += o.OutputTokens.Value; }
+                else { known = false; result.MatchesWithUnknownUsage++; }
+            }
+            result.InputTokensTotal = known ? input : (long?)null;
+            result.OutputTokensTotal = known ? output : (long?)null;
+        }
+
+        private static bool Ran(MatchOutcome o) => o.Status == "completed" || o.Status == "completed_with_stops";
+
         private static void Finish(BatchResult result, List<MatchSpec> specs, BatchManifest manifest)
         {
             bool allOk = true;
@@ -127,21 +168,46 @@ namespace LuanShi.ExperimentBatch
                 };
                 bool bothRan = c.Captures.Count > 0 && t.Captures.Count > 0;
                 pair.BothAuditsOk = c.Audit != null && c.Audit.Ok && t.Audit != null && t.Audit.Ok;
-                if (bothRan) pair.SystemPromptsIdentical = SystemPromptsMatch(c.Captures, t.Captures);
-                if (bothRan) pair.FinalStateDiffers = string.Join("|", c.FinalState) != string.Join("|", t.FinalState);
+                if (bothRan)
+                {
+                    pair.SystemPromptsIdentical = CompareSystemPrompts(c.Captures, t.Captures, out string how);
+                    pair.SystemPromptComparison = how;
+                    pair.FinalStateDiffers = string.Join("|", c.FinalState) != string.Join("|", t.FinalState);
+                }
+                pair.Complete = Ran(c) && Ran(t) && pair.SettingsCheck.Ok;
+                if (!pair.Complete)
+                {
+                    pair.IncompleteReason = "control " + c.Status + ", treatment " + t.Status + (pair.SettingsCheck.Ok ? "" : ", settings check failed");
+                    result.IncompletePairs.Add(pair.PairId + ": " + pair.IncompleteReason);
+                }
                 result.Pairs.Add(pair);
                 if (!pair.SettingsCheck.Ok) allOk = false;
             }
             result.AllAuditsOk = allOk;
+            result.MatchedBatchComplete = result.IncompletePairs.Count == 0 && result.Matches.Count == specs.Count && specs.Count > 0;
         }
 
-        private static bool SystemPromptsMatch(List<ExchangeCapture> a, List<ExchangeCapture> b)
+        /// <summary>
+        /// Aligns requests by identity (seat, nth request of that seat) and compares system prompts. Identical only
+        /// when both arms made the same requests and every aligned system prompt matches byte for byte; otherwise the
+        /// description says how many aligned and how many could not be.
+        /// </summary>
+        public static bool CompareSystemPrompts(List<ExchangeCapture> a, List<ExchangeCapture> b, out string how)
         {
-            if (a.Count == 0 || b.Count == 0) return false;
-            var first = new HashSet<string>(StringComparer.Ordinal);
-            foreach (ExchangeCapture x in a) first.Add(x.System);
-            foreach (ExchangeCapture x in b) if (!first.Contains(x.System)) return false;
-            return true;
+            var left = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (ExchangeCapture x in a) left[x.Seat + "#" + x.SeatRequest] = x.System;
+            int aligned = 0, differing = 0, onlyRight = 0;
+            foreach (ExchangeCapture x in b)
+            {
+                if (!left.TryGetValue(x.Seat + "#" + x.SeatRequest, out string other)) { onlyRight++; continue; }
+                aligned++;
+                if (!string.Equals(other, x.System, StringComparison.Ordinal)) differing++;
+            }
+            int onlyLeft = left.Count - aligned;
+            bool identical = differing == 0 && onlyLeft == 0 && onlyRight == 0;
+            how = "aligned by seat and per-seat request number: " + aligned + " aligned (" + a.Count + " control, " + b.Count + " treatment requests); "
+                + differing + " differ, " + onlyLeft + " control-only, " + onlyRight + " treatment-only" + (identical ? "" : "; NOT identical");
+            return identical;
         }
     }
 }

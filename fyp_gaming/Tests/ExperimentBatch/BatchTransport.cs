@@ -70,9 +70,13 @@ namespace LuanShi.ExperimentBatch
 
         public List<ExchangeCapture> Captures() { lock (_gate) return new List<ExchangeCapture>(_captures); }
 
+        /// <summary>Test seam: milliseconds each reply is held back, to exercise wall-clock limits. Zero in every real run.</summary>
+        internal static int DelayPerRequestMs;
+
         public Task<LlmResponse> SendAsync(LlmRequest req, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
+            if (DelayPerRequestMs > 0) Thread.Sleep(DelayPerRequestMs);
             ExchangeCapture cap;
             LlmResponse response;
             lock (_gate)

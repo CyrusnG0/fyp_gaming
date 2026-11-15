@@ -34,6 +34,8 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("seasons_played")] public int SeasonsPlayed { get; set; }
         [JsonPropertyName("turn_endings")] public List<string> TurnEndings { get; set; } = new List<string>();
         [JsonPropertyName("spatial_context")] public string SpatialContext { get; set; }
+        /// <summary>Which wall-clock limit ended the match, or null.</summary>
+        [JsonPropertyName("wall_limit")] public string WallLimit { get; set; }
         [JsonPropertyName("elapsed_ms")] public long ElapsedMs { get; set; }
         [JsonPropertyName("final_state")] public List<string> FinalState { get; set; } = new List<string>();
         [JsonPropertyName("files")] public Dictionary<string, FileRef> Files { get; set; } = new Dictionary<string, FileRef>();
@@ -50,7 +52,8 @@ namespace LuanShi.ExperimentBatch
     /// <summary>Runs one arm through the production runner and session, then writes and audits its evidence.</summary>
     public static class BatchRunner
     {
-        public static MatchOutcome RunMatch(MatchSpec spec, string matchDir, string batchId)
+        /// <param name="batchWallRemainingSeconds">Batch wall time left; the match stops at the earlier of this and its own limit.</param>
+        public static MatchOutcome RunMatch(MatchSpec spec, string matchDir, string batchId, double batchWallRemainingSeconds = double.MaxValue)
         {
             var outcome = new MatchOutcome
             {
@@ -66,7 +69,7 @@ namespace LuanShi.ExperimentBatch
             {
                 WriteText(outcome, matchDir, "settings", "settings.json", JsonSerializer.Serialize(
                     new { match_id = spec.MatchId, settings_hash = spec.SettingsHash, settings = spec.Flat }, BatchManifest.WriteOptions));
-                Play(spec, matchDir, batchId, outcome);
+                Play(spec, matchDir, batchId, outcome, batchWallRemainingSeconds);
             }
             catch (Exception e)
             {
@@ -88,6 +91,9 @@ namespace LuanShi.ExperimentBatch
                 MatchId = spec.MatchId, PairId = spec.PairId, Arm = spec.Arm, Seed = spec.Seed, SettingsHash = spec.SettingsHash,
                 Status = "skipped", Detail = reason,
             };
+            // The planned settings are kept for a skipped arm too, so the pair's intended difference stays checkable.
+            WriteText(outcome, matchDir, "settings", "settings.json", JsonSerializer.Serialize(
+                new { match_id = spec.MatchId, settings_hash = spec.SettingsHash, settings = spec.Flat }, BatchManifest.WriteOptions));
             Retain(outcome, matchDir);
             return outcome;
         }
@@ -95,7 +101,7 @@ namespace LuanShi.ExperimentBatch
         private static void Retain(MatchOutcome outcome, string matchDir)
             => WriteText(outcome, matchDir, "match", "match.json", JsonSerializer.Serialize(outcome, BatchManifest.WriteOptions));
 
-        private static void Play(MatchSpec spec, string matchDir, string batchId, MatchOutcome outcome)
+        private static void Play(MatchSpec spec, string matchDir, string batchId, MatchOutcome outcome, double batchRemaining)
         {
             BatchManifest m = spec.Resolved;
             GameEngine engine = BatchWorld.Create(m, batchId + "-" + spec.MatchId, spec.Seed);
@@ -111,11 +117,14 @@ namespace LuanShi.ExperimentBatch
 
             session.Start();
             var wall = Stopwatch.StartNew();
-            long limitMs = (m.BatchCeilings.MaxMatchWallSeconds ?? 60) * 1000L;
+            double matchLimit = m.BatchCeilings.MaxMatchWallSeconds ?? 60;
+            // The earlier of the two limits ends the match; which one it was is recorded. Checked between ticks only.
+            bool batchLimitFirst = batchRemaining < matchLimit;
+            long limitMs = (long)((batchLimitFirst ? batchRemaining : matchLimit) * 1000.0);
             bool wallHit = false;
             while (session.State == SpectatorState.Running)
             {
-                if (wall.ElapsedMilliseconds > limitMs) { wallHit = true; break; }
+                if (wall.ElapsedMilliseconds >= limitMs) { wallHit = true; outcome.WallLimit = batchLimitFirst ? "max_batch_wall_seconds" : "max_match_wall_seconds"; break; }
                 session.Tick();
                 Thread.Yield();
             }
@@ -141,7 +150,7 @@ namespace LuanShi.ExperimentBatch
             // finished its seasons while some turns were cut by a ceiling or a provider error is not clean.
             outcome.Status = wallHit ? "stopped" : session.State != SpectatorState.Completed ? "failed"
                 : clean ? "completed" : "completed_with_stops";
-            outcome.Detail = wallHit ? "match wall-clock ceiling reached" : session.PauseReason;
+            outcome.Detail = wallHit ? outcome.WallLimit + " reached during the match (checked between ticks)" : session.PauseReason;
 
             WriteText(outcome, matchDir, "prompts", "prompts.ndjson", PromptLines(outcome.Captures));
             string summaryPath = SpectatorSummary.Write(matchDir, session, config, transport, runner);

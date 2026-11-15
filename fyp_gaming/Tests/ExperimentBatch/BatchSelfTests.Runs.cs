@@ -37,7 +37,7 @@ namespace LuanShi.ExperimentBatch
                     "status counts: " + string.Join(",", r.StatusCounts.Select(kv => kv.Key + "=" + kv.Value)));
                 log.Check(r.Pairs.Count == 2 && r.Pairs.All(p => p.SettingsCheck.Ok && p.BothAuditsOk),
                     "both pairs pass the settings check and their audits");
-                log.Check(r.Pairs.All(p => p.SystemPromptsIdentical == true),
+                log.Check(r.Pairs.All(p => p.SystemPromptsIdentical == true && p.SystemPromptComparison.Contains("aligned")),
                     "the arms send identical system prompts (spatial context is only a fake switch)");
                 log.Check(r.Pairs.All(p => p.FinalStateDiffers == true),
                     "the scripted switch changes the march, so the arms' final states differ");
