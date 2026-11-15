@@ -72,8 +72,12 @@ incomplete) rather than 0. A skipped arm keeps `settings.json` and `match.json`;
 ## Pinned commit and the working tree
 
 `python tools/luanshi_experiment_batch.py run <manifest> --out <dir> --require-head` refuses when HEAD is not the
-pinned commit **or any tracked file is modified** (untracked files are not counted). `--allow-dirty` is the
-explicit override. Every `run` writes `provenance.json` (HEAD, dirty files, flags) into the batch directory.
+pinned commit, **any tracked file is modified**, or **an untracked file would be built**: `*.cs` directly in the
+batch project, `**/*.cs` under `Assets/GameEngine`, the `.csproj`, `Harness/demo-map.json` and MSBuild/NuGet config
+(`Directory.Build.*`, `Directory.Packages.props`, `global.json`, `nuget.config`) in the project's ancestor folders.
+Gitignored files count too, since an ignored `.cs` in a compiled path is still compiled. Other untracked files (runs,
+logs, notes, `bin/`, `obj/`) are ignored. `--allow-dirty` is the explicit override for both. Every `run` writes
+`provenance.json` (HEAD, dirty files, untracked build inputs, flags) into the batch directory and the audit prints it.
 `LUANSHI_BATCH_TEST_DELAY_MS` is a test-only seam that delays every fake reply; it is never set in a real run.
 
 ## Audit rules

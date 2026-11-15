@@ -105,6 +105,53 @@ class DirtyTreeChecks(unittest.TestCase):
         finally:
             tool.REPO = saved
 
+    def test_untracked_build_inputs_are_refused_but_unrelated_files_are_not(self):
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        self.git(repo, "init", "-q")
+        self.put(repo, "fyp_gaming/Assets/GameEngine/Engine.cs", "class E {}")
+        self.put(repo, "fyp_gaming/Tests/ExperimentBatch/Program.cs", "class P {}")
+        self.put(repo, ".gitignore", "ignored/\n")
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-q", "-m", "c")
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        path, directory = write_manifest(lambda m: m.update({"pinned_commit": head[:10]}))
+        self.addCleanup(shutil.rmtree, directory, True)
+        saved, tool.REPO = tool.REPO, repo
+
+        def check(**flags):
+            return tool.check_manifest(path, require_head=True, **flags)[1]
+        try:
+            for unrelated in ("runs/out/batch-result.json", "logs/run.log", "fyp_gaming/Tests/ExperimentBatch/bin/Release/Gen.cs",
+                              "fyp_gaming/Tests/ExperimentBatch/notes.md", "fyp_gaming/Assets/GameEngine/notes.txt", "fyp_gaming/Other/Extra.cs"):
+                self.put(repo, unrelated, "x")
+            self.assertEqual(check(), [], "runs, logs, notes and .cs files outside the compiled paths do not change the build")
+            self.assertEqual(tool.git_state(repo)[2], [])
+
+            for compiled in ("fyp_gaming/Assets/GameEngine/Sub/New.cs", "fyp_gaming/Tests/ExperimentBatch/Extra.cs"):
+                self.put(repo, compiled, "class N {}")
+                problems = check()
+                self.assertTrue(any("untracked file(s) the build would compile" in x and compiled in x for x in problems), problems)
+                self.assertEqual(check(allow_dirty=True), [], "--allow-dirty is the explicit override")
+                os.remove(os.path.join(repo, compiled))
+                self.assertEqual(check(), [])
+
+            self.put(repo, "fyp_gaming/Assets/GameEngine/Hidden.cs", "class H {}")
+            self.put(repo, "ignored/x.txt", "x")
+            with open(os.path.join(repo, ".gitignore"), "w") as handle:
+                handle.write("ignored/\nHidden.cs\n")
+            self.assertTrue(any("Hidden.cs" in x for x in check()), "an ignored .cs in a compiled path is still compiled, so still refused")
+            self.assertEqual(tool.git_state(repo)[2], ["fyp_gaming/Assets/GameEngine/Hidden.cs"])
+        finally:
+            tool.REPO = saved
+
+    @staticmethod
+    def put(repo, relative, text):
+        full = os.path.join(repo, *relative.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as handle:
+            handle.write(text)
+
 
 class AuditChecks(unittest.TestCase):
     def run_batch(self, mutate=None, delay_ms=None):

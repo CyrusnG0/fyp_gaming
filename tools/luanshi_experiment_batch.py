@@ -58,11 +58,34 @@ def scan(node, path, problems):
         problems.append("credential-like value at %s (not shown)" % path)
 
 
+BATCH_DIR = "fyp_gaming/Tests/ExperimentBatch"
+BUILD_CONFIG = ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json", "nuget.config")
+
+
+def is_build_input(path):
+    """True for a repo-relative path ExperimentBatch.csproj would compile or load: *.cs directly in the batch project,
+    **/*.cs under Assets/GameEngine, the project file, the demo map, and MSBuild/NuGet config in the project's ancestor folders."""
+    parts = path.split("/")
+    if path.startswith("fyp_gaming/Assets/GameEngine/") and path.endswith(".cs"):
+        return True
+    if path.startswith(BATCH_DIR + "/") and len(parts) == 4 and (path.endswith(".cs") or path.endswith(".csproj")):
+        return True
+    if path == "fyp_gaming/Tests/Harness/demo-map.json":
+        return True
+    return parts[-1] in BUILD_CONFIG and len(parts) <= 4
+
+
 def git_state(repo):
-    """(HEAD, tracked files with uncommitted changes). Untracked files are not counted: they cannot change a tracked build input."""
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    status = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True).stdout
-    return head, [line[3:] for line in status.splitlines() if line.strip()]
+    """(HEAD, tracked files with uncommitted changes, untracked files that can change the build).
+    Other untracked files (runs, logs, notes) cannot change what is built and are not counted. Gitignored files are
+    still listed, because an ignored .cs under a compiled path would be compiled all the same."""
+    def git(*args):
+        return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True).stdout
+    status = git("status", "--porcelain", "--untracked-files=no")
+    scope = ["fyp_gaming/Assets/GameEngine", BATCH_DIR, "fyp_gaming/Tests/Harness", ".", "fyp_gaming", "fyp_gaming/Tests"]
+    others = git("ls-files", "--others", "--", *scope).splitlines()
+    return (git("rev-parse", "HEAD").strip(), [line[3:] for line in status.splitlines() if line.strip()],
+            sorted(set(f for f in others if is_build_input(f))))
 
 
 def check_manifest(path, require_head=False, allow_dirty=False):
@@ -105,12 +128,15 @@ def check_manifest(path, require_head=False, allow_dirty=False):
         if found.returncode != 0:
             problems.append("pinned_commit %s does not exist in this repository" % commit)
         elif require_head:
-            head, dirty = git_state(REPO)
+            head, dirty, untracked = git_state(REPO)
             if not head.startswith(commit):
                 problems.append("HEAD (%s) is not the pinned commit %s" % (head[:10], commit))
             if dirty and not allow_dirty:
                 problems.append("tracked working-tree changes (%d file(s), e.g. %s): the pinned commit is not what would run; "
                                 "commit them or pass --allow-dirty to record the dirty tree explicitly" % (len(dirty), dirty[0]))
+            if untracked and not allow_dirty:
+                problems.append("untracked file(s) the build would compile or load (%d, e.g. %s): the pinned commit is not what would run; "
+                                "remove or commit them, or pass --allow-dirty to record them explicitly" % (len(untracked), untracked[0]))
     else:
         problems.append("pinned_commit must be 7-40 lowercase hex characters")
     return (manifest if not problems else None), problems
@@ -291,7 +317,9 @@ def audit_batch(batch_dir):
     if os.path.exists(provenance):
         with open(provenance, encoding="utf-8") as handle:
             info = json.load(handle)
-        notes.append("provenance: HEAD %s, tracked working tree %s" % (info.get("head", "?")[:10], "DIRTY (%s)" % ", ".join(info.get("dirty_files", [])[:3]) if info.get("dirty_files") else "clean"))
+        notes.append("provenance: HEAD %s, tracked working tree %s, untracked build inputs %s" % (
+            info.get("head", "?")[:10], "DIRTY (%s)" % ", ".join(info["dirty_files"][:3]) if info.get("dirty_files") else "clean",
+            "PRESENT (%s)" % ", ".join(info["untracked_build_inputs"][:3]) if info.get("untracked_build_inputs") else "none"))
     else:
         notes.append("provenance: not recorded (batch was not started through this tool)")
     return problems, notes, incomplete
@@ -329,13 +357,13 @@ def command_run(args):
         print("invalid: " + problem, file=sys.stderr)
     if not manifest:
         return 2
-    head, dirty = git_state(REPO)
+    head, dirty, untracked = git_state(REPO)
     code = subprocess.call(["dotnet", "run", "--project", PROJECT, "-c", "Release", "--", "run", args.manifest, "--out", args.out])
     batch_dir = os.path.join(args.out, manifest["batch_id"])
     if not os.path.exists(os.path.join(batch_dir, "batch-result.json")):
         return code or 2
     with open(os.path.join(batch_dir, "provenance.json"), "w", encoding="utf-8") as handle:
-        json.dump({"head": head, "pinned_commit": manifest["pinned_commit"], "dirty_files": dirty, "allow_dirty": bool(args.allow_dirty),
+        json.dump({"head": head, "pinned_commit": manifest["pinned_commit"], "dirty_files": dirty, "untracked_build_inputs": untracked, "allow_dirty": bool(args.allow_dirty),
                    "require_head": bool(args.require_head)}, handle, indent=2)
     audit_code = command_audit(argparse.Namespace(batch_dir=batch_dir))
     return code or audit_code
@@ -346,8 +374,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("check-manifest")
     p.add_argument("manifest")
-    p.add_argument("--require-head", action="store_true", help="fail unless HEAD is the pinned commit and no tracked file is modified")
-    p.add_argument("--allow-dirty", action="store_true", help="with --require-head, accept tracked changes (recorded in provenance.json)")
+    p.add_argument("--require-head", action="store_true", help="fail unless HEAD is the pinned commit, no tracked file is modified and no untracked file would be built")
+    p.add_argument("--allow-dirty", action="store_true", help="with --require-head, accept tracked changes and untracked build inputs (recorded in provenance.json)")
     p.set_defaults(func=command_check)
     p = sub.add_parser("run")
     p.add_argument("manifest")
