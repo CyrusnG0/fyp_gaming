@@ -92,8 +92,29 @@ namespace LuanShi.Engine
             _turnEndRecorded = false;
         }
 
+        // Provider token ceilings are per match: a reused runner keeps its lifetime totals for reporting
+        // (TotalInputTokens/TotalOutputTokens) but each match starts with its own allowance and its own
+        // known/unknown usage state.
+        private string _tokenMatchId;
+        private long _matchInput;
+        private long _matchOutput;
+        private bool _matchUsageUnknown;
+
+        private void EnterTokenMatch(string gameId)
+        {
+            if (string.Equals(_tokenMatchId, gameId, StringComparison.Ordinal)) return;
+            _tokenMatchId = gameId;
+            _matchInput = 0;
+            _matchOutput = 0;
+            _matchUsageUnknown = false;
+        }
+
         private void ClearExperimentMatchState()
         {
+            _tokenMatchId = null;
+            _matchInput = 0;
+            _matchOutput = 0;
+            _matchUsageUnknown = false;
             _inquiryLog.Clear();
             _inquiryLogDropped.Clear();
             _historyDropped.Clear();
@@ -150,20 +171,20 @@ namespace LuanShi.Engine
             if (!ExperimentActive) return false;
             bool inputCapped = _config.MaxSessionInputTokens > 0;
             bool outputCapped = _config.MaxSessionOutputTokens > 0;
-            if ((inputCapped && _inputUnknown) || (outputCapped && _outputUnknown))
+            if ((inputCapped || outputCapped) && _matchUsageUnknown)
             {
                 failure = "provider usage unknown with a token ceiling configured";
                 ceiling = "session_usage_unknown";
                 return true;
             }
-            if (inputCapped && (_totalInput ?? 0) >= _config.MaxSessionInputTokens)
+            if (inputCapped && _matchInput >= _config.MaxSessionInputTokens)
             {
                 failure = "session input token ceiling reached";
                 ceiling = "session_input_tokens";
                 return true;
             }
             int perReply = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400;
-            if (outputCapped && (_totalOutput ?? 0) + perReply > _config.MaxSessionOutputTokens)
+            if (outputCapped && _matchOutput + perReply > _config.MaxSessionOutputTokens)
             {
                 failure = "session output token ceiling reached";
                 ceiling = "session_output_tokens";
@@ -244,16 +265,16 @@ namespace LuanShi.Engine
             a.SecondsLeftSession = _config.MaxSessionSeconds > 0 && _sessionStartMillis >= 0
                 ? (int)Math.Max(0, (_config.MaxSessionSeconds * 1000L - (SessionNowMillis() - _sessionStartMillis)) / 1000)
                 : -1;
-            a.InputTokensLeftSession = TokensLeft(_config.MaxSessionInputTokens, _totalInput, _inputUnknown);
-            a.OutputTokensLeftSession = TokensLeft(_config.MaxSessionOutputTokens, _totalOutput, _outputUnknown);
+            a.InputTokensLeftSession = TokensLeft(_config.MaxSessionInputTokens, _matchInput, _matchUsageUnknown);
+            a.OutputTokensLeftSession = TokensLeft(_config.MaxSessionOutputTokens, _matchOutput, _matchUsageUnknown);
             return a;
         }
 
-        private static long TokensLeft(int cap, long? used, bool unknown)
+        private static long TokensLeft(int cap, long used, bool unknown)
         {
             if (cap <= 0) return -1;
             if (unknown) return -2;
-            return Math.Max(0, cap - (used ?? 0));
+            return Math.Max(0, cap - used);
         }
 
         private RichContextResult AssembleRichContext(Observation observation,

@@ -227,7 +227,7 @@ namespace LuanShi.Engine
             }
             report.Add("march destinations across your armies", shown, reachable,
                 shown < reachable
-                    ? "the planner lists only these; omitted destinations cannot be requested and cannot be ordered"
+                    ? "the planner lists only these; omitted destinations are not listed by any tool, but the host checks a submitted destination on its own, so a legal visible one you name from the map may be accepted"
                     : null);
         }
     }

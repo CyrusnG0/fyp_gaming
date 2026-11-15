@@ -117,12 +117,15 @@ namespace LuanShi.Engine
             {
                 _inputUnknown = true;
                 _outputUnknown = true;
+                _matchUsageUnknown = true;
                 _costKnown = false;
                 return;
             }
 
             _totalInput = (_totalInput ?? 0) + response.InputTokens.Value;
             _totalOutput = (_totalOutput ?? 0) + response.OutputTokens.Value;
+            _matchInput += response.InputTokens.Value;
+            _matchOutput += response.OutputTokens.Value;
             if (_config.UsdPerMTokIn.HasValue && _config.UsdPerMTokOut.HasValue)
             {
                 _cost += response.InputTokens.Value / 1000000.0 * _config.UsdPerMTokIn.Value

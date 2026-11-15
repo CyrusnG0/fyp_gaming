@@ -71,6 +71,8 @@ namespace LuanShi.Playground
             ExperimentLargeBudgetTwoSeatsMultiSeason(log);
             ExperimentCeilings(log);
             ExperimentEmptyRepliesAndTelemetry(log);
+            ExperimentOmittedDestinationIsAccepted(log);
+            ExperimentTokenCeilingsAreMatchScoped(log);
 
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;

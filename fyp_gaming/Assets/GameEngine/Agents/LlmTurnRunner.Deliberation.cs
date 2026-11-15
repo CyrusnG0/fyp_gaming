@@ -112,6 +112,7 @@ namespace LuanShi.Engine
                 _sessionStartMillis = -1;
             }
             MarkSessionStart();
+            EnterTokenMatch(observation.GameId);
 
             DeliberationBindingResult binding = _deliberationLedger.BindTurn(_seatId, _turnToken);
             if (!binding.Ok)
