@@ -42,6 +42,7 @@ namespace LuanShi.EditorTools
         private const string PhaseKey = "LuanShi.CombatRehearsal.Phase";
         private const string IdleKey = "LuanShi.CombatRehearsal.Idle";
         private const string ModeKey = "LuanShi.CombatRehearsal.Mode";
+        private const string KeepOpenKey = "LuanShi.CombatRehearsal.KeepOpen";
 
         private static bool _hooked;
         private static int _waitFrames;
@@ -54,6 +55,19 @@ namespace LuanShi.EditorTools
 
         public static void Run()
         {
+            Start(Environment.GetEnvironmentVariable("LUANSHI_REHEARSAL_KEEP_OPEN") == "1");
+        }
+
+        /// <summary>
+        /// Same rehearsal from inside an open editor: on finish it leaves Play Mode instead of exiting
+        /// the editor, and it never reopens (or saves) the scene. Mode comes from LUANSHI_REHEARSAL_MODE.
+        /// </summary>
+        [MenuItem("LuanShi/Combat rehearsal (keep editor open)")]
+        public static void RunKeepOpen() => Start(true);
+
+        private static void Start(bool keepOpen)
+        {
+            SessionState.SetBool(KeepOpenKey, keepOpen);
             string outDir = Environment.GetEnvironmentVariable("LUANSHI_REHEARSAL_OUT");
             if (string.IsNullOrEmpty(outDir))
             {
@@ -115,7 +129,10 @@ namespace LuanShi.EditorTools
                     SessionState.SetInt(IdleKey, idle);
                     if (idle < 90) return;
 
-                    EditorSceneManager.OpenScene(DemoScene, OpenSceneMode.Single);
+                    // Keep-open runs reuse the already open demo scene: a reopen would prompt to save it.
+                    if (!SessionState.GetBool(KeepOpenKey, false)
+                        || EditorSceneManager.GetActiveScene().path != DemoScene)
+                        EditorSceneManager.OpenScene(DemoScene, OpenSceneMode.Single);
                     var demo = UnityEngine.Object.FindAnyObjectByType<KingdomDemo>();
                     if (demo == null) { Finish(4, "the demo scene has no KingdomDemo component"); return; }
                     // Opt-in selection, in memory only. The scene is never saved.
@@ -521,6 +538,12 @@ namespace LuanShi.EditorTools
             File.WriteAllText(path, envelope.ToString());
             Debug.Log("[rehearsal] evidence -> " + path + " (" + reason + ", exit " + code + ")");
             Debug.Log("[rehearsal] scene file untouched; play-mode changes discarded");
+            if (SessionState.GetBool(KeepOpenKey, false))
+            {
+                Debug.Log("[rehearsal] keep-open run: leaving Play Mode, editor stays open");
+                if (EditorApplication.isPlaying) EditorApplication.ExitPlaymode();
+                return;
+            }
             EditorApplication.Exit(0);
         }
 
