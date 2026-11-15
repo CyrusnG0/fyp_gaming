@@ -14,7 +14,7 @@ for LS-001 and LS-002, and Unity-editor verification stays a separate step.
 bash fyp_gaming/Tests/run-tests.sh
 ```
 
-This runs both the engine harness and response-diagnostics project. The diagnostics use a
+This runs the engine harness, response-diagnostics project and experiment-analysis evidence checks. The diagnostics use a
 local loopback HTTP listener and may require a sandbox that permits localhost networking.
 They make no paid provider calls. To run diagnostics separately:
 

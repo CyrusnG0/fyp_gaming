@@ -42,4 +42,7 @@ dotnet build "$project" -c Release --nologo -v q || exit $?
 dotnet run --project "$project" -c Release --no-build || exit $?
 echo
 echo "LuanShi response diagnostics"
-dotnet run --project "$here/ResponseDiagnostics/ResponseDiagnostics.csproj" -c Release
+dotnet run --project "$here/ResponseDiagnostics/ResponseDiagnostics.csproj" -c Release || exit $?
+echo
+echo "LuanShi experiment analysis evidence"
+dotnet run --project "$here/ExperimentAnalysis/ExperimentAnalysis.csproj" -c Release
