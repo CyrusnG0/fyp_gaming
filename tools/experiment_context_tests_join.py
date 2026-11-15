@@ -72,6 +72,40 @@ class JoinTests(AnalysisCase):
         self.assertEqual(len(problems), 1)
         self.assertEqual(model["join"]["usable_requests"], 0)
 
+    def test_conflicting_command_representations_are_reported_and_excluded(self):
+        run_command = {"type": "reclaim", "target_id": "city-a"}
+        result_command = {"type": "recruit", "target_id": "city-a"}
+        self.workspace.write(
+            [run_record(SEAT_A, 1, 1, 1, run_command, result_ok=True)],
+            [request_exchange(SEAT_A, 1, 1, 1, prompt(SEAT_A, 1))],
+            [result_exchange(SEAT_A, 1, 1, 1, result_command, result_ok=True)])
+        model = self.workspace.analyse()
+        conflicts = [item for item in self.diagnostics(model, "representation_conflict")
+                     if item["field"] == "command_json"]
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(model["join"]["usable_requests"], 0)
+        turn = self.turn(model, SEAT_A, 1)
+        self.assertEqual(turn["orders"]["accepted"], 0)
+        self.assertEqual(turn["orders"]["rejected"], 0)
+        self.assertEqual(turn["requests"]["excluded_ambiguous_or_incomplete"], 1)
+        self.assertEqual(turn["requests"]["excluded_keys"][0]["conflicts"][0]["field"],
+                         "command_json")
+
+    def test_conflicting_outcome_representations_do_not_infer_acceptance(self):
+        command = {"type": "reclaim", "target_id": "city-a"}
+        self.workspace.write(
+            [run_record(SEAT_A, 1, 1, 1, command, result_ok=False)],
+            [request_exchange(SEAT_A, 1, 1, 1, prompt(SEAT_A, 1))],
+            [result_exchange(SEAT_A, 1, 1, 1, command, result_ok=True)])
+        model = self.workspace.analyse()
+        conflicts = [item for item in self.diagnostics(model, "representation_conflict")
+                     if item["field"] == "result_ok"]
+        self.assertEqual(len(conflicts), 1)
+        turn = self.turn(model, SEAT_A, 1)
+        self.assertEqual(turn["orders"]["accepted"], 0)
+        self.assertEqual(turn["orders"]["rejected"], 0)
+        self.assertEqual(turn["requests"]["excluded_ambiguous_or_incomplete"], 1)
+
     def test_missing_request_exchange_yields_unknown_prompt_facts(self):
         command = {"type": "end_turn"}
         self.workspace.write([run_record(SEAT_A, 1, 1, 1, command)], [],

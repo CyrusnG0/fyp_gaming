@@ -49,6 +49,8 @@ class ReconstructedDeliberationTests(AnalysisCase):
             command = record.get("command")
             data = record.get("observation") or observation(SEAT_A, 1)
             runs.append(run_record(SEAT_A, 1, index, 1, command, observation_data=data,
+                                   parse_ok=record.get("parse_ok", True),
+                                   result_error=record.get("result_error"),
                                    omit_raw_model_text=True, extra=record.get("extra")))
             requests.append(request_exchange(
                 SEAT_A, 1, index, 1,

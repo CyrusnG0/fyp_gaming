@@ -100,6 +100,11 @@ class Experiment:
                     self.diagnostics.append({
                         "kind": "join_problem", "problem": problem, "key": key_text(key),
                         "sources": request.cites()})
+                for conflict in request.conflicts:
+                    self.diagnostics.append({
+                        "kind": "representation_conflict", "field": conflict["field"],
+                        "key": key_text(key), "sources": request.cites(),
+                        "representations": conflict.get("sources")})
             self.joined[key] = request
 
         for key, entries in turn_groups.items():

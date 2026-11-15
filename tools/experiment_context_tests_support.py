@@ -129,8 +129,10 @@ def system(*, research=False, inquiry=True, note=True, marker=None):
 
 def run_record(seat, season, index, turn_token, command=None, *, run_id=RUN_ID,
                scenario_id=None, tokens=(100, 50, 20), latency=10, raw_model_text=None,
-               result_ok=True, parse_ok=True, observation_data=None, extra=None,
+               result_ok=True, parse_ok=True, result_error=None, observation_data=None, extra=None,
                omit_raw_model_text=False):
+    if result_error is None and result_ok is False:
+        result_error = "action rejected"
     record = {
         "run_id": run_id, "seat_id": seat, "season": season, "request_index": index,
         "turn_token": turn_token, "game_seed": 4242, "provider": "fake", "model": "fake-model",
@@ -140,7 +142,7 @@ def run_record(seat, season, index, turn_token, command=None, *, run_id=RUN_ID,
         "balance_profile": {"profile": "food-easy"},
         "input_tokens": tokens[0], "output_tokens": tokens[1], "reasoning_tokens": tokens[2],
         "latency_ms": latency, "finish_reason": "stop",
-        "parse_ok": parse_ok, "result_ok": result_ok, "result_error": None,
+        "parse_ok": parse_ok, "result_ok": result_ok, "result_error": result_error,
         "error_kind": "None", "error_detail": None,
         "raw_model_text": raw_model_text if raw_model_text is not None
         else json.dumps(command or {}),

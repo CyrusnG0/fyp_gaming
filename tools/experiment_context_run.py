@@ -44,7 +44,7 @@ def analyse_run(experiment, geometry, sources, run_label=None):
     diagnostics = list(experiment.diagnostics)
     unmatched = [item for item in diagnostics if item.get("kind") in
                  ("record_without_composite_key", "join_problem", "ambiguous_composite_key",
-                  "duplicate_composite_key")]
+                  "duplicate_composite_key", "representation_conflict")]
     model = {
         "schema": SCHEMA,
         "tool": {"name": "experiment_context_analysis", "version": TOOL_VERSION,
@@ -263,7 +263,9 @@ def evidence_gaps(experiment, seasons, geometry):
                     "embedded copy; facts are reported from observation_json" % len(mismatches))
     if all(not turn["marches"] for turn in seasons):
         gaps.append("no accepted march in this run")
-    if all(not turn["visible_contact"] for turn in seasons):
+    known_non_own_contact = [item for turn in seasons for item in turn["visible_contact"]
+                             if item.get("owner_class") in ("foreign", "neutral")]
+    if not known_non_own_contact:
         gaps.append("no seat ever saw a foreign or neutral city, army or scouted city: contact, "
                     "attacks and captures cannot be attributed from these observations")
     if all(turn["usage"]["reasoning_tokens"]["missing"] for turn in seasons):

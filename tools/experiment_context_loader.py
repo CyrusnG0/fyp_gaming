@@ -158,6 +158,7 @@ class JoinedRequest:
         self.result = None
         self.problems = []
         self.ambiguous = False
+        self.conflicts = []
 
     # -- identity -----------------------------------------------------------
     def identity(self):
@@ -184,7 +185,52 @@ class JoinedRequest:
         for field, seen in self.identity().items():
             if len({str(value) for value in seen}) > 1:
                 self.problems.append("identity_mismatch:" + field)
+        self.conflicts = self.representation_conflicts()
         return self
+
+    @staticmethod
+    def _command_object(raw):
+        if isinstance(raw, dict):
+            return raw
+        if not isinstance(raw, str):
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def representation_conflicts(self):
+        """Duplicated outcome fields must agree before the request can be analysed."""
+        if self.run is None or self.result is None:
+            return []
+        outcome = self.outcome()
+        conflicts = []
+        run_has_command = "command_json" in self.run.obj
+        result_has_command = "command_json" in outcome
+        run_raw_command = self.run.get("command_json")
+        result_raw_command = outcome.get("command_json")
+        run_command = self._command_object(run_raw_command)
+        result_command = self._command_object(result_raw_command)
+        command_conflict = run_command != result_command
+        if run_command is None and result_command is None:
+            command_conflict = run_raw_command != result_raw_command
+        if run_has_command and result_has_command and command_conflict:
+            conflicts.append({"field": "command_json",
+                              "sources": ["run.command_json", "result.outcome.command_json"]})
+        for field in ("result_ok", "parse_ok"):
+            run_value = self.run.get(field)
+            result_value = outcome.get(field)
+            if field in self.run.obj and field in outcome and run_value != result_value:
+                conflicts.append({"field": field,
+                                  "sources": ["run." + field, "result.outcome." + field]})
+        run_error = self.run.get("result_error")
+        result_error = outcome.get("result_error")
+        if ("result_error" in self.run.obj and "result_error" in outcome
+                and run_error != result_error):
+            conflicts.append({"field": "result_error",
+                              "sources": ["run.result_error", "result.outcome.result_error"]})
+        return conflicts
 
     @property
     def identity_mismatched(self):
@@ -192,8 +238,8 @@ class JoinedRequest:
 
     @property
     def usable(self):
-        """False when two records claim the same key or their identity fields disagree."""
-        return not self.ambiguous and not self.identity_mismatched
+        """False when records are ambiguous, identity-mismatched, or internally conflicting."""
+        return not self.ambiguous and not self.identity_mismatched and not self.conflicts
 
     @property
     def degraded(self):
@@ -397,4 +443,5 @@ class JoinedRequest:
             "turn_token": self.turn_token,
             "sources": self.cites(),
             "problems": list(self.problems),
+            "conflicts": list(self.conflicts),
         }

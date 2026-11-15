@@ -58,6 +58,24 @@ class MarchTests(AnalysisCase):
         classes = {item["id"]: item["owner_class"] for item in turn["visible_contact"]}
         self.assertEqual(classes, {"city-enemy": "foreign", "city-neutral": "neutral"})
 
+    def test_missing_owner_field_is_unknown_but_explicit_null_is_neutral(self):
+        data = observation(SEAT_A, 1, enemy_city_at=(24, 8), neutral_city_at=(10, 10))
+        enemy = next(city for city in data["cities"] if city["id"] == "city-enemy")
+        enemy.pop("owner_seat_id")
+        command = {"type": "march", "target_id": "army-a-1", "param_a": 24, "param_b": 8}
+        self.workspace.write(
+            [run_record(SEAT_A, 1, 1, 1, command, observation_data=data)],
+            [request_exchange(SEAT_A, 1, 1, 1, prompt(
+                SEAT_A, 1, observation_data=data,
+                movement={"army-a-1": {"position": (18, 8), "options": [(24, 8, 6)],
+                                       "unlisted": 0}}))],
+            [result_exchange(SEAT_A, 1, 1, 1, command)])
+        turn = self.turn(self.workspace.analyse(), SEAT_A, 1)
+        classes = {item["id"]: item["owner_class"] for item in turn["visible_contact"]}
+        self.assertEqual(classes["city-enemy"], "unknown")
+        self.assertEqual(classes["city-neutral"], "neutral")
+        self.assertEqual(turn["marches"][0]["target_at_destination"]["owner_class"], "unknown")
+
     def test_geometry_is_away_and_offered_toward_options_are_listed(self):
         model = self._march_model(
             direction=(24, 8), options=((16, 8, 2), (17, 8, 1), (24, 8, 6), (24, 11, 6)),

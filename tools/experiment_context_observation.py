@@ -34,6 +34,7 @@ def observation_facts(observation, seat_id):
             "id": city.get("id"), "name": city.get("name"),
             "x": _as_int(city.get("x")), "z": _as_int(city.get("z")),
             "owner_seat_id": city.get("owner_seat_id"),
+            "owner_known": "owner_seat_id" in city,
             "food": _as_int(city.get("food")), "gold": _as_int(city.get("gold")),
             "morale": _as_int(city.get("morale")),
             "population": _as_int(city.get("population")),
@@ -45,6 +46,7 @@ def observation_facts(observation, seat_id):
             continue
         facts["armies"].append({
             "id": army.get("id"), "owner_seat_id": army.get("owner_seat_id"),
+            "owner_known": "owner_seat_id" in army,
             "x": _as_int(army.get("x")), "z": _as_int(army.get("z")),
             "troops": _as_int(army.get("troops")),
             "unit_type": army.get("unit_type"),
@@ -53,6 +55,7 @@ def observation_facts(observation, seat_id):
         if isinstance(city, dict):
             facts["scouted_cities"].append({
                 "id": city.get("id"), "owner_seat_id": city.get("owner_seat_id"),
+                "owner_known": "owner_seat_id" in city,
                 "x": _as_int(city.get("x")), "z": _as_int(city.get("z"))})
     for faction in observation.get("factions") or []:
         if isinstance(faction, dict):
@@ -77,34 +80,44 @@ def observation_facts(observation, seat_id):
     return facts
 
 
-def owner_class(owner_seat_id, seat_id):
-    """foreign | neutral | own — neutral means no recorded owner, not an enemy."""
+def owner_class(owner_seat_id, seat_id, owner_known=True):
+    """foreign | neutral | own | unknown; only explicit null means neutral."""
+    if not owner_known:
+        return "unknown"
     if owner_seat_id == seat_id:
         return "own"
-    return "neutral" if owner_seat_id in (None, "") else "foreign"
+    if owner_seat_id is None:
+        return "neutral"
+    return "unknown" if owner_seat_id == "" else "foreign"
 
 
 def visible_contact(facts, seat_id):
     """Everything visible that this seat does not own, including neutral objectives."""
     contact = []
     for city in facts.get("cities") or []:
-        category = owner_class(city.get("owner_seat_id"), seat_id)
+        category = owner_class(city.get("owner_seat_id"), seat_id,
+                              city.get("owner_known", True))
         if category == "own":
             continue
         contact.append({"kind": "city", "id": city.get("id"),
                         "owner_seat_id": city.get("owner_seat_id"),
+                        "owner_known": city.get("owner_known", True),
                         "owner_class": category, "x": city.get("x"), "z": city.get("z")})
     for army in facts.get("armies") or []:
-        category = owner_class(army.get("owner_seat_id"), seat_id)
+        category = owner_class(army.get("owner_seat_id"), seat_id,
+                              army.get("owner_known", True))
         if category == "own":
             continue
         contact.append({"kind": "army", "id": army.get("id"),
                         "owner_seat_id": army.get("owner_seat_id"),
+                        "owner_known": army.get("owner_known", True),
                         "owner_class": category, "x": army.get("x"), "z": army.get("z")})
     for city in facts.get("scouted_cities") or []:
         contact.append({"kind": "scouted_city", "id": city.get("id"),
                         "owner_seat_id": city.get("owner_seat_id"),
-                        "owner_class": owner_class(city.get("owner_seat_id"), seat_id),
+                        "owner_known": city.get("owner_known", True),
+                        "owner_class": owner_class(city.get("owner_seat_id"), seat_id,
+                                                   city.get("owner_known", True)),
                         "x": city.get("x"), "z": city.get("z")})
     return contact
 
@@ -122,7 +135,9 @@ def entity_at(observation, point, seat_id=None):
                                "scouted_cities": "scouted_city"}[kind]
                 return {"kind": entity_kind, "id": item.get("id"),
                         "owner_seat_id": item.get("owner_seat_id"),
-                        "owner_class": owner_class(item.get("owner_seat_id"), seat_id)}, "visible"
+                        "owner_known": "owner_seat_id" in item,
+                        "owner_class": owner_class(item.get("owner_seat_id"), seat_id,
+                                                   "owner_seat_id" in item)}, "visible"
     return None, "not_visible"
 
 
