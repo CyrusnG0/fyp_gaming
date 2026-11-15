@@ -73,6 +73,7 @@ namespace LuanShi.Engine
             sb.Append(",\"balance_profile\":").Append(session.Balance.ToJson());
             sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
             sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
+            sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
             sb.Append(",\"seasons_planned\":")
               .Append(session.SeasonsPlanned.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"seasons_played\":")
@@ -88,12 +89,16 @@ namespace LuanShi.Engine
             // Spectator seats always expose attack planning, so the opt-in flag alone selects the
             // attack prompt identity here.
             bool attack = config != null && config.EnableAttack;
+            bool rich = config != null && config.ExperimentActive;
+            bool research = config != null && config.EnableResearch;
             Field(sb, "prompt_version",
-                PromptBuilder.VersionFor(true, inquiry, personas, attack, deliberation), config, true);
+                research || rich
+                    ? PromptBuilder.CombinedVersionFor(true, inquiry, null, attack, deliberation, rich, research)
+                    : PromptBuilder.VersionFor(true, inquiry, personas, attack, deliberation), config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
-                    : PromptBuilder.SchemaHashFor(true, inquiry, null, attack, deliberation),
+                    : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);

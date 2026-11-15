@@ -7,6 +7,29 @@ namespace LuanShi.Playground
     /// <summary>Review regressions: march destinations beyond the display cap, and match-scoped token ceilings.</summary>
     internal static partial class PlaygroundSelfTests
     {
+        private static void ExperimentResearchCombination(TestLog log)
+        {
+            var engine = ProductionEngine();
+            engine.State.FindFaction("seat-a").ResearchPoints = 100;
+            var host = new ProductionHost(engine, "seat-a");
+            var config = RichConfig();
+            config.EnableResearch = true;
+            var fake = new FakeLlmTransport();
+            fake.EnqueueSuccess("{\"type\":\"research\",\"args\":{\"line\":\"agri\"}}", 0, 100, 10);
+            fake.EnqueueSuccess("{\"type\":\"end_turn\"}", 0, 100, 10);
+            var runner = new LlmTurnRunner(fake, config, null, null, new MemoryLlmStrategicNoteStore());
+            runner.Begin(host, host.Token, "seat-a", ProdSeed);
+            DrainProduction(runner);
+            log.Check(engine.State.FindFaction("seat-a").ResearchLevel(ResearchLine.Agri) == 1,
+                "rich research: production runner purchases agriculture through the engine");
+            log.Check(fake.Requests[0].System.Contains("RESEARCH ORDERS") &&
+                fake.Requests[0].System.Contains("RICH DELIBERATION") &&
+                fake.Requests[0].User.Contains("args={\"line\":\"agri\"}"),
+                "rich research: dispatched system and candidates contain both features");
+            log.Check(fake.Requests[0].User.Contains("demo-slice-8-rich-research-1"),
+                "rich research: dispatched user prompt identifies the combined version");
+        }
+
         private static GameEngine SecondMatchEngine()
         {
             GameEngine engine = PlaygroundScenario.Create(ProdSeed, "review-match-2");

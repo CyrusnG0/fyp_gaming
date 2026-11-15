@@ -189,6 +189,37 @@ namespace LuanShi.Engine
             return sb.ToString();
         }
 
+        public static string CombinedVersionFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool rich, bool research)
+        {
+            if (!research) return RichVersionFor(planning, inquiry, persona, attack, deliberation, rich);
+            if (!rich) return VersionFor(planning, inquiry, persona, attack, deliberation, true);
+            return "demo-slice-8-rich-research-1";
+        }
+
+        public static string CombinedSystemPromptFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool rich, bool research)
+        {
+            if (!research) return RichSystemPromptFor(planning, inquiry, persona, attack, deliberation, rich);
+            if (!rich) return SystemPromptFor(planning, inquiry, persona, attack, deliberation, true);
+            return RichSystemPromptFor(planning, inquiry, persona, attack, deliberation, true) + ResearchAddendum();
+        }
+
+        public static string CombinedSchemaHashFor(bool planning, bool inquiry, LlmPersona persona,
+            bool attack, bool deliberation, bool rich, bool research)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(CombinedSystemPromptFor(planning, inquiry, persona,
+                attack, deliberation, rich, research));
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(bytes);
+                var sb = new StringBuilder(16);
+                for (int i = 0; i < 8; i++)
+                    sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
+                return sb.ToString();
+            }
+        }
+
         /// <summary>
         /// Domestic (non-planning) user prompt with the research identity. With
         /// <paramref name="researchOrdersEnabled"/> false it is the existing 9-argument prompt.

@@ -73,6 +73,7 @@ namespace LuanShi.Playground
             ExperimentEmptyRepliesAndTelemetry(log);
             ExperimentOmittedDestinationIsAccepted(log);
             ExperimentTokenCeilingsAreMatchScoped(log);
+            ExperimentResearchCombination(log);
 
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;

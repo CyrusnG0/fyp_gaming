@@ -33,14 +33,14 @@ namespace LuanShi.Engine
             "- Each request lists what the prompt includes and what it omits under CONTEXT COMPLETENESS. " +
             "Anything not listed there was not supplied to you; do not assume it.";
 
-        public static string VersionFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
+        public static string RichVersionFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
             bool deliberation, bool rich)
             => rich && deliberation && _activeVersion != LegacyPromptVersion
                && _activeVersion != DomesticPromptVersion
                 ? RichDeliberationPromptVersion
                 : VersionFor(planning, inquiry, persona, attack, deliberation);
 
-        public static string SystemPromptFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
+        public static string RichSystemPromptFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
             bool deliberation, bool rich)
         {
             string text = SystemPromptFor(planning, inquiry, persona, attack, deliberation);
@@ -50,11 +50,11 @@ namespace LuanShi.Engine
             return text;
         }
 
-        public static string SchemaHashFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
+        public static string RichSchemaHashFor(bool planning, bool inquiry, LlmPersona persona, bool attack,
             bool deliberation, bool rich)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(
-                SystemPromptFor(planning, inquiry, persona, attack, deliberation, rich));
+                RichSystemPromptFor(planning, inquiry, persona, attack, deliberation, rich));
             byte[] hash;
             using (SHA256 sha = SHA256.Create())
                 hash = sha.ComputeHash(bytes);

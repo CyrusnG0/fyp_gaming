@@ -318,9 +318,10 @@ namespace LuanShi.Engine
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
             CurrentPersonaId = persona?.Id;
             bool rich = ExperimentActive;
-            string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation, rich);
-            List<ActionOption> options = ActionCatalogue.Build(observation, attacks);
+            bool research = _config.EnableResearch;
+            string system = PromptBuilder.CombinedSystemPromptFor(planning, inquiry, persona, attackOn,
+                deliberation, rich, research);
+            List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             int requestsLeft = RemainingRequests();
@@ -337,7 +338,7 @@ namespace LuanShi.Engine
                 // Experiment: one seat-filtered, size-reported prompt. The recorded observation JSON
                 // is exactly the JSON this prompt carries, including its configured event cap.
                 if (!TryBuildRichPrompt(observation, options, movement, attacks, persona, inquiryResult,
-                        PromptBuilder.VersionFor(planning, inquiry, persona, attackOn, deliberation, true),
+                        PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn, deliberation, true, research),
                         system.Length, requestsLeft, actionsLeft, out user, out string richObservation))
                     return;
                 observationJson = richObservation;
@@ -347,18 +348,18 @@ namespace LuanShi.Engine
                 ? PromptBuilder.UserPrompt(observation, options, _history,
                     requestsLeft, actionsLeft, movement, relevantMemories,
                     inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
-                    earlierResults, deliberation)
+                    earlierResults, deliberation, research)
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     requestsLeft, actionsLeft, relevantMemories, inquiryResult,
-                    inquiry, persona);
+                    inquiry, persona, research);
             if (system.Length + user.Length > _config.EffectiveMaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
-            string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn,
-                deliberation, rich);
-            string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation, rich);
+            string promptVersion = PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn,
+                deliberation, rich, research);
+            string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
+                deliberation, rich, research);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // Admit and mark dispatched before the provider is called. A denial sends nothing and
             // records no provider request.

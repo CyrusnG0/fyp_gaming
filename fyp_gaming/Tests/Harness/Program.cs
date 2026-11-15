@@ -120,6 +120,9 @@ internal static partial class Harness
         RunAttackOptions();
         RunLlmAttack();
         RunAttackFeedback();
+        RunLlmResearchAction();
+        RunLlmResearchPrompt();
+        RunLlmResearchRunner();
         RunSpatialContext();
         RunVisibleMarchRunner();
         RunCompactScenario();

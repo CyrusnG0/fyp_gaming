@@ -41,6 +41,7 @@ namespace LuanShi.Engine
         /// orders. When false the prompt text, version, hash and parser vocabulary are unchanged.
         /// </summary>
         public bool EnableAttack;
+        public bool EnableResearch;
 
         /// <summary>Use visible-only route planning and admission for LLM marches.</summary>
         public bool RequireVisibleMarchRoutes;
@@ -214,6 +215,7 @@ namespace LuanShi.Engine
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
+            if (EnableResearch) sb.Append("; research=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             // Only enabled deliberation adds text, so the legacy diagnostic stays byte-identical.
             if (EnableDeliberation)
@@ -265,6 +267,8 @@ namespace LuanShi.Engine
                         EnablePersonas = Bool(field.Value, EnablePersonas); break;
                     case "require_visible_march_routes":
                         RequireVisibleMarchRoutes = Bool(field.Value, RequireVisibleMarchRoutes); break;
+                    case "enable_research":
+                        EnableResearch = Bool(field.Value, EnableResearch); break;
                     case "enable_attack":
                         EnableAttack = Bool(field.Value, EnableAttack); break;
                     case "enable_deliberation":
