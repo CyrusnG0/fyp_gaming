@@ -18,6 +18,7 @@ namespace LuanShi.Engine
         public string CityId;      // only for capture_neutral_city (the city is in sight => observable)
         public string TowerId;     // only for capture_tower
         public string Note;        // short, safe, terrain/visibility words only — never hidden facts
+        public int GridDistance;   // hex/grid distance from army origin when diversified
         public string Direction;   // W..SW compass bearing when diversified; null otherwise
         public bool ExploresFrontier;
         public string ObjectiveHint;
@@ -53,6 +54,7 @@ namespace LuanShi.Engine
         public int CommandPoints;
         public int MarchOrderCost;
         public IReadOnlyList<ArmyMovePlan> Armies;   // own armies only, ordered by army id
+        public SpatialContextView SpatialContext;    // populated by BuildDiversified when enabled
 
         /// <summary>Deterministic serialisation used by the harness for hidden-world equality checks.</summary>
         public string ToJson()
@@ -114,6 +116,7 @@ namespace LuanShi.Engine
             sb.Append(",\"note\":").Append(MiniJson.Str(option.Note));
             if (option.Direction != null)
             {
+                sb.Append(",\"grid_distance\":").Append(MiniJson.Num(option.GridDistance));
                 sb.Append(",\"direction\":").Append(MiniJson.Str(option.Direction));
                 sb.Append(",\"explores_frontier\":").Append(option.ExploresFrontier ? "true" : "false");
                 sb.Append(",\"objective_hint\":").Append(MiniJson.Str(option.ObjectiveHint));
@@ -146,10 +149,23 @@ namespace LuanShi.Engine
         /// <summary>
         /// Opt-in directionally varied and objective/frontier-aware selection of legal movement
         /// candidates. Never changes legality or reads unseen terrain or hidden entities.
+        /// Respects <see cref="PromptBuilder.ActiveSpatialOptions"/> when the caller passes the
+        /// default cap or omits a prebuilt <see cref="SpatialContextView"/>.
         /// </summary>
         public static MovementView BuildDiversified(GameEngine engine, string seatId,
             int maxOptionsPerArmy = DefaultMaxOptionsPerArmy, SpatialContextView spatial = null)
-            => BuildPlanSet(engine, seatId, maxOptionsPerArmy, true, spatial);
+        {
+            SpatialContextOptions opts = PromptBuilder.ActiveSpatialOptions;
+            if (opts != null && opts.Level == SpatialDetailLevel.Off)
+                return BuildPlanSet(engine, seatId, maxOptionsPerArmy, false, null);
+
+            int cap = maxOptionsPerArmy == DefaultMaxOptionsPerArmy && opts != null
+                ? opts.EffectiveMoveCap(maxOptionsPerArmy)
+                : maxOptionsPerArmy;
+            if (spatial == null && engine != null && engine.State != null && !string.IsNullOrEmpty(seatId))
+                spatial = SpatialContextBuilder.Build(engine, seatId);
+            return BuildPlanSet(engine, seatId, cap, true, spatial);
+        }
 
         /// <summary>Rejects LLM marches that require a route through terrain the faction cannot see.</summary>
         public static bool AllowsVisibleRoute(GameEngine engine, string seatId, ActionCommand command)
@@ -165,7 +181,9 @@ namespace LuanShi.Engine
         private static MovementView BuildPlanSet(GameEngine engine, string seatId,
             int maxOptionsPerArmy, bool diversify, SpatialContextView spatial)
         {
-            int cap = ClampCap(maxOptionsPerArmy);
+            int cap = diversify
+                ? (maxOptionsPerArmy < 1 ? 1 : maxOptionsPerArmy)
+                : ClampCap(maxOptionsPerArmy);
             var view = new MovementView
             {
                 SeatId = null,
@@ -182,6 +200,7 @@ namespace LuanShi.Engine
             view.SeatId = fac.SeatId;
             view.CommandPoints = fac.CommandPoints;
             view.Season = engine.State.Season;
+            view.SpatialContext = diversify ? spatial : null;
 
             List<SpatialObjectiveTarget> targets = diversify
                 ? SpatialContextBuilder.CollectMovementTargets(engine, fac.SeatId, spatial)

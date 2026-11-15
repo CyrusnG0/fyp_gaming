@@ -31,11 +31,11 @@ namespace LuanShi.Engine
         public static string SpatialContextAddendum()
         {
             return "\n\nSPATIAL CONTEXT AND SIGHT BOUNDARIES (opt-in; fog-filtered):\n" +
-                   "- Map coordinates use x (0=West to width-1=East) and z (0=South to height-1=North), with 8 compass directions (W, NW, N, NE, E, SE, S, SW).\n" +
-                   "- Entities tagged [visible] are inside your current sight radii; positions tagged [stale] come from active scout reports or prior out-of-sight events and may be outdated.\n" +
-                   "- Cells outside live sight are labelled currently unseen: the engine does not track whether a hex has ever been explored. Never assume currently unseen cells are empty, passable, or free of hidden forces.\n" +
-                   "- Any direction or option labelled frontier (including [frontier] tags) is derived strictly from the current sight boundary (visible cells bordering currently unseen cells).\n" +
-                   "- MOVEMENT OPTIONS may present a directionally varied subset (marked selection=diversified) along visible terrain with dir=<compass>, [frontier], and (goal: ...) toward known objectives. These remain advisory: you may submit any legal march or other order, and the engine revalidates every command.";
+                   "- Map coordinates use x (0=West to width-1=East) and z (0=South to height-1=North), with center=<cx>,<cz>, edge_dist, and 8 compass directions (W, NW, N, NE, E, SE, S, SW).\n" +
+                   "- Entities tagged [visible] are inside your current sight radii; relative bearings show distance and direction to map_center, primary own city (from_primary), or nearest own entity (from_own). Positions tagged [stale] come from scout reports or prior out-of-sight events and may be outdated.\n" +
+                   "- Cells outside live sight are labelled currently unseen (summarized by unseen_bbox and unseen_beyond_sight columns/rows): the engine does not track whether a hex has ever been explored. Never assume currently unseen cells are empty, passable, or free of hidden forces.\n" +
+                   "- Any direction or option labelled frontier (including [frontier] and (goal: frontier ... (toward map_center))) is derived strictly from the current sight boundary.\n" +
+                   "- MOVEMENT OPTIONS include dir=<compass> and dist=<hexes> along visible terrain, plus any truncation counts (spatial_truncation:). Advisory only: any legal order is revalidated by the engine.";
         }
 
         public static string VersionForSpatial(bool planning, bool inquiry = false,
@@ -78,7 +78,9 @@ namespace LuanShi.Engine
 
         /// <summary>Bounded, deterministic text rendering of a <see cref="SpatialContextView"/>.</summary>
         public static string SpatialContextText(SpatialContextView view, int maxOwn = 24,
-            int maxVisible = 16, int maxStale = 8, int maxObjectives = 12, int maxArmyFrontiers = 16)
+            int maxVisible = 16, int maxStale = 8, int maxObjectives = 12, int maxArmyFrontiers = 16,
+            bool includeVisibleRanges = false,
+            int maxVisibleRows = SpatialContextOptions.StandardVisibleRangesCap)
         {
             var sb = new StringBuilder(1024);
             sb.Append(SpatialHeader);
@@ -88,6 +90,9 @@ namespace LuanShi.Engine
                 return sb.ToString();
             }
 
+            SpatialContextOptions cfg = _spatialOptions ?? new SpatialContextOptions();
+            sb.Append(cfg.ToSummaryLine());
+
             if (view.Map != null)
             {
                 sb.Append("map: width=").Append(NumStr(view.Map.Width))
@@ -95,6 +100,7 @@ namespace LuanShi.Engine
                   .Append(" axes=\"x:0..").Append(NumStr(Math.Max(0, view.Map.Width - 1)))
                   .Append(" West->East, z:0..").Append(NumStr(Math.Max(0, view.Map.Height - 1)))
                   .Append(" South->North\"")
+                  .Append(" center=").Append(NumStr(view.Map.CenterX)).Append(',').Append(NumStr(view.Map.CenterZ))
                   .Append(" sight_radii(city=").Append(NumStr(view.Map.FogCityRange))
                   .Append(",army=").Append(NumStr(view.Map.FogArmyRange))
                   .Append(",tower=").Append(NumStr(view.Map.FogWatchTowerRange))
@@ -107,12 +113,23 @@ namespace LuanShi.Engine
                   .Append('/').Append(NumStr(view.Frontier.TotalCellCount))
                   .Append(" cells currently_unseen=").Append(NumStr(view.Frontier.CurrentlyUnseenCellCount))
                   .Append(" sight_boundary_cells=").Append(NumStr(view.Frontier.SightBoundaryCellCount));
+                if (view.Frontier.VisibleMinX >= 0)
+                {
+                    sb.Append(" visible_bbox=[").Append(NumStr(view.Frontier.VisibleMinX))
+                      .Append("..").Append(NumStr(view.Frontier.VisibleMaxX))
+                      .Append(", ").Append(NumStr(view.Frontier.VisibleMinZ))
+                      .Append("..").Append(NumStr(view.Frontier.VisibleMaxZ)).Append(']');
+                }
                 if (view.Frontier.HasCurrentlyUnseen)
                 {
                     sb.Append(" unseen_bbox=[").Append(NumStr(view.Frontier.UnseenMinX))
                       .Append("..").Append(NumStr(view.Frontier.UnseenMaxX))
                       .Append(", ").Append(NumStr(view.Frontier.UnseenMinZ))
-                      .Append("..").Append(NumStr(view.Frontier.UnseenMaxZ)).Append(']');
+                      .Append("..").Append(NumStr(view.Frontier.UnseenMaxZ)).Append(']')
+                      .Append(" unseen_beyond_sight(W=").Append(NumStr(view.Frontier.WestUnseenCols))
+                      .Append(",E=").Append(NumStr(view.Frontier.EastUnseenCols))
+                      .Append(",S=").Append(NumStr(view.Frontier.SouthUnseenCols))
+                      .Append(",N=").Append(NumStr(view.Frontier.NorthUnseenCols)).Append(')');
                     sb.Append(" frontier_dirs=")
                       .Append(string.IsNullOrEmpty(view.Frontier.FrontierDirectionsFromOwn)
                           ? "none"
@@ -132,6 +149,8 @@ namespace LuanShi.Engine
             AppendVisibleOthersSection(sb, view.VisibleOthers, maxVisible);
             AppendStaleIntelSection(sb, view.StaleIntel, maxStale);
             AppendObjectivesSection(sb, view.ObjectiveBearings, maxObjectives);
+            if (includeVisibleRanges)
+                AppendVisibleCellsSection(sb, view.Frontier, maxVisibleRows, out _);
             return sb.ToString();
         }
 
@@ -161,80 +180,6 @@ namespace LuanShi.Engine
                 attackNotice);
         }
 
-        private static string AssembleBoundedSpatialPrompt(Observation observation,
-            IReadOnlyList<ActionOption> options, IReadOnlyList<string> recentHistory,
-            int requestsLeft, int actionsLeft, MovementView movement, SpatialContextView spatial,
-            string version, int sysLen, IReadOnlyList<LlmMemory> memories, string inquiryResult,
-            LlmPersona persona, string attackNotice)
-        {
-            string spatialText = SpatialContextText(spatial);
-            string fullMove = movement == null
-                ? ""
-                : MovementOptionsText(movement, int.MaxValue, int.MaxValue, includeSpatialTags: true);
-            string full = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
-                actionsLeft, version, spatialText + fullMove, memories, inquiryResult, persona,
-                attackNotice);
-            if (sysLen + full.Length <= MaxPromptChars) return full;
-
-            int maxMoveOpts = 0;
-            if (movement != null && movement.Armies != null)
-                foreach (ArmyMovePlan plan in movement.Armies)
-                    if (plan != null && plan.Options != null && plan.Options.Count > maxMoveOpts)
-                        maxMoveOpts = plan.Options.Count;
-
-            for (int limit = maxMoveOpts - 1; limit >= 1; limit--)
-            {
-                string movePart = MovementOptionsText(movement, limit, int.MaxValue, includeSpatialTags: true);
-                string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
-                    actionsLeft, version, spatialText + movePart, memories, inquiryResult, persona,
-                    attackNotice);
-                if (sysLen + candidate.Length <= MaxPromptChars) return candidate;
-            }
-
-            int moveFloor = maxMoveOpts > 0 ? 1 : 0;
-            string floorMove = movement == null
-                ? ""
-                : MovementOptionsText(movement, moveFloor, int.MaxValue, includeSpatialTags: true);
-            foreach (int[] caps in SpatialTruncationSteps)
-            {
-                string tightSpatial = SpatialContextText(spatial, caps[0], caps[1], caps[2], caps[3], caps[4]);
-                string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
-                    actionsLeft, version, tightSpatial + floorMove, memories, inquiryResult, persona,
-                    attackNotice);
-                if (sysLen + candidate.Length <= MaxPromptChars) return candidate;
-            }
-
-            string minSpatial = SpatialContextText(spatial, 0, 0, 0, 0, 0);
-            if (movement == null)
-            {
-                return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                    version, minSpatial, memories, inquiryResult, persona, attackNotice);
-            }
-
-            int totalArmies = movement.Armies == null ? 0 : movement.Armies.Count;
-            for (int armies = totalArmies; armies >= 0; armies--)
-            {
-                string movePart = MovementOptionsText(movement, 1, armies, includeSpatialTags: true);
-                string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
-                    actionsLeft, version, minSpatial + movePart, memories, inquiryResult, persona,
-                    attackNotice);
-                if (sysLen + candidate.Length <= MaxPromptChars) return candidate;
-            }
-
-            for (int armies = totalArmies; armies >= 0; armies--)
-            {
-                string movePart = MovementOptionsText(movement, 0, armies, includeSpatialTags: true);
-                string candidate = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
-                    actionsLeft, version, minSpatial + movePart, memories, inquiryResult, persona,
-                    attackNotice);
-                if (sysLen + candidate.Length <= MaxPromptChars) return candidate;
-            }
-
-            return BuildUserPrompt(observation, options, recentHistory, requestsLeft, actionsLeft,
-                version, minSpatial + MovementOptionsText(movement, 0, 0, includeSpatialTags: true),
-                memories, inquiryResult, persona, attackNotice);
-        }
-
         private static void AppendOwnEntitiesSection(StringBuilder sb,
             IReadOnlyList<SpatialEntitySummary> items, int cap)
         {
@@ -252,11 +197,22 @@ namespace LuanShi.Engine
                 SpatialEntitySummary e = items[i];
                 if (e == null) continue;
                 sb.Append("  - ").Append(CleanLine(e.Kind))
-                  .Append(" id=").Append(CleanLine(e.Id))
-                  .Append(" pos=").Append(NumStr(e.X)).Append(',').Append(NumStr(e.Z))
+                  .Append(" id=").Append(CleanLine(e.Id));
+                if (!string.IsNullOrEmpty(e.Name))
+                    sb.Append(" name=\"").Append(SanitizeQuoted(e.Name)).Append('"');
+                sb.Append(" pos=").Append(NumStr(e.X)).Append(',').Append(NumStr(e.Z))
                   .Append(" strength=").Append(NumStr(e.Strength));
                 if (!string.IsNullOrEmpty(e.UnitType))
                     sb.Append(" unit=").Append(CleanLine(e.UnitType));
+                if (!string.IsNullOrEmpty(e.RefId) && e.RefDistance >= 0)
+                    sb.Append(" from_primary=").Append(CleanLine(e.RefId))
+                      .Append(':').Append(NumStr(e.RefDistance))
+                      .Append('@').Append(CleanLine(e.RefDirection));
+                if (e.CenterDistance >= 0)
+                    sb.Append(" to_center=").Append(NumStr(e.CenterDistance))
+                      .Append('@').Append(CleanLine(e.CenterDirection))
+                      .Append("(dx=").Append(NumStr(e.CenterDeltaX))
+                      .Append(",dz=").Append(NumStr(e.CenterDeltaZ)).Append(')');
                 sb.Append(" edge_dist(W=").Append(NumStr(e.WestEdgeDist))
                   .Append(",E=").Append(NumStr(e.EastEdgeDist))
                   .Append(",S=").Append(NumStr(e.SouthEdgeDist))
@@ -317,13 +273,26 @@ namespace LuanShi.Engine
                 if (e == null) continue;
                 sb.Append("  - [").Append(string.IsNullOrEmpty(e.Knowledge) ? "visible" : CleanLine(e.Knowledge))
                   .Append("] ").Append(CleanLine(e.Kind))
-                  .Append(" id=").Append(CleanLine(e.Id))
-                  .Append(" owner=").Append(string.IsNullOrEmpty(e.OwnerSeatId) ? "neutral" : CleanLine(e.OwnerSeatId))
+                  .Append(" id=").Append(CleanLine(e.Id));
+                if (!string.IsNullOrEmpty(e.Name))
+                    sb.Append(" name=\"").Append(SanitizeQuoted(e.Name)).Append('"');
+                sb.Append(" owner=").Append(string.IsNullOrEmpty(e.OwnerSeatId) ? "neutral" : CleanLine(e.OwnerSeatId))
                   .Append(" allegiance=").Append(CleanLine(e.Allegiance))
                   .Append(" pos=").Append(NumStr(e.X)).Append(',').Append(NumStr(e.Z))
                   .Append(" strength=").Append(NumStr(e.Strength));
                 if (!string.IsNullOrEmpty(e.UnitType))
                     sb.Append(" unit=").Append(CleanLine(e.UnitType));
+                if (!string.IsNullOrEmpty(e.RefId) && e.RefDistance >= 0)
+                    sb.Append(" from_own=").Append(CleanLine(e.RefId))
+                      .Append(':').Append(NumStr(e.RefDistance))
+                      .Append('@').Append(CleanLine(e.RefDirection));
+                if (e.CenterDistance >= 0)
+                    sb.Append(" to_center=").Append(NumStr(e.CenterDistance))
+                      .Append('@').Append(CleanLine(e.CenterDirection));
+                sb.Append(" edge_dist(W=").Append(NumStr(e.WestEdgeDist))
+                  .Append(",E=").Append(NumStr(e.EastEdgeDist))
+                  .Append(",S=").Append(NumStr(e.SouthEdgeDist))
+                  .Append(",N=").Append(NumStr(e.NorthEdgeDist)).Append(')');
                 sb.Append('\n');
             }
             if (shown < total)
@@ -355,7 +324,7 @@ namespace LuanShi.Engine
                 if (s.ValidUntilSeason >= 0)
                     sb.Append(" valid_until=").Append(NumStr(s.ValidUntilSeason));
                 if (!string.IsNullOrEmpty(s.Summary))
-                    sb.Append(" note=\"").Append(CleanLine(s.Summary)).Append('"');
+                    sb.Append(" note=\"").Append(SanitizeQuoted(s.Summary)).Append('"');
                 sb.Append('\n');
             }
             if (shown < total)

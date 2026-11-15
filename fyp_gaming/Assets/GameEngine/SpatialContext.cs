@@ -14,10 +14,12 @@ namespace LuanShi.Engine
         public int FogCityRange;
         public int FogArmyRange;
         public int FogWatchTowerRange;
+        public int CenterX;
+        public int CenterZ;
 
         public string ToJson()
         {
-            var sb = new StringBuilder(192);
+            var sb = new StringBuilder(224);
             sb.Append('{');
             sb.Append("\"width\":").Append(MiniJson.Num(Width));
             sb.Append(",\"height\":").Append(MiniJson.Num(Height));
@@ -26,6 +28,8 @@ namespace LuanShi.Engine
             sb.Append(",\"fog_city_range\":").Append(MiniJson.Num(FogCityRange));
             sb.Append(",\"fog_army_range\":").Append(MiniJson.Num(FogArmyRange));
             sb.Append(",\"fog_watch_tower_range\":").Append(MiniJson.Num(FogWatchTowerRange));
+            sb.Append(",\"center_x\":").Append(MiniJson.Num(CenterX));
+            sb.Append(",\"center_z\":").Append(MiniJson.Num(CenterZ));
             sb.Append('}');
             return sb.ToString();
         }
@@ -45,10 +49,16 @@ namespace LuanShi.Engine
         public string UnitType;
         public int WestEdgeDist, EastEdgeDist, SouthEdgeDist, NorthEdgeDist;
         public string NearEdges;
+        public int CenterDistance;
+        public string CenterDirection = "";
+        public int CenterDeltaX, CenterDeltaZ;
+        public string RefId = "";
+        public int RefDistance;
+        public string RefDirection = "";
 
         public string ToJson()
         {
-            var sb = new StringBuilder(224);
+            var sb = new StringBuilder(320);
             sb.Append('{');
             sb.Append("\"kind\":").Append(MiniJson.Str(Kind));
             sb.Append(",\"id\":").Append(MiniJson.Str(Id));
@@ -65,6 +75,11 @@ namespace LuanShi.Engine
             sb.Append(",\"south_edge_dist\":").Append(MiniJson.Num(SouthEdgeDist));
             sb.Append(",\"north_edge_dist\":").Append(MiniJson.Num(NorthEdgeDist));
             sb.Append(",\"near_edges\":").Append(MiniJson.Str(NearEdges));
+            sb.Append(",\"center_distance\":").Append(MiniJson.Num(CenterDistance));
+            sb.Append(",\"center_direction\":").Append(MiniJson.Str(CenterDirection));
+            sb.Append(",\"ref_id\":").Append(MiniJson.Str(RefId));
+            sb.Append(",\"ref_distance\":").Append(MiniJson.Num(RefDistance));
+            sb.Append(",\"ref_direction\":").Append(MiniJson.Str(RefDirection));
             sb.Append('}');
             return sb.ToString();
         }
@@ -168,12 +183,16 @@ namespace LuanShi.Engine
         public int SightBoundaryCellCount;
         public bool HasCurrentlyUnseen;
         public int UnseenMinX = -1, UnseenMaxX = -1, UnseenMinZ = -1, UnseenMaxZ = -1;
+        public int VisibleMinX = -1, VisibleMaxX = -1, VisibleMinZ = -1, VisibleMaxZ = -1;
+        public int WestUnseenCols, EastUnseenCols, SouthUnseenCols, NorthUnseenCols;
+        public IReadOnlyList<string> VisibleRowRanges;
+        public IReadOnlyList<string> VisibleTerrainNotes;
         public string FrontierDirectionsFromOwn;
         public string HistoryLimitationNote;
 
         public string ToJson()
         {
-            var sb = new StringBuilder(256);
+            var sb = new StringBuilder(384);
             sb.Append('{');
             sb.Append("\"visible_cells\":").Append(MiniJson.Num(VisibleCellCount));
             sb.Append(",\"total_cells\":").Append(MiniJson.Num(TotalCellCount));
@@ -184,10 +203,29 @@ namespace LuanShi.Engine
             sb.Append(",\"unseen_max_x\":").Append(MiniJson.Num(UnseenMaxX));
             sb.Append(",\"unseen_min_z\":").Append(MiniJson.Num(UnseenMinZ));
             sb.Append(",\"unseen_max_z\":").Append(MiniJson.Num(UnseenMaxZ));
+            sb.Append(",\"visible_min_x\":").Append(MiniJson.Num(VisibleMinX));
+            sb.Append(",\"visible_max_x\":").Append(MiniJson.Num(VisibleMaxX));
+            sb.Append(",\"visible_min_z\":").Append(MiniJson.Num(VisibleMinZ));
+            sb.Append(",\"visible_max_z\":").Append(MiniJson.Num(VisibleMaxZ));
+            sb.Append(",\"west_unseen_cols\":").Append(MiniJson.Num(WestUnseenCols));
+            sb.Append(",\"east_unseen_cols\":").Append(MiniJson.Num(EastUnseenCols));
+            sb.Append(",\"south_unseen_cols\":").Append(MiniJson.Num(SouthUnseenCols));
+            sb.Append(",\"north_unseen_cols\":").Append(MiniJson.Num(NorthUnseenCols));
+            sb.Append(",\"visible_row_ranges\":").Append(JsonStrList(VisibleRowRanges));
+            sb.Append(",\"visible_terrain_notes\":").Append(JsonStrList(VisibleTerrainNotes));
             sb.Append(",\"frontier_directions_from_own\":").Append(MiniJson.Str(FrontierDirectionsFromOwn));
             sb.Append(",\"history_limitation_note\":").Append(MiniJson.Str(HistoryLimitationNote));
             sb.Append('}');
             return sb.ToString();
+        }
+
+        private static string JsonStrList(IReadOnlyList<string> items)
+        {
+            var list = new List<string>();
+            if (items != null)
+                foreach (var item in items)
+                    if (item != null) list.Add(MiniJson.Str(item));
+            return MiniJson.Array(list);
         }
     }
 
@@ -245,6 +283,14 @@ namespace LuanShi.Engine
         public static readonly string[] CompassOrder = { "W", "NW", "N", "NE", "E", "SE", "S", "SW" };
 
         /// <summary>Exact integer 8-sector octant classification without floating-point variance.</summary>
+        public static int HexDistanceOrChebyshev(MapData map, int x1, int z1, int x2, int z2)
+        {
+            if (x1 == x2 && z1 == z2) return 0;
+            int maxSteps = map != null ? map.Width + map.Height : 64;
+            int hex = map != null ? map.HexDistance(x1, z1, x2, z2, maxSteps) : -1;
+            return hex >= 0 ? hex : Math.Max(Math.Abs(x2 - x1), Math.Abs(z2 - z1));
+        }
+
         public static string CompassDirection(int dx, int dz)
         {
             if (dx == 0 && dz == 0) return "here";

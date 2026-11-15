@@ -17,6 +17,7 @@ namespace LuanShi.Engine
             for (int i = 0; i < all.Count; i++)
             {
                 MoveOption opt = all[i];
+                opt.GridDistance = SpatialGeometry.HexDistanceOrChebyshev(map, army.X, army.Z, opt.X, opt.Z);
                 opt.Direction = SpatialGeometry.CompassDirection(opt.X - army.X, opt.Z - army.Z);
                 int unseen = SpatialGeometry.CountUnseenNeighbors(engine, seatId, map, opt.X, opt.Z);
                 opt.ExploresFrontier = unseen > 0;
@@ -90,7 +91,20 @@ namespace LuanShi.Engine
                     if (best != null)
                     {
                         if (best.ExploresFrontier && string.IsNullOrEmpty(best.ObjectiveHint))
-                            best.ObjectiveHint = "frontier " + dir;
+                        {
+                            bool towardCenter = false;
+                            if (map != null && map.Width > 0 && map.Height > 0)
+                            {
+                                int cx = map.Width / 2, cz = map.Height / 2;
+                                int maxSteps = map.Width + map.Height;
+                                int curCenter = HexOrStepDist(map, army.X, army.Z, cx, cz, maxSteps);
+                                int nextCenter = HexOrStepDist(map, best.X, best.Z, cx, cz, maxSteps);
+                                towardCenter = nextCenter < curCenter;
+                            }
+                            best.ObjectiveHint = towardCenter
+                                ? "frontier " + dir + " (toward map_center)"
+                                : "frontier " + dir;
+                        }
                         used.Add(best);
                         picked.Add(best);
                     }

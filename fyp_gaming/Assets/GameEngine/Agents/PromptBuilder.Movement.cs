@@ -23,22 +23,29 @@ namespace LuanShi.Engine
 
         /// <summary>Full section (every advertised option, including any engine-side cap).</summary>
         public static string MovementOptionsText(MovementView view)
-            => RenderMovementOptions(view, int.MaxValue, int.MaxValue, includeSpatialTags: false);
+            => MovementOptionsText(view, int.MaxValue, int.MaxValue);
 
         /// <summary>
         /// Renders at most <paramref name="maxOptionsPerArmy"/> options per army, keeping each
         /// army's stable prefix (captures first). A counted note follows when options were dropped.
         /// </summary>
         public static string MovementOptionsText(MovementView view, int maxOptionsPerArmy)
-            => RenderMovementOptions(view, maxOptionsPerArmy, int.MaxValue, includeSpatialTags: false);
+            => MovementOptionsText(view, maxOptionsPerArmy, int.MaxValue);
 
         /// <summary>
         /// Bounded form used by the prompt-size fallback: also keeps only the first
         /// <paramref name="maxArmies"/> armies (ordered by army id) and notes the remainder.
         /// Deterministic; captures stay first because they are first within each army's prefix.
+        /// When <see cref="MovementView.SpatialContext"/> is attached and
+        /// <see cref="ActiveSpatialOptions"/> is enabled, renders <c>SPATIAL CONTEXT</c> plus
+        /// spatial-tagged movement options and truncation accounting.
         /// </summary>
         public static string MovementOptionsText(MovementView view, int maxOptionsPerArmy, int maxArmies)
-            => RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags: false);
+        {
+            if (view != null && view.SpatialContext != null && ActiveSpatialOptions.Level != SpatialDetailLevel.Off)
+                return RenderSpatialMovementSection(view, maxOptionsPerArmy, maxArmies);
+            return RenderMovementOptions(view, maxOptionsPerArmy, maxArmies, includeSpatialTags: false);
+        }
 
         /// <summary>
         /// Opt-in spatial-aware rendering: keeps <paramref name="includeSpatialTags"/> == false
@@ -106,6 +113,8 @@ namespace LuanShi.Engine
                         {
                             if (!string.IsNullOrEmpty(option.Direction))
                                 sb.Append(" dir=").Append(Safe(option.Direction));
+                            if (option.GridDistance > 0)
+                                sb.Append(" dist=").Append(Int(option.GridDistance));
                             if (option.ExploresFrontier)
                                 sb.Append(" [frontier]");
                             string hint = NoteText(option.ObjectiveHint);

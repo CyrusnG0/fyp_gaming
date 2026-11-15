@@ -28,16 +28,43 @@ namespace LuanShi.Engine
             var visible = new bool[w, h];
             int visibleCount = 0, unseenCount = 0;
             int minX = w, maxX = -1, minZ = h, maxZ = -1;
+            int visMinX = w, visMaxX = -1, visMinZ = h, visMaxZ = -1;
+            var rowRanges = new List<string>(h);
+            var terrainNotes = new List<string>();
 
             for (int z = 0; z < h; z++)
             {
+                int runStart = -1;
+                var segs = new List<string>(2);
                 for (int x = 0; x < w; x++)
                 {
                     bool vis = engine.InSight(seatId, x, z);
                     visible[x, z] = vis;
-                    if (vis) visibleCount++;
+                    if (vis)
+                    {
+                        visibleCount++;
+                        if (x < visMinX) visMinX = x;
+                        if (x > visMaxX) visMaxX = x;
+                        if (z < visMinZ) visMinZ = z;
+                        if (z > visMaxZ) visMaxZ = z;
+                        if (runStart < 0) runStart = x;
+                        // Sight verified above: safe to record visible obstacles or step > 1.
+                        if (!map.IsWalkable(x, z))
+                            terrainNotes.Add("(" + x + "," + z + "):blocked");
+                        else if (map.Cost != null && map.Cost[map.Index(x, z)] > 1)
+                            terrainNotes.Add("(" + x + "," + z + "):step="
+                                + map.Cost[map.Index(x, z)].ToString(CultureInfo.InvariantCulture));
+                    }
                     else
                     {
+                        if (runStart >= 0)
+                        {
+                            segs.Add(runStart == x - 1
+                                ? runStart.ToString(CultureInfo.InvariantCulture)
+                                : runStart.ToString(CultureInfo.InvariantCulture) + ".."
+                                    + (x - 1).ToString(CultureInfo.InvariantCulture));
+                            runStart = -1;
+                        }
                         unseenCount++;
                         if (x < minX) minX = x;
                         if (x > maxX) maxX = x;
@@ -45,6 +72,15 @@ namespace LuanShi.Engine
                         if (z > maxZ) maxZ = z;
                     }
                 }
+                if (runStart >= 0)
+                {
+                    segs.Add(runStart == w - 1
+                        ? runStart.ToString(CultureInfo.InvariantCulture)
+                        : runStart.ToString(CultureInfo.InvariantCulture) + ".."
+                            + (w - 1).ToString(CultureInfo.InvariantCulture));
+                }
+                if (segs.Count > 0)
+                    rowRanges.Add("z=" + z.ToString(CultureInfo.InvariantCulture) + ":x=" + string.Join(",", segs));
             }
 
             int cx = w / 2, cz = h / 2;
@@ -118,6 +154,16 @@ namespace LuanShi.Engine
                 UnseenMaxX = unseenCount > 0 ? maxX : -1,
                 UnseenMinZ = unseenCount > 0 ? minZ : -1,
                 UnseenMaxZ = unseenCount > 0 ? maxZ : -1,
+                VisibleMinX = visibleCount > 0 ? visMinX : -1,
+                VisibleMaxX = visibleCount > 0 ? visMaxX : -1,
+                VisibleMinZ = visibleCount > 0 ? visMinZ : -1,
+                VisibleMaxZ = visibleCount > 0 ? visMaxZ : -1,
+                WestUnseenCols = visibleCount > 0 ? visMinX : 0,
+                EastUnseenCols = visibleCount > 0 ? Math.Max(0, w - 1 - visMaxX) : 0,
+                SouthUnseenCols = visibleCount > 0 ? visMinZ : 0,
+                NorthUnseenCols = visibleCount > 0 ? Math.Max(0, h - 1 - visMaxZ) : 0,
+                VisibleRowRanges = rowRanges,
+                VisibleTerrainNotes = terrainNotes,
                 FrontierDirectionsFromOwn = unseenCount == 0
                     ? "(full map in current sight)"
                     : (globalDirs.Count == 0 ? "(none)" : string.Join(", ", globalDirs)),
