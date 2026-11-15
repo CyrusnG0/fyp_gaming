@@ -209,20 +209,23 @@ namespace LuanShi.Engine
             string user = PromptBuilder.InsertBeforeCandidates(body, section);
             if (spatialOn && level == 3 && input.SystemChars + user.Length > effectiveMaxChars)
             {
-                int excess = input.SystemChars + user.Length - effectiveMaxChars;
-                int sectionBudget = Math.Max(0, (movementText == null ? 0 : movementText.Length) - excess);
-                movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
-                    input.SpatialOptions, sectionBudget, out spatialReport);
-                if (moveSectionIndex < report.Sections.Count)
+                for (int pass = 0; pass < 2 && input.SystemChars + user.Length > effectiveMaxChars; pass++)
                 {
-                    report.Sections.RemoveAt(moveSectionIndex);
-                    AddMovement(input.Movement, report, spatialReport, insertAt: moveSectionIndex);
+                    int excess = input.SystemChars + user.Length - effectiveMaxChars;
+                    int sectionBudget = Math.Max(0, (movementText == null ? 0 : movementText.Length) - excess);
+                    movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
+                        input.SpatialOptions, sectionBudget, out spatialReport);
+                    if (moveSectionIndex < report.Sections.Count)
+                    {
+                        report.Sections.RemoveAt(moveSectionIndex);
+                        AddMovement(input.Movement, report, spatialReport, insertAt: moveSectionIndex);
+                    }
+                    section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
+                    body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
+                        input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
+                        input.Persona, attackNotice, events);
+                    user = PromptBuilder.InsertBeforeCandidates(body, section);
                 }
-                section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
-                body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
-                    input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
-                    input.Persona, attackNotice, events);
-                user = PromptBuilder.InsertBeforeCandidates(body, section);
             }
             if (spatialReport != null)
             {
