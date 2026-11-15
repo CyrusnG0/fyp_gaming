@@ -63,6 +63,14 @@ namespace LuanShi.Playground
             ProductionDeliberationSpectatorSummary(log);
             ProductionRehearsalTwoSeasonNoteAndInquiries(log);
             ProductionRehearsalSixRequestBoundary(log);
+            ExperimentConfiguration(log);
+            ExperimentFeatureOffIsUnchanged(log);
+            ExperimentRichPromptAndTruncationReport(log);
+            ExperimentRetentionAcrossTurns(log);
+            ExperimentThinkingIsObservableAndFree(log);
+            ExperimentLargeBudgetTwoSeatsMultiSeason(log);
+            ExperimentCeilings(log);
+            ExperimentEmptyRepliesAndTelemetry(log);
 
             Console.WriteLine("\n" + log.Passed + " passed, " + log.Failed + " failed");
             return log.Failed == 0 ? 0 : 1;

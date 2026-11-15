@@ -34,8 +34,22 @@ namespace LuanShi.Engine
 
     public sealed partial class LlmTurnRunner
     {
-        /// <summary>Plain-language, stable completion reason for panels and researcher records.</summary>
+        /// <summary>
+        /// Plain-language, stable completion reason for panels and researcher records. In the
+        /// rich-deliberation experiment a stop caused by a ceiling names it, for example
+        /// "Stopped - time limit [ceiling: session_seconds]"; otherwise the text is unchanged.
+        /// </summary>
         public string EndReasonText
+        {
+            get
+            {
+                string text = EndReasonTextCore;
+                string ceiling = ExperimentActive ? StopCeiling : null;
+                return ceiling == null ? text : text + " [ceiling: " + ceiling + "]";
+            }
+        }
+
+        private string EndReasonTextCore
         {
             get
             {

@@ -169,7 +169,7 @@ namespace LuanShi.Engine
         {
             if (string.IsNullOrEmpty(line)) return;
             _history.Add(Limit(Redact(line), 240));
-            while (_history.Count > MaxRecentHistory) _history.RemoveAt(0);
+            while (_history.Count > HistoryLimit) { _history.RemoveAt(0); CountHistoryDrop(); }
         }
 
         private static string HistoryLine(LlmAction action, string result)
@@ -211,11 +211,14 @@ namespace LuanShi.Engine
             string commandJson, bool? resultOk, string resultError,
             string inquiryTool = null, int? inquiryResultChars = null)
         {
+            // Opt-in experiment only: what the model chose, host-measured timing and command points.
+            string deliberationEvent = TakeDeliberationEvent(flight, parseOk, commandJson, resultOk,
+                inquiryTool);
             if (_recorder == null) return;
             // The exact prompt and the full provider body are written to ignored run evidence.
             // Capture is best-effort and must never abort or alter the turn.
             CaptureExchangeResult(flight, response, parseOk, commandJson, resultOk, resultError,
-                inquiryTool, inquiryResultChars);
+                inquiryTool, inquiryResultChars, deliberationEvent);
             try
             {
                 var parts = new List<string>(40);
@@ -277,6 +280,12 @@ namespace LuanShi.Engine
                 {
                     parts.Add(Str("inquiry_tool", inquiryTool));
                     parts.Add(nullableInt("inquiry_result_chars", inquiryResultChars));
+                }
+                if (deliberationEvent != null)
+                {
+                    parts.Add("\"deliberation_event\":" + deliberationEvent);
+                    if (LastContextReportJson != null)
+                        parts.Add("\"context_report\":" + LastContextReportJson);
                 }
                 _recorder.Record(_runId, "{" + string.Join(",", parts) + "}");
             }

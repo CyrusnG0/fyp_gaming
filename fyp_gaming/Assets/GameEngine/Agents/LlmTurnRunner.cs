@@ -146,6 +146,7 @@ namespace LuanShi.Engine
             _memories.Clear();
             _pendingInquiryResult = null;
             ResetDeliberationTurnState();
+            ResetExperimentTurnState();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
             // seats must not leak either seat's action feedback into the other's prompt. A seed
             // change starts a genuinely new session and clears every seat.
@@ -188,8 +189,10 @@ namespace LuanShi.Engine
             InFlight flight = _inflight;
             if (flight.Generation != _generation) return;
 
-            if (TurnTimeExpired() || DeliberationWallExpired())
+            string timeCeiling = TimeCeilingHit();
+            if (timeCeiling != null)
             {
+                _stopDetail = timeCeiling;
                 var expired = LlmResponse.Failure(LlmErrorKind.Timeout, "turn time limit reached",
                     ElapsedMs(flight));
                 SettleDeliberationProvider(flight, null);
@@ -230,6 +233,7 @@ namespace LuanShi.Engine
         {
             if (!IsRunning) return;
             if (TurnTimeExpired()) { FinishLimit("turn time limit reached", EndReason.TurnTimeLimit); return; }
+            if (!ExperimentPreflight()) return;
             // Deliberation mode delegates request/action/session admission to the shared per-match
             // ledger. The legacy counters remain display evidence only in that mode. Feature-off
             // keeps the exact historical checks below.
@@ -288,6 +292,7 @@ namespace LuanShi.Engine
             // silent fallback to a different accounting scheme.
             if (DeliberationActive && !PrepareDeliberation(observation, out string deliberationFailure))
             { FinishFailed(deliberationFailure, EndReason.DeliberationLimit); return; }
+            if (!ExperimentTokenGate()) return;
 
             MovementView movement = null;
             if (planning && !TryPlanMovement(out movement, out string movementFailure))
@@ -312,8 +317,9 @@ namespace LuanShi.Engine
                 ? EarlierRetainedInquiryResults(inquiryResult) : null;
             LlmPersona persona = LlmPersona.ResolveForTurn(_config, _host, observation, _seatId);
             CurrentPersonaId = persona?.Id;
+            bool rich = ExperimentActive;
             string system = PromptBuilder.SystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, rich);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
@@ -325,7 +331,19 @@ namespace LuanShi.Engine
             // Deliberation uses the richer builder even for a non-planning host: with a null
             // movement view and no attacks it emits the same domestic body plus the private note,
             // retained results and the deliberation identity.
-            string user = planning || deliberation
+            string user;
+            if (rich)
+            {
+                // Experiment: one seat-filtered, size-reported prompt. The recorded observation JSON
+                // is exactly the JSON this prompt carries, including its configured event cap.
+                if (!TryBuildRichPrompt(observation, options, movement, attacks, persona, inquiryResult,
+                        PromptBuilder.VersionFor(planning, inquiry, persona, attackOn, deliberation, true),
+                        system.Length, requestsLeft, actionsLeft, out user, out string richObservation))
+                    return;
+                observationJson = richObservation;
+            }
+            else
+                user = planning || deliberation
                 ? PromptBuilder.UserPrompt(observation, options, _history,
                     requestsLeft, actionsLeft, movement, relevantMemories,
                     inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
@@ -333,20 +351,21 @@ namespace LuanShi.Engine
                 : PromptBuilder.UserPrompt(observation, options, _history,
                     requestsLeft, actionsLeft, relevantMemories, inquiryResult,
                     inquiry, persona);
-            if (system.Length + user.Length > MaxPromptChars)
+            if (system.Length + user.Length > _config.EffectiveMaxPromptChars)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 
             int index = RequestsThisTurn + 1;
             string promptVersion = PromptBuilder.VersionFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, rich);
             string schemaHash = PromptBuilder.SchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation);
+                deliberation, rich);
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
             // Admit and mark dispatched before the provider is called. A denial sends nothing and
             // records no provider request.
             DeliberationAdmission requestAdmission = null;
             if (deliberation && !TryDispatchDeliberationRequest(out requestAdmission)) return;
 
+            RecordExperimentSettings(promptVersion, schemaHash);
             // The exact prompt is captured before I/O, so a transport failure still leaves evidence.
             // It is recorded only once dispatch is approved: a denied request never reached a provider.
             CaptureExchangeRequest(index, observation.Season, req, promptVersion, schemaHash);
