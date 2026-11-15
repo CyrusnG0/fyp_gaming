@@ -74,6 +74,11 @@ namespace LuanShi.Engine
             sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
             sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
             sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
+            sb.Append(",\"visible_march_routes_enforced\":")
+              .Append(config != null && config.EffectiveVisibleMarchRoutes ? "true" : "false");
+            Field(sb, "spatial_context_level",
+                config != null && config.SpatialContext != null ? config.SpatialContext.LevelKey() : "off",
+                config, true);
             sb.Append(",\"seasons_planned\":")
               .Append(session.SeasonsPlanned.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"seasons_played\":")

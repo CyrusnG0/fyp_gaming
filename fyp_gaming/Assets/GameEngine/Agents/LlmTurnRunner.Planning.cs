@@ -11,7 +11,7 @@ namespace LuanShi.Engine
     {
         /// <summary>The host's planning capabilities; null for a plain domestic-only host.</summary>
         private IPlanningHost PlanningHost => _host as IPlanningHost;
-        internal bool RequireVisibleMarchRoutes => _config.RequireVisibleMarchRoutes;
+        internal bool RequireVisibleMarchRoutes => _config.EffectiveVisibleMarchRoutes;
         internal SpatialContextOptions SpatialOptions => _config?.SpatialContext;
         private bool HasPlanningHost => _host is IPlanningHost;
 

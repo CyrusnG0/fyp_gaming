@@ -37,7 +37,7 @@ namespace LuanShi.Engine
         public Observation Observe() => _observe != null ? _observe() : _engine?.Observe(_seatId);
 
         public ValidationResult Submit(ActionCommand cmd)
-            => _config != null && _config.RequireVisibleMarchRoutes
+            => _config != null && _config.EffectiveVisibleMarchRoutes
                && !MovementPlanner.AllowsVisibleRoute(_engine, _seatId, cmd)
                 ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
                 : (_submit != null ? _submit(cmd) : ValidationResult.Fail("host submit unavailable"));
@@ -51,7 +51,7 @@ namespace LuanShi.Engine
         public MovementView PlanMovement(SpatialContextOptions spatialOptions)
         {
             bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
-            return (_config != null && _config.RequireVisibleMarchRoutes) || spatialOn
+            return (_config != null && _config.EffectiveVisibleMarchRoutes) || spatialOn
                 ? MovementPlanner.BuildDiversified(_engine, _seatId,
                     MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
                 : MovementPlanner.Build(_engine, _seatId);

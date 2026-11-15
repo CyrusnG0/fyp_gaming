@@ -47,6 +47,14 @@ namespace LuanShi.Engine
         public bool RequireVisibleMarchRoutes;
 
         /// <summary>
+        /// True when visible-route planning and admission are active — either explicitly via
+        /// <see cref="RequireVisibleMarchRoutes"/> or implicitly because <see cref="SpatialContext"/>
+        /// is enabled (which requires fog-safe visible-only pathing).
+        /// </summary>
+        public bool EffectiveVisibleMarchRoutes
+            => RequireVisibleMarchRoutes || (SpatialContext != null && SpatialContext.IsEnabled);
+
+        /// <summary>
         /// Opt-in spatial map context configuration, default OFF (<see cref="SpatialDetailLevel.Off"/>).
         /// </summary>
         public SpatialContextOptions SpatialContext = new SpatialContextOptions();
@@ -222,6 +230,7 @@ namespace LuanShi.Engine
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
+            else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
             if (SpatialContext != null && SpatialContext.IsEnabled)
                 sb.Append("; spatial=").Append(SpatialContext.LevelKey());
             // Only enabled deliberation adds text, so the legacy diagnostic stays byte-identical.

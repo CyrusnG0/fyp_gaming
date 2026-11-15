@@ -22,6 +22,7 @@ internal static partial class Harness
         SpatialTruncationPersistedInRichAndNonRichModes();
         SpatialEnabledWithRequireVisibleFalseOnSingleLlmHost();
         SpatialEnabledWithRequireVisibleFalseOnSpectatorHost();
+        SpatialHiddenShortcutEnforcesVisibleRouteAcrossBothHosts();
     }
 
     private static void SpatialSingleLlmHostReachesDispatchedPrompt()
@@ -386,6 +387,165 @@ internal static partial class Harness
                   && sumVer == reqVer
                   && sumHash == reqHash,
                 "spectator host with spatial enabled and require_visible_march_routes=false dispatches spatial prompt and matches summary version/hash");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    private static void SpatialHiddenShortcutEnforcesVisibleRouteAcrossBothHosts()
+    {
+        // 1. Single-LLM host across hidden-shortcut paired worlds
+        string prevSingleReq1Sys = null;
+        string prevSingleReq1User = null;
+        string prevSingleReq2User = null;
+        string prevSingleHistory = null;
+        string prevSingleFirstResult = null;
+        foreach (bool shortcutOpen in new[] { true, false })
+        {
+            var engine = BuildUnseenShortcutWorld(707, shortcutOpen);
+            string seatId = engine.State.FindArmy(ShortcutArmyId).OwnerSeatId;
+            int token = engine.BeginSeatTurn(seatId);
+            var cfg = new LlmConfig
+            {
+                Provider = "fake",
+                Model = "fake-shortcut-single",
+                RequireVisibleMarchRoutes = false,
+                MaxPromptChars = 25000,
+                SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Standard },
+                MaxRequestsPerTurn = 6,
+                MaxActionsPerTurn = 3,
+            };
+            var host = new SingleLlmTurnHost(
+                engine,
+                cfg,
+                seatId,
+                () => engine.Observe(seatId),
+                cmd => engine.SubmitAs(seatId, token, cmd),
+                () => { });
+            var fake = new CombinedFakeTransport();
+            fake.EnqueueOk("{\"type\":\"march\",\"target_id\":\"" + ShortcutArmyId + "\",\"param_a\":3,\"param_b\":5}");
+            fake.EnqueueOk("{\"type\":\"march\",\"target_id\":\"" + ShortcutArmyId + "\",\"param_a\":4,\"param_b\":5}");
+            fake.EnqueueOk("{\"type\":\"end_turn\"}");
+            var recorder = new MemoryRecorderSink();
+            var runner = new LlmTurnRunner(fake, cfg, recorder);
+            runner.Begin(host, token, seatId, 707);
+            LlmDrain(runner);
+            engine.EndSeatTurn(token);
+
+            var army = engine.State.FindArmy(ShortcutArmyId);
+            string expectedVer = PromptBuilder.CombinedVersionFor(true, false, null, false, false, false, false, true);
+            string expectedHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, false, false, false, true);
+            string reqVer = ExtractJsonStringField(recorder.ExchangeLines[0], "prompt_version");
+            string reqHash = ExtractJsonStringField(recorder.ExchangeLines[0], "schema_hash");
+            string historyJoined = string.Join("\n", runner.RecentHistory);
+            string firstResult = recorder.ExchangeLines.Count > 1
+                ? ExtractJsonStringField(recorder.ExchangeLines[1], "result_error")
+                : null;
+
+            Check(cfg.EffectiveVisibleMarchRoutes
+                  && cfg.Redacted().Contains("visible_march_routes=enforced_by_spatial", StringComparison.Ordinal)
+                  && runner.State == RunnerState.Finished
+                  && fake.Requests.Count == 3
+                  && army.X == 4 && army.Z == 5
+                  && firstResult == FeedbackPolicy.DestinationNotReachable
+                  && historyJoined.Contains(FeedbackPolicy.DestinationNotReachable, StringComparison.Ordinal)
+                  && reqVer == expectedVer
+                  && reqHash == expectedHash,
+                $"single-LLM host with spatial+RequireVisibleMarchRoutes=false rejects unlisted shortcut (shortcutOpen={shortcutOpen})");
+
+            if (prevSingleReq1User != null)
+            {
+                Check(prevSingleReq1Sys == fake.Requests[1].System
+                      && prevSingleReq1User == fake.Requests[1].User
+                      && prevSingleHistory == historyJoined
+                      && prevSingleFirstResult == firstResult,
+                    "single-LLM host produces identical result, subsequent prompt, and history across hidden-shortcut paired worlds");
+            }
+            prevSingleReq1Sys = fake.Requests[1].System;
+            prevSingleReq1User = fake.Requests[1].User;
+            prevSingleReq2User = fake.Requests[2].User;
+            prevSingleHistory = historyJoined;
+            prevSingleFirstResult = firstResult;
+        }
+
+        // 2. Spectator host across hidden-shortcut paired worlds
+        string tempDir = Path.Combine(Path.GetTempPath(), "luanshi-spatial-shortcut-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string prevSpecReq1Sys = null;
+            string prevSpecReq1User = null;
+            string prevSpecReq2User = null;
+            string prevSpecHistory = null;
+            string prevSpecFirstResult = null;
+            foreach (bool shortcutOpen in new[] { true, false })
+            {
+                var engine = BuildUnseenShortcutWorld(707, shortcutOpen);
+                var cfg = new LlmConfig
+                {
+                    Provider = "fake",
+                    Model = "fake-shortcut-spec",
+                    RequireVisibleMarchRoutes = false,
+                    MaxPromptChars = 25000,
+                    SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Standard },
+                    MaxRequestsPerTurn = 6,
+                    MaxActionsPerTurn = 3,
+                };
+                var fake = new CombinedFakeTransport();
+                fake.EnqueueOk("{\"type\":\"march\",\"target_id\":\"" + ShortcutArmyId + "\",\"param_a\":3,\"param_b\":5}");
+                fake.EnqueueOk("{\"type\":\"march\",\"target_id\":\"" + ShortcutArmyId + "\",\"param_a\":4,\"param_b\":5}");
+                fake.EnqueueOk("{\"type\":\"end_turn\"}");
+                fake.EnqueueOk("{\"type\":\"end_turn\"}");
+                var recorder = new MemoryRecorderSink();
+                var runner = new LlmTurnRunner(fake, cfg, recorder);
+                var session = new SpectatorSession(engine, runner, 1, 707);
+                session.Start();
+                SpectatorDrain(session);
+
+                string summaryPath = SpectatorSummary.Write(tempDir, session, cfg, fake, runner);
+                string summaryJson = File.ReadAllText(summaryPath);
+
+                var army = engine.State.FindArmy(ShortcutArmyId);
+                string expectedVer = PromptBuilder.CombinedVersionFor(true, false, null, false, false, false, false, true);
+                string expectedHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, false, false, false, true);
+                string reqVer = ExtractJsonStringField(recorder.ExchangeLines[0], "prompt_version");
+                string reqHash = ExtractJsonStringField(recorder.ExchangeLines[0], "schema_hash");
+                string sumVer = ExtractJsonStringField(summaryJson, "prompt_version");
+                string sumHash = ExtractJsonStringField(summaryJson, "schema_hash");
+                string historyJoined = string.Join("\n", runner.RecentHistory);
+                string firstResult = recorder.ExchangeLines.Count > 1
+                    ? ExtractJsonStringField(recorder.ExchangeLines[1], "result_error")
+                    : null;
+
+                Check(session.State == SpectatorState.Completed
+                      && session.TotalAccepted == 1
+                      && session.TotalRejected == 1
+                      && army.X == 4 && army.Z == 5
+                      && firstResult == FeedbackPolicy.DestinationNotReachable
+                      && reqVer == expectedVer
+                      && reqHash == expectedHash
+                      && sumVer == reqVer
+                      && sumHash == reqHash
+                      && summaryJson.Contains("\"visible_march_routes_enforced\":true", StringComparison.Ordinal)
+                      && summaryJson.Contains("\"spatial_context_level\":\"standard\"", StringComparison.Ordinal)
+                      && summaryJson.Contains("visible_march_routes=enforced_by_spatial", StringComparison.Ordinal),
+                    $"spectator host with spatial+RequireVisibleMarchRoutes=false rejects unlisted shortcut and records summary evidence (shortcutOpen={shortcutOpen})");
+
+                if (prevSpecReq1User != null)
+                {
+                    Check(prevSpecReq1Sys == fake.Requests[1].System
+                          && prevSpecReq1User == fake.Requests[1].User
+                          && prevSpecHistory == historyJoined
+                          && prevSpecFirstResult == firstResult,
+                        "spectator host produces identical result, subsequent prompt, and history across hidden-shortcut paired worlds");
+                }
+                prevSpecReq1Sys = fake.Requests[1].System;
+                prevSpecReq1User = fake.Requests[1].User;
+                prevSpecReq2User = fake.Requests[2].User;
+                prevSpecHistory = historyJoined;
+                prevSpecFirstResult = firstResult;
+            }
         }
         finally
         {
