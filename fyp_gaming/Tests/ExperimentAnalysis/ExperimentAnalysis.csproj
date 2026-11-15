@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!--
+      Standalone production-path checks for experiment evidence visibility. It compiles the real
+      engine sources directly (no UnityEngine, no NuGet package), owns its own entry point and is
+      deliberately NOT registered in Tests/Harness/Program.cs or Tests/Playground/Program.cs.
+
+      Run: dotnet run (project path) Tests/ExperimentAnalysis/ExperimentAnalysis.csproj -c Release
+      Fake provider only: no network, no paid call.
+    -->
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.ExperimentAnalysis.Tests</AssemblyName>
+    <RootNamespace>LuanShi.ExperimentAnalysis.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+  </ItemGroup>
+
+</Project>
