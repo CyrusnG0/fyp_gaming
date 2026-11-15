@@ -37,6 +37,7 @@ namespace LuanShi.Engine
         public bool Fits;
         public int PromptChars;
         public int MaxPromptChars;
+        public SpatialTruncationReport SpatialTruncation;
 
         public void Add(string name, int included, int available, string note)
             => Sections.Add(new Section { Name = name, Included = included, Available = available, Note = note });
@@ -82,7 +83,10 @@ namespace LuanShi.Engine
                 sb.Append(",\"truncated\":").Append(s.Available >= 0 && s.Included < s.Available ? "true" : "false");
                 sb.Append('}');
             }
-            sb.Append("]}");
+            sb.Append(']');
+            if (SpatialTruncation != null)
+                sb.Append(",\"spatial_truncation\":").Append(SpatialTruncation.ToJson());
+            sb.Append('}');
             return sb.ToString();
         }
     }
@@ -108,6 +112,7 @@ namespace LuanShi.Engine
         public int RequestsLeft;
         public int ActionsLeft;
         public PromptBuilder.RichAllowances Allowances;
+        public SpatialContextOptions SpatialOptions;
     }
 
     internal sealed class RichContextResult
@@ -115,6 +120,7 @@ namespace LuanShi.Engine
         public string User;
         public string ObservationJson;
         public RichContextReport Report;
+        public SpatialTruncationReport SpatialTruncation => Report?.SpatialTruncation;
     }
 
     /// <summary>
@@ -148,7 +154,11 @@ namespace LuanShi.Engine
             if (level >= 3) events = Math.Min(events, PromptBuilder.MaxPromptObservationEvents);
 
             Observation obs = input.Observation;
-            var report = new RichContextReport { TrimLevel = level, MaxPromptChars = config.EffectiveMaxPromptChars };
+            int effectiveMaxChars = input.SpatialOptions != null && input.SpatialOptions.IsEnabled
+                && input.SpatialOptions.ProviderCharLimit > 0
+                ? Math.Min(config.EffectiveMaxPromptChars, input.SpatialOptions.ProviderCharLimit)
+                : config.EffectiveMaxPromptChars;
+            var report = new RichContextReport { TrimLevel = level, MaxPromptChars = effectiveMaxChars };
 
             int totalEvents = obs.Events.Count;
             report.Add("observation events (newest kept)", Math.Min(totalEvents, events), totalEvents,
@@ -175,18 +185,53 @@ namespace LuanShi.Engine
                 string.IsNullOrEmpty(input.Note) ? 0 : 1,
                 string.IsNullOrEmpty(input.Note) ? "none saved yet" : "one note (" + input.Note.Length
                     .ToString(CultureInfo.InvariantCulture) + " chars), the latest only");
-            AddMovement(input.Movement, report);
+
+            bool spatialOn = input.Movement != null && input.Movement.SpatialContext != null
+                && input.SpatialOptions != null && input.SpatialOptions.IsEnabled;
+            SpatialTruncationReport spatialReport = null;
+            string movementText = input.Movement == null ? null
+                : (spatialOn
+                    ? PromptBuilder.MovementOptionsText(input.Movement, int.MaxValue, int.MaxValue,
+                        input.SpatialOptions, out spatialReport)
+                    : PromptBuilder.MovementOptionsText(input.Movement));
+
+            int moveSectionIndex = report.Sections.Count;
+            AddMovement(input.Movement, report, spatialReport);
             report.Add("candidate orders", input.Options.Count, input.Options.Count, null);
             report.Add("other factions' private information", 0, -1,
                 "only what your own seat-filtered observation shows is supplied");
 
-            string movementText = input.Movement == null ? null : PromptBuilder.MovementOptionsText(input.Movement);
             string attackNotice = input.AttackEnabled ? ActionCatalogue.AttackNotice(input.Attacks) : null;
             string section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
             string body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
                 input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
                 input.Persona, attackNotice, events);
             string user = PromptBuilder.InsertBeforeCandidates(body, section);
+            if (spatialOn && level == 3 && input.SystemChars + user.Length > effectiveMaxChars)
+            {
+                int excess = input.SystemChars + user.Length - effectiveMaxChars;
+                int sectionBudget = Math.Max(0, (movementText == null ? 0 : movementText.Length) - excess);
+                movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
+                    input.SpatialOptions, sectionBudget, out spatialReport);
+                if (moveSectionIndex < report.Sections.Count)
+                {
+                    report.Sections.RemoveAt(moveSectionIndex);
+                    AddMovement(input.Movement, report, spatialReport, insertAt: moveSectionIndex);
+                }
+                section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
+                body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
+                    input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
+                    input.Persona, attackNotice, events);
+                user = PromptBuilder.InsertBeforeCandidates(body, section);
+            }
+            if (spatialReport != null)
+            {
+                spatialReport.ProviderCharLimit = effectiveMaxChars;
+                spatialReport.SystemChars = input.SystemChars;
+                spatialReport.UserChars = user.Length;
+                spatialReport.TotalChars = input.SystemChars + user.Length;
+                report.SpatialTruncation = spatialReport;
+            }
             report.PromptChars = input.SystemChars + user.Length;
             report.Fits = report.PromptChars <= report.MaxPromptChars;
             return new RichContextResult
@@ -215,7 +260,8 @@ namespace LuanShi.Engine
             return picked.Count;
         }
 
-        private static void AddMovement(MovementView movement, RichContextReport report)
+        private static void AddMovement(MovementView movement, RichContextReport report,
+            SpatialTruncationReport spatialReport = null, int insertAt = -1)
         {
             if (movement == null || movement.Armies == null || movement.Armies.Count == 0) return;
             int shown = 0, reachable = 0;
@@ -225,10 +271,19 @@ namespace LuanShi.Engine
                 shown += plan.Options == null ? 0 : plan.Options.Count;
                 reachable += Math.Max(plan.Options == null ? 0 : plan.Options.Count, plan.TotalReachable);
             }
-            report.Add("march destinations across your armies", shown, reachable,
-                shown < reachable
+            if (spatialReport != null)
+                shown = Math.Max(0, reachable - spatialReport.MoveOptionsDropped);
+            var entry = new RichContextReport.Section
+            {
+                Name = "march destinations across your armies",
+                Included = shown,
+                Available = reachable,
+                Note = shown < reachable
                     ? "the planner lists only these; omitted destinations are not listed by any tool, but the host checks a submitted destination on its own, so a legal visible one you name from the map may be accepted"
-                    : null);
+                    : null,
+            };
+            if (insertAt >= 0 && insertAt <= report.Sections.Count) report.Sections.Insert(insertAt, entry);
+            else report.Sections.Add(entry);
         }
     }
 }

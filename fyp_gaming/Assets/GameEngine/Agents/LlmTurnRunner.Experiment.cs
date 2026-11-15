@@ -302,6 +302,7 @@ namespace LuanShi.Engine
                 RequestsLeft = requestsLeft,
                 ActionsLeft = actionsLeft,
                 Allowances = BuildAllowances(),
+                SpatialOptions = _config?.SpatialContext,
             };
             return RichContextAssembler.Assemble(input, _config);
         }
@@ -341,6 +342,7 @@ namespace LuanShi.Engine
                 persona, inquiryResult, version, systemChars, requestsLeft, actionsLeft);
             user = assembled.User;
             observationJson = assembled.ObservationJson;
+            LastSpatialTruncation = assembled.SpatialTruncation;
             LastContextReportJson = assembled.Report.ToJson();
             if (assembled.Report.Fits) return true;
             _stopDetail = "prompt_chars";

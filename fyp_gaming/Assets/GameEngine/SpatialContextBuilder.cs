@@ -45,10 +45,13 @@ namespace LuanShi.Engine
             MapData map = engine.State.Map;
             int width = map != null ? map.Width : 0;
             int height = map != null ? map.Height : 0;
+            int centerX = width > 0 ? width / 2 : 0;
+            int centerZ = height > 0 ? height / 2 : 0;
 
             var own = new List<SpatialEntitySummary>();
             var visibleOthers = new List<SpatialEntitySummary>();
-            CollectEntities(obs, fac.SeatId, width, height, own, visibleOthers);
+            CollectEntities(map, obs, fac.SeatId, width, height, centerX, centerZ, own, visibleOthers);
+            PopulateReferenceBearings(map, own, visibleOthers);
 
             var stale = CollectStaleIntel(engine, obs, fac.SeatId, visibleOthers);
             var targets = CollectObjectives(visibleOthers, stale);
@@ -68,6 +71,8 @@ namespace LuanShi.Engine
                     FogCityRange = BalanceConfig.FogCityRange,
                     FogArmyRange = BalanceConfig.FogArmyRange,
                     FogWatchTowerRange = BalanceConfig.FogWatchTowerRange,
+                    CenterX = centerX,
+                    CenterZ = centerZ,
                 },
                 OwnEntities = own,
                 VisibleOthers = visibleOthers,
@@ -94,7 +99,7 @@ namespace LuanShi.Engine
             int h = map != null ? map.Height : 0;
             var own = new List<SpatialEntitySummary>();
             var visibleOthers = new List<SpatialEntitySummary>();
-            CollectEntities(obs, seatId, w, h, own, visibleOthers);
+            CollectEntities(map, obs, seatId, w, h, w > 0 ? w / 2 : 0, h > 0 ? h / 2 : 0, own, visibleOthers);
             var stale = CollectStaleIntel(engine, obs, seatId, visibleOthers);
             return TargetsFromView(visibleOthers, stale);
         }
@@ -139,30 +144,31 @@ namespace LuanShi.Engine
             return targets;
         }
 
-        private static void CollectEntities(Observation obs, string seatId, int width, int height,
+        private static void CollectEntities(MapData map, Observation obs, string seatId,
+            int width, int height, int centerX, int centerZ,
             List<SpatialEntitySummary> own, List<SpatialEntitySummary> visibleOthers)
         {
             foreach (var c in obs.Cities)
             {
                 if (c == null) continue;
-                var summary = MakeEntity("city", c.Id, c.Name, c.OwnerSeatId, seatId,
-                    c.X, c.Z, c.Garrison, c.GarrisonType, width, height);
+                var summary = MakeEntity(map, "city", c.Id, c.Name, c.OwnerSeatId, seatId,
+                    c.X, c.Z, c.Garrison, c.GarrisonType, width, height, centerX, centerZ);
                 if (summary.Allegiance == "own") own.Add(summary);
                 else visibleOthers.Add(summary);
             }
             foreach (var a in obs.Armies)
             {
                 if (a == null) continue;
-                var summary = MakeEntity("army", a.Id, a.Name, a.OwnerSeatId, seatId,
-                    a.X, a.Z, a.Troops, a.UnitType, width, height);
+                var summary = MakeEntity(map, "army", a.Id, a.Name, a.OwnerSeatId, seatId,
+                    a.X, a.Z, a.Troops, a.UnitType, width, height, centerX, centerZ);
                 if (summary.Allegiance == "own") own.Add(summary);
                 else visibleOthers.Add(summary);
             }
             foreach (var t in obs.WatchTowers)
             {
                 if (t == null) continue;
-                var summary = MakeEntity("watch_tower", t.Id, t.Name, t.OwnerSeatId, seatId,
-                    t.X, t.Z, 0, null, width, height);
+                var summary = MakeEntity(map, "watch_tower", t.Id, t.Name, t.OwnerSeatId, seatId,
+                    t.X, t.Z, 0, null, width, height, centerX, centerZ);
                 if (summary.Allegiance == "own") own.Add(summary);
                 else visibleOthers.Add(summary);
             }
@@ -170,12 +176,13 @@ namespace LuanShi.Engine
             visibleOthers.Sort(CompareEntities);
         }
 
-        private static SpatialEntitySummary MakeEntity(string kind, string id, string name,
-            string ownerSeatId, string viewerSeatId, int x, int z, int strength, string unitType,
-            int width, int height)
+        private static SpatialEntitySummary MakeEntity(MapData map, string kind, string id,
+            string name, string ownerSeatId, string viewerSeatId, int x, int z, int strength,
+            string unitType, int width, int height, int centerX, int centerZ)
         {
             string allegiance = string.IsNullOrEmpty(ownerSeatId) ? "neutral"
                 : string.Equals(ownerSeatId, viewerSeatId, StringComparison.Ordinal) ? "own" : "foreign";
+            int cdx = centerX - x, cdz = centerZ - z;
             return new SpatialEntitySummary
             {
                 Kind = kind,
@@ -193,7 +200,54 @@ namespace LuanShi.Engine
                 SouthEdgeDist = height > 0 ? z : 0,
                 NorthEdgeDist = height > 0 ? Math.Max(0, height - 1 - z) : 0,
                 NearEdges = SpatialGeometry.NearEdgesText(x, z, width, height),
+                CenterDeltaX = cdx,
+                CenterDeltaZ = cdz,
+                CenterDistance = width > 0 && height > 0
+                    ? SpatialGeometry.HexDistanceOrChebyshev(map, x, z, centerX, centerZ) : 0,
+                CenterDirection = width > 0 && height > 0
+                    ? SpatialGeometry.CompassDirection(cdx, cdz) : "here",
             };
+        }
+
+        private static void PopulateReferenceBearings(MapData map,
+            List<SpatialEntitySummary> own, List<SpatialEntitySummary> visibleOthers)
+        {
+            if (own == null || own.Count == 0) return;
+            SpatialEntitySummary primaryRef = null;
+            foreach (var e in own)
+                if (e.Kind == "city") { primaryRef = e; break; }
+            if (primaryRef == null) primaryRef = own[0];
+
+            foreach (var e in own)
+            {
+                if (ReferenceEquals(e, primaryRef)) continue;
+                e.RefId = primaryRef.Id;
+                e.RefDistance = SpatialGeometry.HexDistanceOrChebyshev(map, primaryRef.X, primaryRef.Z, e.X, e.Z);
+                e.RefDirection = SpatialGeometry.CompassDirection(e.X - primaryRef.X, e.Z - primaryRef.Z);
+            }
+
+            if (visibleOthers == null) return;
+            foreach (var v in visibleOthers)
+            {
+                SpatialEntitySummary bestOwn = null;
+                int bestDist = int.MaxValue;
+                foreach (var o in own)
+                {
+                    int d = SpatialGeometry.HexDistanceOrChebyshev(map, o.X, o.Z, v.X, v.Z);
+                    if (bestOwn == null || d < bestDist
+                        || (d == bestDist && bestOwn.Kind != "army" && o.Kind == "army"))
+                    {
+                        bestOwn = o;
+                        bestDist = d;
+                    }
+                }
+                if (bestOwn != null)
+                {
+                    v.RefId = bestOwn.Id;
+                    v.RefDistance = bestDist;
+                    v.RefDirection = SpatialGeometry.CompassDirection(v.X - bestOwn.X, v.Z - bestOwn.Z);
+                }
+            }
         }
 
         private static int CompareEntities(SpatialEntitySummary a, SpatialEntitySummary b)
@@ -292,15 +346,14 @@ namespace LuanShi.Engine
             List<SpatialEntitySummary> own, List<SpatialObjectiveTarget> targets)
         {
             var bearings = new List<SpatialObjectiveBearing>();
-            int maxSteps = map != null ? map.Width + map.Height : 64;
             foreach (var entity in own)
             {
                 if (entity.Kind != "army") continue;
                 foreach (var t in targets)
                 {
                     if (t.X == entity.X && t.Z == entity.Z) continue;
-                    int dist = map != null ? map.HexDistance(entity.X, entity.Z, t.X, t.Z, maxSteps) : -1;
-                    if (dist < 0) dist = Math.Max(Math.Abs(t.X - entity.X), Math.Abs(t.Z - entity.Z));
+                    int dist = SpatialGeometry.HexDistanceOrChebyshev(
+                        map, entity.X, entity.Z, t.X, t.Z);
                     int dx = t.X - entity.X;
                     int dz = t.Z - entity.Z;
                     bearings.Add(new SpatialObjectiveBearing

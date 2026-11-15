@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost
+        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -72,9 +72,14 @@ namespace LuanShi.Engine
             public void EndTurn() => EndTurnCalled = true;
 
             /// <summary>Seat-safe candidates for this host's own seat (read-only).</summary>
-            public MovementView PlanMovement() => _session.Runner.RequireVisibleMarchRoutes
-                ? MovementPlanner.BuildDiversified(_engine, _seatId)
-                : MovementPlanner.Build(_engine, _seatId);
+            public MovementView PlanMovement() => PlanMovement(_session.Runner.SpatialOptions);
+
+            /// <summary>Seat-safe candidates honoring explicit per-run spatial options.</summary>
+            public MovementView PlanMovement(SpatialContextOptions spatialOptions)
+                => _session.Runner.RequireVisibleMarchRoutes
+                    ? MovementPlanner.BuildDiversified(_engine, _seatId,
+                        MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
+                    : MovementPlanner.Build(_engine, _seatId);
 
             /// <summary>
             /// Seat-safe attack/assault candidates. Only consulted when the config opts in
