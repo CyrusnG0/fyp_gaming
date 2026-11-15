@@ -31,6 +31,8 @@ namespace LuanShi.Engine
             _memories.Clear();
             _pendingInquiryResult = null;
             ResetDeliberationTurnState();
+            ResetExperimentTurnState();
+            ClearExperimentMatchState();
             RequestsThisTurn = 0;
             ActionsThisTurn = 0;
             InvalidThisTurn = 0;
@@ -59,6 +61,7 @@ namespace LuanShi.Engine
             EndReason = EndReason.Cancelled;
             Status = "cancelled: " + FailureReason;
             AddActivity("finished", EndReasonText);
+            RecordTurnEnd();
             if (flight != null)
             {
                 // Record the abandoned request with explicitly unknown provider fields. A late
@@ -107,6 +110,7 @@ namespace LuanShi.Engine
             State = state;
             Status = status;
             AddActivity("finished", EndReasonText);
+            RecordTurnEnd();
             if (_endTurnCalled) return;
             _endTurnCalled = true;
             try { _host?.EndTurn(); }

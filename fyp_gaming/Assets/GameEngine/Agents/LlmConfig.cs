@@ -11,7 +11,7 @@ namespace LuanShi.Engine
     /// ToString/Redacted, warnings or exceptions. <see cref="LoadFromFile"/> uses the B1
     /// StrictJson parser; a missing or malformed file degrades to defaults + environment values.
     /// </summary>
-    public sealed class LlmConfig
+    public sealed partial class LlmConfig
     {
         public string Provider = "deepseek";
         public string BaseUrl = "https://api.deepseek.com";
@@ -161,7 +161,10 @@ namespace LuanShi.Engine
         /// enable_deliberation, max_inquiries_per_turn, max_inquiries_per_session,
         /// max_accepted_actions_per_session, max_note_chars, max_retained_inquiry_results,
         /// inquiry_max_response_chars, deliberation_input_token_bound,
-        /// max_deliberation_turn_millis.
+        /// max_deliberation_turn_millis, and the opt-in experiment keys experiment_profile,
+        /// max_session_seconds, max_session_input_tokens, max_session_output_tokens,
+        /// max_prompt_chars, context_history_items, context_memory_chars, context_event_items,
+        /// context_cross_turn_inquiry_results, context_inquiry_chars (see LlmConfig.Experiment.cs).
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
         {
@@ -226,6 +229,7 @@ namespace LuanShi.Engine
                 sb.Append("; retained_inquiries=").Append(
                     MaxRetainedInquiryResults.ToString(CultureInfo.InvariantCulture));
             }
+            AppendExperimentRedacted(sb);
             return sb.ToString();
         }
 
@@ -290,6 +294,9 @@ namespace LuanShi.Engine
                                     SetPersonaOverride(item.Key, str.Value);
                             }
                         }
+                        break;
+                    default:
+                        ApplyExperimentKey(field.Key, field.Value);
                         break;
                 }
             }

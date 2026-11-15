@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace LuanShi.Engine
 {
@@ -33,12 +34,14 @@ namespace LuanShi.Engine
                 InvestigationRequestParser.Parse(response.Text, options);
             if (!parsed.Ok)
             {
+                SetDeliberationEvent("inquiry", null, "invalid:" + parsed.ErrorCode, 0, null, flight);
                 FailInquiry(flight, response, parsed.ErrorCode, parsed.Error, null);
                 return;
             }
 
             InvestigationRequest request = parsed.Request;
             AddActivity("inquiry", "Inquiry requested: " + request.ToolName + ".");
+            var execTimer = Stopwatch.StartNew();
 
             DeliberationAdmission admission = _deliberationLedger.TryAdmitInquiry();
             if (!admission.Allowed)
@@ -46,6 +49,10 @@ namespace LuanShi.Engine
                 string denial = BoundedDeliberationFailure(request.ToolName, admission.Code);
                 _pendingInquiryResult = denial;
                 RetainInquiryResult(denial);
+                LogInquiryResult(request.ToolName, denial);
+                _stopDetail = admission.Code;
+                SetDeliberationEvent("inquiry", request.ToolName, "denied:" + admission.Code,
+                    execTimer.ElapsedMilliseconds, denial.Length, flight);
                 LastResult = "inquiry denied: " + admission.Code;
                 AddActivity("inquiry", "Inquiry denied by the deliberation budget.");
                 AddHistory("inquiry " + request.ToolName + " -> denied: " + admission.Code);
@@ -61,6 +68,8 @@ namespace LuanShi.Engine
                 _deliberationLedger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
                 FinishFailed("deliberation inquiry dispatch denied: " + dispatch.Code,
                     EndReason.DispatchDenied);
+                SetDeliberationEvent("inquiry", request.ToolName, "dispatch_denied:" + dispatch.Code,
+                    execTimer.ElapsedMilliseconds, null, flight);
                 WriteRecord(flight, response, true, null, null, dispatch.Code, request.ToolName, null);
                 return;
             }
@@ -109,6 +118,11 @@ namespace LuanShi.Engine
 
             _pendingInquiryResult = resultJson;
             RetainInquiryResult(resultJson);
+            LogInquiryResult(request.ToolName, resultJson);
+            InquiriesThisTurn++;
+            SetDeliberationEvent("inquiry", request.ToolName,
+                technicalFailure ? "failed" : "answered", execTimer.ElapsedMilliseconds,
+                resultJson.Length, flight);
             LastResult = "inquiry answered: " + request.ToolName;
             AddActivity("inquiry", "Inquiry answered: " + request.ToolName
                 + " (result chars=" + resultJson.Length + ").");
@@ -183,6 +197,7 @@ namespace LuanShi.Engine
             if (error != null)
             {
                 InvalidThisTurn++;
+                SetDeliberationEvent("note", null, "invalid:" + error, 0, null, flight);
                 LastResult = "invalid note: " + error;
                 AddActivity("validation", "Invalid strategic note: " + error + ".");
                 AddHistory("invalid note -> " + error);
@@ -200,9 +215,11 @@ namespace LuanShi.Engine
                 return;
             }
 
+            var noteTimer = Stopwatch.StartNew();
             if (!NoteStore.Save(_deliberationMatchId, _seatId, text, _season))
             {
                 InvalidThisTurn++;
+                SetDeliberationEvent("note", null, "storage_failed", noteTimer.ElapsedMilliseconds, null, flight);
                 LastResult = "strategic note storage failed";
                 AddActivity("validation", "Strategic note storage failed.");
                 AddHistory("note storage failed");
@@ -221,6 +238,8 @@ namespace LuanShi.Engine
             }
 
             _strategicNote = text;
+            NotesSavedThisTurn++;
+            SetDeliberationEvent("note", null, "saved", noteTimer.ElapsedMilliseconds, text.Length, flight);
             LastResult = "note saved";
             AddActivity("note", "Strategic note saved (" + text.Length + " chars).");
             AddHistory("note saved (" + text.Length + " chars)");

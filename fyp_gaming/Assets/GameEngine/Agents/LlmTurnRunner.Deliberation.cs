@@ -108,7 +108,11 @@ namespace LuanShi.Engine
                 _deliberationMatchId = observation.GameId;
                 _retainedInquiryResults.Clear();
                 _strategicNote = null;
+                ClearExperimentMatchState();
+                _sessionStartMillis = -1;
             }
+            MarkSessionStart();
+            EnterTokenMatch(observation.GameId);
 
             DeliberationBindingResult binding = _deliberationLedger.BindTurn(_seatId, _turnToken);
             if (!binding.Ok)
@@ -139,7 +143,9 @@ namespace LuanShi.Engine
                 MaxInquiryPerSession = NonNegative(_config.MaxInquiriesPerSession),
                 MaxWallMillisPerTurn = _config.MaxDeliberationTurnMillis > 0
                     ? _config.MaxDeliberationTurnMillis : DeliberationBudgetLimits.Unenforced,
-                MaxWallMillisPerSession = DeliberationBudgetLimits.Unenforced,
+                MaxWallMillisPerSession = _config.MaxSessionSeconds > 0
+                    ? (int)Math.Min(int.MaxValue - 1, _config.MaxSessionSeconds * 1000L)
+                    : DeliberationBudgetLimits.Unenforced,
                 MaxInputTokensPerTurn = DeliberationBudgetLimits.Unenforced,
                 MaxInputTokensPerSession = DeliberationBudgetLimits.Unenforced,
                 MaxOutputTokensPerTurn = DeliberationBudgetLimits.Unenforced,
@@ -241,6 +247,7 @@ namespace LuanShi.Engine
 
         private void FinishDeliberationRequestDenied(DeliberationAdmission admission, string code)
         {
+            _stopDetail = code;
             FailureReason = "deliberation request denied (" + (code ?? "unknown") + ")";
             EndReason reason;
             switch (admission == null ? DeliberationDenyReason.None : admission.Reason)
@@ -262,6 +269,7 @@ namespace LuanShi.Engine
 
         private void FinishDeliberationActionDenied(DeliberationAdmission admission, string code)
         {
+            _stopDetail = code;
             FailureReason = "deliberation action denied (" + (code ?? "unknown") + ")";
             EndReason = EndReason.ActionLimit;
             Status = "limit: " + FailureReason;

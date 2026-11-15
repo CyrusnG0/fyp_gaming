@@ -100,7 +100,7 @@ namespace LuanShi.Engine
 
         private void CaptureExchangeResult(InFlight flight, LlmResponse response, bool parseOk,
             string commandJson, bool? resultOk, string resultError,
-            string inquiryTool = null, int? inquiryResultChars = null)
+            string inquiryTool = null, int? inquiryResultChars = null, string deliberationEvent = null)
         {
             ILlmExchangeRecorder sink = ExchangeRecorder;
             if (sink == null || flight == null) return;
@@ -121,6 +121,12 @@ namespace LuanShi.Engine
                 {
                     outcome.Add(Str("inquiry_tool", inquiryTool));
                     outcome.Add(nullableInt("inquiry_result_chars", inquiryResultChars));
+                }
+                if (deliberationEvent != null)
+                {
+                    outcome.Add("\"deliberation_event\":" + deliberationEvent);
+                    if (LastContextReportJson != null)
+                        outcome.Add("\"context_report\":" + LastContextReportJson);
                 }
                 parts.Add("\"outcome\":{" + string.Join(",", outcome) + "}");
                 sink.RecordExchange(_runId, "{" + string.Join(",", parts) + "}");
