@@ -6,6 +6,7 @@
 // KingdomDemo.SpectatorPanel.cs. Scoreboard data stays in the UI and never enters a prompt.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using UnityEngine;
@@ -173,12 +174,19 @@ namespace LuanShi
         /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn)
         /// and every summary is labelled FAKE.
         /// </summary>
-        void EnqueueFakeSeatTurn(string seatId)
+        void EnqueueFakeSeatTurn(string seatId, bool openingSeason, bool firstFaction)
         {
             if (agentFake == null || engine == null || string.IsNullOrEmpty(seatId)) return;
             Observation seatObs = engine.Observe(seatId);
-            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId,
-                agentConfig != null && agentConfig.EnableManualLookup);
+            IReadOnlyList<string> plan;
+            if (agentConfig != null && agentConfig.EnableDeliberation)
+                plan = FakeTurnPlan.DeliberationRehearsal(seatObs, seatId, openingSeason, firstFaction);
+            else
+            {
+                MovementView movement = agentConfig != null && agentConfig.RequireVisibleMarchRoutes
+                    ? MovementPlanner.BuildDiversified(engine, seatId) : MovementPlanner.Build(engine, seatId);
+                plan = FakeTurnPlan.Build(movement, seatObs, seatId, agentConfig != null && agentConfig.EnableManualLookup);
+            }
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 200, 120, 20);
         }
@@ -200,7 +208,7 @@ namespace LuanShi
                 for (int i = 0; i < order.Count; i++)
                 {
                     if (season == 0 && i < start) continue;   // resuming mid-season
-                    EnqueueFakeSeatTurn(order[i]);
+                    EnqueueFakeSeatTurn(order[i], season == 0 && engine.State.Season == 1, i == 0);
                 }
         }
 

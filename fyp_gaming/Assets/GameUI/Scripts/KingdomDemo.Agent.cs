@@ -384,7 +384,9 @@ namespace LuanShi
         {
             if (agentFake == null) return;
             agentFake.Reset();
-            var plan = FakeTurnPlan.Build(MovementPlanner.Build(engine, seatId), seatObs, seatId,
+            MovementView movement = agentConfig != null && agentConfig.RequireVisibleMarchRoutes
+                ? MovementPlanner.BuildDiversified(engine, seatId) : MovementPlanner.Build(engine, seatId);
+            var plan = FakeTurnPlan.Build(movement, seatObs, seatId,
                 agentConfig != null && agentConfig.EnableManualLookup);
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
@@ -396,10 +398,15 @@ namespace LuanShi
             public AgentTurnHost(KingdomDemo owner, string seatId) { _owner = owner; _seatId = seatId; }
             public string FactionKey => _owner.engine?.State?.FindFaction(_seatId)?.Name;
             public Observation Observe() => _owner.ObserveAgentSeat(_seatId);
-            public ValidationResult Submit(ActionCommand cmd) => _owner.SubmitAgentCommand(_seatId, cmd);
+            public ValidationResult Submit(ActionCommand cmd)
+                => _owner.agentConfig.RequireVisibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_owner.engine, _seatId, cmd)
+                    ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
+                    : _owner.SubmitAgentCommand(_seatId, cmd);
             public void EndTurn() => _owner.AgentEndTurnRequested();
             /// <summary>Read-only, seat-filtered candidates for this agent seat.</summary>
-            public MovementView PlanMovement() => MovementPlanner.Build(_owner.engine, _seatId);
+            public MovementView PlanMovement() => _owner.agentConfig.RequireVisibleMarchRoutes
+                ? MovementPlanner.BuildDiversified(_owner.engine, _seatId)
+                : MovementPlanner.Build(_owner.engine, _seatId);
             /// <summary>
             /// Read-only, seat-filtered attack/assault candidates. Only consulted when the config
             /// opts in (<see cref="LlmConfig.EnableAttack"/>), so the default prompt is unchanged.

@@ -42,6 +42,9 @@ namespace LuanShi.Engine
         /// </summary>
         public bool EnableAttack;
 
+        /// <summary>Use visible-only route planning and admission for LLM marches.</summary>
+        public bool RequireVisibleMarchRoutes;
+
         /// <summary>
         /// Opt-in production deliberation, default OFF. When true the runner accepts the four strict
         /// read-only inquiry tools (manual_lookup, inspect_entity, search_history, recall_memory) and a
@@ -208,6 +211,7 @@ namespace LuanShi.Engine
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
+            if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             // Only enabled deliberation adds text, so the legacy diagnostic stays byte-identical.
             if (EnableDeliberation)
             {
@@ -255,6 +259,8 @@ namespace LuanShi.Engine
                         EnableManualLookup = Bool(field.Value, EnableManualLookup); break;
                     case "enable_personas":
                         EnablePersonas = Bool(field.Value, EnablePersonas); break;
+                    case "require_visible_march_routes":
+                        RequireVisibleMarchRoutes = Bool(field.Value, RequireVisibleMarchRoutes); break;
                     case "enable_attack":
                         EnableAttack = Bool(field.Value, EnableAttack); break;
                     case "enable_deliberation":

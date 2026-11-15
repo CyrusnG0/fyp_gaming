@@ -151,6 +151,17 @@ namespace LuanShi.Engine
             int maxOptionsPerArmy = DefaultMaxOptionsPerArmy, SpatialContextView spatial = null)
             => BuildPlanSet(engine, seatId, maxOptionsPerArmy, true, spatial);
 
+        /// <summary>Rejects LLM marches that require a route through terrain the faction cannot see.</summary>
+        public static bool AllowsVisibleRoute(GameEngine engine, string seatId, ActionCommand command)
+        {
+            if (command == null || command.Type != ActionType.March) return true;
+            var army = engine.State.FindArmy(command.TargetId);
+            if (army == null || army.OwnerSeatId != seatId) return false;
+            int budget = BalanceConfig.MarchBudget(engine.State.Season, army.UnitType);
+            return SpatialGeometry.VisiblePathCost(engine, seatId, engine.State.Map,
+                army.X, army.Z, command.ParamA, command.ParamB, budget) >= 0;
+        }
+
         private static MovementView BuildPlanSet(GameEngine engine, string seatId,
             int maxOptionsPerArmy, bool diversify, SpatialContextView spatial)
         {

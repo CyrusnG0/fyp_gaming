@@ -53,6 +53,24 @@ namespace LuanShi.Engine
             return actions;
         }
 
+        public static IReadOnlyList<string> DeliberationRehearsal(Observation observation,
+            string seatId, bool openingSeason, bool firstFaction)
+        {
+            var replies = new List<string>();
+            if (openingSeason && firstFaction)
+            {
+                replies.Add("{\"tool\":\"manual_lookup\",\"topic\":\"research\"}");
+                replies.Add("{\"note\":\"FAKE rehearsal: bank food and hold the river\"}");
+                string city = FirstOwnedCity(observation, seatId);
+                if (city != null)
+                    replies.Add("{\"type\":\"levy_tax\",\"target_id\":" + MiniJson.Str(city) + "}");
+            }
+            else if (openingSeason)
+                replies.Add("{\"tool\":\"manual_lookup\",\"topic\":\"diplomacy\"}");
+            replies.Add("{\"type\":\"end_turn\"}");
+            return replies;
+        }
+
         private static MoveOption FirstCaptureOption(MovementView movement, out ArmyMovePlan army)
         {
             army = null;

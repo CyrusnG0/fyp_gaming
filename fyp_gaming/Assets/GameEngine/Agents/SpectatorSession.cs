@@ -55,7 +55,9 @@ namespace LuanShi.Engine
                 ValidationResult result;
                 try
                 {
-                    result = _engine.SubmitAs(_seatId, _token, cmd);
+                    result = _session.Runner.RequireVisibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_engine, _seatId, cmd)
+                        ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
+                        : _engine.SubmitAs(_seatId, _token, cmd);
                 }
                 catch (Exception)
                 {
@@ -70,7 +72,9 @@ namespace LuanShi.Engine
             public void EndTurn() => EndTurnCalled = true;
 
             /// <summary>Seat-safe candidates for this host's own seat (read-only).</summary>
-            public MovementView PlanMovement() => MovementPlanner.Build(_engine, _seatId);
+            public MovementView PlanMovement() => _session.Runner.RequireVisibleMarchRoutes
+                ? MovementPlanner.BuildDiversified(_engine, _seatId)
+                : MovementPlanner.Build(_engine, _seatId);
 
             /// <summary>
             /// Seat-safe attack/assault candidates. Only consulted when the config opts in

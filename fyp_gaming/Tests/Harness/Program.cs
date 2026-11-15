@@ -120,6 +120,8 @@ internal static partial class Harness
         RunAttackOptions();
         RunLlmAttack();
         RunAttackFeedback();
+        RunSpatialContext();
+        RunVisibleMarchRunner();
         RunCompactScenario();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
