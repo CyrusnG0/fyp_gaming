@@ -185,6 +185,13 @@ namespace LuanShi.ControlledScenarios
             result.Status = anyFailed ? CsStatus.Failed
                 : anyStopped || !allCompleted ? CsStatus.Stopped : CsStatus.Completed;
             result.Detail = stopLimit == null ? null : "run ceiling or stop: " + stopLimit;
+            // A per-scenario sweep failure is a run-level failure too, even if the run's own final
+            // sweep later succeeds (for example because the test released the lock first).
+            foreach (CsScenarioResult scenario in result.Scenarios)
+                if (scenario.Detail != null
+                    && scenario.Detail.IndexOf("redaction sweep failed", StringComparison.Ordinal) >= 0)
+                    result.Detail = result.Detail == null
+                        ? scenario.Detail : result.Detail + "; " + scenario.Detail;
             if (result.ProviderLive)
             {
                 result.Limitations.Add("live replies are model-written (source=provider), NOT fixtures");
@@ -202,10 +209,14 @@ namespace LuanShi.ControlledScenarios
                     + result.UnknownUsageRequests + " request(s) without usage";
 
             WriteAggregateDispatches(runDir, result);
-            WriteRunManifest(runDir, manifest, result, git);
             // Final whole-run sweep: any artifact written after (or outside) the per-scenario
-            // finally is still covered before the run directory is returned.
-            CsEvidence.RedactDirectory(runDir);
+            // finally is still covered before the run directory is returned. Its failure is folded
+            // into the result BEFORE the manifest is written, so the saved manifest/report and the
+            // console summary can never claim success. The manifest itself is written through the
+            // central redaction (WriteRunManifest) and is therefore already key-free.
+            CsRedactionSweepResult runSweep = CsEvidence.RedactDirectory(runDir);
+            if (runSweep.Failed) CsEvidence.ApplyRunSweepFailure(result, runSweep);
+            WriteRunManifest(runDir, manifest, result, git);
             return result;
         }
 

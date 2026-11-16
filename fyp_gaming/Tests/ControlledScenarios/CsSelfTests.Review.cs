@@ -262,6 +262,10 @@ namespace LuanShi.ControlledScenarios
                 string runRoot = NewTempDir("cs33-run");
                 try
                 {
+                    // A direct live dispatch now validates the complete environment before it
+                    // creates anything, so this part uses the valid synthetic URL; the malicious
+                    // URL is still covered by Read and the manifest path above.
+                    SetLiveEnv(key: ReviewSentinelKey, baseUrl: LiveBaseUrl);
                     var provider = new TestLiveProvider(
                         ctx => new CountingTransport(_ => EndTurnReply()));
                     CsScenarioSpec spec = Builtin("cs-visible-contact-v1", 4641);
@@ -288,8 +292,7 @@ namespace LuanShi.ControlledScenarios
                         {
                             JsonElement settings = ReadJsonFile(path);
                             displaySafe = CsEvidenceRecorder.Text(
-                                Obj(settings, "provider"), "base_url_display")
-                                == "https://example.invalid/...";
+                                Obj(settings, "provider"), "base_url_display") == LiveBaseUrl;
                         }
                     }
                     log.Check(result != null && !leaked && displaySafe,

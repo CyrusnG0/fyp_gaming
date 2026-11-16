@@ -154,39 +154,19 @@ namespace LuanShi.ControlledScenarios
         }
 
         /// <summary>
-        /// True when the raw key, its percent-encoded form (either hex case) or the key recovered
-        /// by one or two unescape passes appears anywhere in the path or a single segment. This
-        /// catches a key smuggled through percent encoding or double encoding.
+        /// True when the raw key or any supported percent-encoded form (upper/lower hex, mixed per
+        /// character, unreserved characters included) appears anywhere in the path, or when the key
+        /// is recovered by one or two unescape passes. Uses the SAME matcher as evidence redaction,
+        /// so the URL-path rejection and the sweep cannot drift apart. Double decoding still catches
+        /// a key smuggled through two encoding layers.
         /// </summary>
         private static bool PathCarriesCredential(string path, string key)
         {
             if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(key)) return false;
-            bool plainKey = key.Length >= MinimumCredentialLength;
-            if (plainKey && path.IndexOf(key, StringComparison.Ordinal) >= 0) return true;
-            string encoded = Uri.EscapeDataString(key);
-            if (ContainsPercentForm(path, encoded)) return true;
+            if (key.Length < MinimumCredentialLength) return false;
+            if (CsEvidence.MatchesKey(path, key)) return true;
             string once = SafeUnescape(path), twice = SafeUnescape(once);
-            if (plainKey && (once.IndexOf(key, StringComparison.Ordinal) >= 0
-                    || twice.IndexOf(key, StringComparison.Ordinal) >= 0)) return true;
-            if (ContainsPercentForm(once, encoded) || ContainsPercentForm(twice, encoded)) return true;
-            foreach (string segment in path.Split('/'))
-            {
-                string first = SafeUnescape(segment), second = SafeUnescape(first);
-                if (plainKey && (first.IndexOf(key, StringComparison.Ordinal) >= 0
-                        || second.IndexOf(key, StringComparison.Ordinal) >= 0)) return true;
-                if (ContainsPercentForm(segment, encoded)
-                    || ContainsPercentForm(first, encoded)
-                    || ContainsPercentForm(second, encoded)) return true;
-            }
-            return false;
-        }
-
-        /// <summary>Encoded comparison that tolerates upper- or lower-case percent hex digits.</summary>
-        private static bool ContainsPercentForm(string value, string encoded)
-        {
-            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(encoded)) return false;
-            return value.IndexOf(encoded, StringComparison.Ordinal) >= 0
-                || value.IndexOf(encoded, StringComparison.OrdinalIgnoreCase) >= 0;
+            return CsEvidence.MatchesKey(once, key) || CsEvidence.MatchesKey(twice, key);
         }
 
         private static string SafeUnescape(string value)

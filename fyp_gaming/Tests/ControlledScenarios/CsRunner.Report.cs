@@ -146,6 +146,9 @@ namespace LuanShi.ControlledScenarios
                 { "start_world_digest", result.StartWorldDigest },
                 { "final_world_digest", result.FinalWorldDigest },
                 { "status", result.Status }, { "limit", result.Limit },
+                // Detail is included so a sweep failure known only after the first write is still
+                // visible in the rewritten result.json.
+                { "detail", result.Detail },
                 { "requests", result.Requests }, { "dispatches", result.Dispatches },
                 { "late_responses_discarded", result.LateResponsesDiscarded },
                 { "prompt_hashes", hashes },

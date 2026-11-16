@@ -53,6 +53,7 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-34] StrongThreatLegalActions", StrongThreatLegalActions),
                 Entry("[CS-35] WallCutAttribution", WallCutAttribution),
                 Entry("[CS-36] CredentialGapRegression", Review2CredentialGaps),
+                Entry("[CS-39] Review3Fixes", Review3Fixes),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

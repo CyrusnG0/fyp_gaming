@@ -25,7 +25,12 @@ namespace LuanShi.ControlledScenarios
                 runCeilings?.MaxOutputTokens);
         }
 
-        public static CsScenarioResult RunScenario(CsScenarioSpec spec, string runDirectory,
+        /// <summary>
+        /// Internal provider-injection overload (tests and <see cref="Run"/> use it). It is NOT a
+        /// public entry point: an external caller must use the string-kind overload above, which
+        /// goes through <see cref="CsProviderFactory"/> and refuses live without --allow-live.
+        /// </summary>
+        internal static CsScenarioResult RunScenario(CsScenarioSpec spec, string runDirectory,
             IScenarioProvider provider, CsGitInfo git, string runId, CsRunBudget budget = null,
             CsRunCeilings runCeilings = null, int? maxOutputTokens = null, bool allowLive = false)
         {
@@ -47,6 +52,9 @@ namespace LuanShi.ControlledScenarios
             };
             var clock = Stopwatch.StartNew();
             budget ??= CsRunBudget.Unbounded();
+            // Result.json is rewritten after a failed sweep, so the captures that shape it must
+            // survive out of the try block even when the body throws.
+            List<CsDispatchCapture> capturesForResult = new List<CsDispatchCapture>();
             try
             {
                 // Stable game id: replaying the same staged setup must produce the same prompts.
@@ -194,6 +202,7 @@ namespace LuanShi.ControlledScenarios
                 result.RunId = runner.RunId;
                 result.FinalWorldDigest = CsWorld.CanonicalDigest(engine.State);
                 List<CsDispatchCapture> captures = transport.Captures();
+                capturesForResult = captures;
                 List<CsRunLine> runLines = recorder.RunLines();
 
                 // The recording transport has the same wall deadline as this loop. If its timer
@@ -275,7 +284,20 @@ namespace LuanShi.ControlledScenarios
             {
                 // The note/memory stores are written during the session and the production summary
                 // pass writes last; sweep every scenario artifact after both, including on failure.
-                CsEvidence.RedactDirectory(scenarioDir);
+                CsRedactionSweepResult sweep = CsEvidence.RedactDirectory(scenarioDir);
+                if (sweep.Failed)
+                {
+                    CsEvidence.ApplySweepFailure(result, sweep);
+                    // The sweep outcome is known only now, so result.json is rewritten here (via
+                    // the central redaction) to carry the failed status and bounded detail. This is
+                    // the post-sweep write the success path cannot provide.
+                    try
+                    {
+                        WriteJson(scenarioDir, "result.json",
+                            ResultObject(result, capturesForResult));
+                    }
+                    catch (Exception) { }
+                }
             }
             result.ElapsedMs = clock.ElapsedMilliseconds;
             return result;
@@ -287,13 +309,16 @@ namespace LuanShi.ControlledScenarios
         /// required by the public boundary. The fake path is deliberately unchanged.
         /// </summary>
         internal static void ValidateLiveDispatch(IScenarioProvider provider, bool allowLive,
-            CsRunBudget budget, int? maxOutputTokens)
+            CsRunBudget budget, int? maxOutputTokens, Func<string, string> getenv = null)
         {
             if (provider == null || !provider.IsLive) return;
             if (!allowLive) throw new CsLiveRefusedException(CsProviderFactory.LiveRefusal);
-            // A live provider override builds its config without CsLiveEnvironment.Read, so this
-            // path must reject a configured but unredactable key before any directory or dispatch.
-            CsLiveEnvironment.ValidateConfiguredKey();
+            // A live provider override builds its config without the runner's earlier read, so the
+            // COMPLETE environment is validated here before any directory or dispatch. Messages
+            // are exactly CsLiveEnvironment's variable-name errors; no value is ever included.
+            CsLiveEnvironmentResult environment = CsLiveEnvironment.Read(getenv);
+            if (!environment.Ok)
+                throw new CsLiveConfigException(string.Join("; ", environment.Errors));
             if (budget == null || !budget.IsBounded)
                 throw new CsLiveConfigException("live runs require a bounded whole-run budget with "
                     + "a finite positive max_run_requests and max_run_wall_seconds; an unbounded "
