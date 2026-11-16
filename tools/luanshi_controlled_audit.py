@@ -396,6 +396,9 @@ def check_live_block(block, path, problems, run_level=False):
         problems.append(path + ".base_url_display must be an https scheme://host[:port]/path value")
     elif secret_like_display_path(base):
         problems.append(path + ".base_url_display must not contain a secret-like path segment")
+    elif isinstance(base, str) and "%" in base:
+        problems.append(path + ".base_url_display must not contain a percent-encoded "
+                        "path segment")
     names = block.get("env_var_names")
     if "env_var_names" in block and (
             not isinstance(names, list) or not all(isinstance(name, str) for name in names)

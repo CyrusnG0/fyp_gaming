@@ -132,10 +132,15 @@ namespace LuanShi.ControlledScenarios
                         } },
                 });
 
+                // The production stores persist model-authored text. Wrap them so the configured
+                // key is redacted before it reaches disk (the directory sweep below is the final
+                // backstop for anything else either store writes).
                 ILlmMemoryStore memory = spec.EnableDeliberation
-                    ? new LocalLlmMemoryStore(Path.Combine(scenarioDir, "memory")) : null;
+                    ? new CsRedactingMemoryStore(
+                        new LocalLlmMemoryStore(Path.Combine(scenarioDir, "memory"))) : null;
                 ILlmStrategicNoteStore notes = spec.EnableDeliberation
-                    ? new LocalLlmStrategicNoteStore(Path.Combine(scenarioDir, "notes.jsonl")) : null;
+                    ? new CsRedactingNoteStore(
+                        new LocalLlmStrategicNoteStore(Path.Combine(scenarioDir, "notes.jsonl"))) : null;
 
                 SpectatorSession session = null;
                 var context = new CsProviderContext
@@ -266,6 +271,12 @@ namespace LuanShi.ControlledScenarios
                 // or a report.
                 result.Detail = CsEvidence.Redact(e.GetType().Name + ": " + e.Message);
             }
+            finally
+            {
+                // The note/memory stores are written during the session and the production summary
+                // pass writes last; sweep every scenario artifact after both, including on failure.
+                CsEvidence.RedactDirectory(scenarioDir);
+            }
             result.ElapsedMs = clock.ElapsedMilliseconds;
             return result;
         }
@@ -280,6 +291,9 @@ namespace LuanShi.ControlledScenarios
         {
             if (provider == null || !provider.IsLive) return;
             if (!allowLive) throw new CsLiveRefusedException(CsProviderFactory.LiveRefusal);
+            // A live provider override builds its config without CsLiveEnvironment.Read, so this
+            // path must reject a configured but unredactable key before any directory or dispatch.
+            CsLiveEnvironment.ValidateConfiguredKey();
             if (budget == null || !budget.IsBounded)
                 throw new CsLiveConfigException("live runs require a bounded whole-run budget with "
                     + "a finite positive max_run_requests and max_run_wall_seconds; an unbounded "

@@ -203,6 +203,9 @@ namespace LuanShi.ControlledScenarios
 
             WriteAggregateDispatches(runDir, result);
             WriteRunManifest(runDir, manifest, result, git);
+            // Final whole-run sweep: any artifact written after (or outside) the per-scenario
+            // finally is still covered before the run directory is returned.
+            CsEvidence.RedactDirectory(runDir);
             return result;
         }
 

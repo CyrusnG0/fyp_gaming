@@ -57,6 +57,10 @@ namespace LuanShi.ControlledScenarios
         /// mangle ordinary text or reject every path. Empty values are always ignored.</summary>
         internal const int MinimumCredentialLength = 8;
 
+        /// <summary>Fixed, value-free message for a configured key that cannot be redacted safely.</summary>
+        internal const string KeyTooShortError =
+            "LUANSHI_LLM_API_KEY is too short to be redacted safely (value not shown)";
+
         public static CsLiveEnvironmentResult Read(Func<string, string> getenv = null)
         {
             getenv ??= Environment.GetEnvironmentVariable;
@@ -66,6 +70,7 @@ namespace LuanShi.ControlledScenarios
             string model = Value(getenv, "LUANSHI_LLM_MODEL");
 
             if (string.IsNullOrWhiteSpace(key)) result.Errors.Add("LUANSHI_LLM_API_KEY is not set");
+            else if (key.Trim().Length < MinimumCredentialLength) result.Errors.Add(KeyTooShortError);
             if (string.IsNullOrWhiteSpace(model)) result.Errors.Add("LUANSHI_LLM_MODEL is not set");
             else result.Model = model.Trim();
 
@@ -84,6 +89,19 @@ namespace LuanShi.ControlledScenarios
                 else result.BaseUrl = trimmed;
             }
             return result;
+        }
+
+        /// <summary>
+        /// Rejects a configured but too-short key on live paths that build their own config without
+        /// calling <see cref="Read"/> (for example a live provider override in RunScenario). An
+        /// absent key is not rejected here; only a configured value that cannot be redacted.
+        /// </summary>
+        public static void ValidateConfiguredKey(Func<string, string> getenv = null)
+        {
+            getenv ??= Environment.GetEnvironmentVariable;
+            string key = Value(getenv, "LUANSHI_LLM_API_KEY");
+            if (!string.IsNullOrWhiteSpace(key) && key.Trim().Length < MinimumCredentialLength)
+                throw new CsLiveConfigException(KeyTooShortError);
         }
 
         /// <summary>
@@ -129,11 +147,52 @@ namespace LuanShi.ControlledScenarios
         {
             if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri uri)) return false;
             string path = uri.AbsolutePath ?? "";
-            if (!string.IsNullOrEmpty(key) && key.Length >= MinimumCredentialLength
-                && path.IndexOf(key, StringComparison.Ordinal) >= 0) return true;
+            if (PathCarriesCredential(path, key)) return true;
             foreach (string segment in path.Split('/'))
                 if (IsSecretLikeSegment(segment)) return true;
             return false;
+        }
+
+        /// <summary>
+        /// True when the raw key, its percent-encoded form (either hex case) or the key recovered
+        /// by one or two unescape passes appears anywhere in the path or a single segment. This
+        /// catches a key smuggled through percent encoding or double encoding.
+        /// </summary>
+        private static bool PathCarriesCredential(string path, string key)
+        {
+            if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(key)) return false;
+            bool plainKey = key.Length >= MinimumCredentialLength;
+            if (plainKey && path.IndexOf(key, StringComparison.Ordinal) >= 0) return true;
+            string encoded = Uri.EscapeDataString(key);
+            if (ContainsPercentForm(path, encoded)) return true;
+            string once = SafeUnescape(path), twice = SafeUnescape(once);
+            if (plainKey && (once.IndexOf(key, StringComparison.Ordinal) >= 0
+                    || twice.IndexOf(key, StringComparison.Ordinal) >= 0)) return true;
+            if (ContainsPercentForm(once, encoded) || ContainsPercentForm(twice, encoded)) return true;
+            foreach (string segment in path.Split('/'))
+            {
+                string first = SafeUnescape(segment), second = SafeUnescape(first);
+                if (plainKey && (first.IndexOf(key, StringComparison.Ordinal) >= 0
+                        || second.IndexOf(key, StringComparison.Ordinal) >= 0)) return true;
+                if (ContainsPercentForm(segment, encoded)
+                    || ContainsPercentForm(first, encoded)
+                    || ContainsPercentForm(second, encoded)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Encoded comparison that tolerates upper- or lower-case percent hex digits.</summary>
+        private static bool ContainsPercentForm(string value, string encoded)
+        {
+            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(encoded)) return false;
+            return value.IndexOf(encoded, StringComparison.Ordinal) >= 0
+                || value.IndexOf(encoded, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string SafeUnescape(string value)
+        {
+            try { return Uri.UnescapeDataString(value); }
+            catch (Exception) { return value; }
         }
 
         private static bool PathIsSafe(string path)
@@ -141,6 +200,9 @@ namespace LuanShi.ControlledScenarios
             foreach (string segment in path.Split('/'))
             {
                 if (segment.Length == 0) continue;
+                // Any percent-encoded byte could hide a key or an unprintable payload. Displaying
+                // "%" would also expose an encoded credential, so it is never safe.
+                if (segment.IndexOf('%') >= 0) return false;
                 if (segment.Length >= 24 || IsSecretLikeSegment(segment)) return false;
                 foreach (char c in segment)
                     if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.')) return false;

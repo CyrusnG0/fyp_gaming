@@ -539,6 +539,17 @@ class BaseUrlDisplayAuditTests(unittest.TestCase):
         audit.check_live_block(block, "provider", problems, run_level=True)
         self.assertFalse(any("secret-like path segment" in problem for problem in problems))
 
+    def test_percent_encoded_display_path_is_flagged(self):
+        block = {"kind": "openai-compatible", "model": "m", "live": True,
+                 "base_url_display": "https://example.invalid/v1/Ab%2BCd%2FEf%3DGh",
+                 "env_var_names": list(LIVE_ENV_NAMES), "max_output_tokens": 512,
+                 "request_timeout_ms": 25000, "effective_max_requests": 200,
+                 "effective_max_wall_seconds": 120, "commit": "abc1234", "dirty": False}
+        problems = []
+        audit.check_live_block(block, "provider", problems, run_level=True)
+        self.assertTrue(any("percent-encoded" in problem for problem in problems))
+        self.assertTrue(all("Ab%2B" not in problem for problem in problems))
+
 
 class ProviderStatusTests(unittest.TestCase):
     def test_provider_status(self):
