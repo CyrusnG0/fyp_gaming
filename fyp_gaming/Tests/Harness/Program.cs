@@ -123,6 +123,9 @@ internal static partial class Harness
         RunLlmResearchAction();
         RunLlmResearchPrompt();
         RunLlmResearchRunner();
+        RunLlmDiplomacySlice();
+        RunLlmDiplomacyRunner();
+        RunReplayDiplomacyFixture();
         RunSpatialContext();
         RunVisibleMarchRunner();
         RunCompactScenario();

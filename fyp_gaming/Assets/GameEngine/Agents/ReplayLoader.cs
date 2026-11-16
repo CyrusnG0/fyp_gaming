@@ -304,17 +304,21 @@ namespace LuanShi.Engine
 
                     bool parseOk = GetBool(obj, "parse_ok");
                     string raw = GetString(obj, "raw_model_text");
+                    // The record's own identity decides whether the diplomacy orders were enabled, so
+                    // this pre-read agrees with the parse below and with the record it feeds.
+                    string promptVersion = GetString(obj, "prompt_version");
                     bool isEnd = false;
                     if (parseOk && !string.IsNullOrEmpty(raw))
                     {
-                        var p = LlmActionParser.Parse(raw);
+                        var p = LlmActionParser.Parse(raw, false, false,
+                            PromptBuilder.IsDiplomacyPromptVersion(promptVersion));
                         isEnd = p.Ok && p.Action != null && p.Action.EndTurn;
                     }
                     bool resultOk = obj.TryGet("result_ok", out JsonNode roNode) && roNode is JsonBool rob ? rob.Value : (isEnd && parseOk);
 
                     var rec = new ReplayRequestRecord {
                         RunId = runId, Seed = seed, Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
-                        PromptVersion = GetString(obj, "prompt_version"), SchemaHash = GetString(obj, "schema_hash"),
+                        PromptVersion = promptVersion, SchemaHash = GetString(obj, "schema_hash"),
                         SeatId = GetString(obj, "seat_id"), TurnToken = GetInt(obj, "turn_token"), Season = GetInt(obj, "season"),
                         ObservationHash = GetString(obj, "observation_hash"), ObservationJson = GetRawOrString(obj, "observation_json"),
                         RequestIndex = GetInt(obj, "request_index"), TotalRequests = GetInt(obj, "total_requests"),

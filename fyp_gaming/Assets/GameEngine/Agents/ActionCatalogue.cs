@@ -31,7 +31,7 @@ namespace LuanShi.Engine
     /// never from canonical <see cref="GameState"/>. Foreign and hidden cities therefore cannot
     /// leak into the catalogue even if they exist in the engine.
     /// </summary>
-    public static class ActionCatalogue
+    public static partial class ActionCatalogue
     {
         private const string CandidateNote = "candidate, revalidated by the engine";
 

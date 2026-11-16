@@ -43,6 +43,16 @@ namespace LuanShi.Engine
         public bool EnableAttack;
         public bool EnableResearch;
 
+        /// <summary>
+        /// Opt-in diplomacy orders, default OFF. When true the prompt appends the first-slice rules
+        /// (send_message, propose_treaty, respond_treaty accept/reject), the seat-safe catalogue
+        /// advertises those candidates from the acting seat's own observation, and the parser accepts
+        /// their strict shapes, including one bounded message/offer note. Gift, war, betrayal and
+        /// counteroffers stay unavailable. When false the prompt text, version, hash, catalogue and
+        /// parser vocabulary are exactly as before.
+        /// </summary>
+        public bool EnableDiplomacy;
+
         /// <summary>Use visible-only route planning and admission for LLM marches.</summary>
         public bool RequireVisibleMarchRoutes;
 
@@ -171,7 +181,8 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
-        /// enable_personas, enable_attack, personas, and the deliberation-only keys
+        /// enable_personas, enable_attack, enable_research, enable_diplomacy, personas, and the
+        /// deliberation-only keys
         /// enable_deliberation, max_inquiries_per_turn, max_inquiries_per_session,
         /// max_accepted_actions_per_session, max_note_chars, max_retained_inquiry_results,
         /// inquiry_max_response_chars, deliberation_input_token_bound,
@@ -229,6 +240,7 @@ namespace LuanShi.Engine
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
+            if (EnableDiplomacy) sb.Append("; diplomacy=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
             if (SpatialContext != null && SpatialContext.IsEnabled)
@@ -285,6 +297,8 @@ namespace LuanShi.Engine
                         RequireVisibleMarchRoutes = Bool(field.Value, RequireVisibleMarchRoutes); break;
                     case "enable_research":
                         EnableResearch = Bool(field.Value, EnableResearch); break;
+                    case "enable_diplomacy":
+                        EnableDiplomacy = Bool(field.Value, EnableDiplomacy); break;
                     case "spatial_level":
                         if (SpatialContext == null) SpatialContext = new SpatialContextOptions();
                         string lvl = Text(field.Value, null);

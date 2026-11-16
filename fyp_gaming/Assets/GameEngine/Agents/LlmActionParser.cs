@@ -21,9 +21,15 @@ namespace LuanShi.Engine
     /// schema, rejects host-owned/spoofed fields, and never trusts strings as instructions.
     /// The engine remains the only authority on whether an action is legal.
     /// </summary>
-    public static class LlmActionParser
+    public static partial class LlmActionParser
     {
-        private const int MaxStringLength = 200;
+        /// <summary>
+        /// Every free-text field the parser accepts is limited to this many characters. Diplomacy
+        /// message bodies and treaty notes reuse the same bound, so no new, longer channel exists.
+        /// </summary>
+        public const int MaxTextLength = 200;
+
+        private const int MaxStringLength = MaxTextLength;
         private const string EndTurnType = "end_turn";
 
         private static readonly string[] Vocabulary =
@@ -76,13 +82,20 @@ namespace LuanShi.Engine
         public static ParseResult Parse(string modelText, bool allowAttack)
             => Parse(modelText, allowAttack, false);
 
+        /// <summary>Attacks and research may be opted in; diplomacy stays disabled.</summary>
+        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch)
+            => Parse(modelText, allowAttack, allowResearch, false);
+
         /// <summary>
         /// The opt-in flags widen the vocabulary only. Attacks take the same fixed shape as march
         /// (own army id plus two small integer coordinates); research has no target and requires
-        /// exactly <c>args.line</c>. The host must also have advertised the order, and the engine
-        /// still decides legality.
+        /// exactly <c>args.line</c>. Diplomacy orders name another seat in <c>target_id</c> — the
+        /// acting seat is always host-bound, so a target is a counterparty, never an actor — and may
+        /// carry one bounded <c>text</c>. The host must also have advertised the order, and the
+        /// engine still decides legality.
         /// </summary>
-        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch)
+        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch,
+            bool allowDiplomacy)
         {
             if (!UnwrapFence(modelText, out string json, out string error))
                 return ParseResult.Failure(error);
@@ -92,10 +105,11 @@ namespace LuanShi.Engine
             var obj = root as JsonObject;
             if (obj == null) return ParseResult.Failure("response must be an object");
 
-            string type = null, target = null, reason = null, summary = null;
+            string type = null, target = null, reason = null, summary = null, text = null;
             int paramA = 0, paramB = 0;
-            bool hasTarget = false, hasParamA = false, hasParamB = false;
+            bool hasTarget = false, hasParamA = false, hasParamB = false, hasText = false;
             JsonObject argsNode = null;
+            JsonNode textNode = null;
 
             foreach (var field in obj.Items)
             {
@@ -135,6 +149,15 @@ namespace LuanShi.Engine
                     case "summary":
                         if (!TryString(field.Value, out summary, out error)) return ParseResult.Failure(error);
                         break;
+                    case "text":
+                        // While the diplomacy orders are disabled this field is unknown, exactly as it
+                        // was before this slice — including its order relative to other bad fields
+                        // (a preceding forbidden field still wins). Only an enabled parser defers it,
+                        // because then the type decides whether the field is allowed at all.
+                        if (!allowDiplomacy) return ParseResult.Failure("unknown field");
+                        textNode = field.Value;
+                        hasText = true;
+                        break;
                     default:
                         if (ForbiddenFields.Contains(field.Key))
                             return ParseResult.Failure("forbidden field");
@@ -142,11 +165,22 @@ namespace LuanShi.Engine
                 }
             }
 
+            // A player-written line is a message body (send_message) or an offer note
+            // (propose_treaty) only. A disabled parser never reaches here (see the field loop), and
+            // any other type keeps the pre-slice "unknown field" answer, so text can never ride along
+            // on an unrelated order.
+            if (hasText)
+            {
+                if (!CarriesText(type)) return ParseResult.Failure("unknown field");
+                if (!TryString(textNode, out text, out error)) return ParseResult.Failure(error);
+            }
+
             if (type == null) return ParseResult.Failure("type is required");
             bool attackType = AttackSet.Contains(type);
             bool researchType = type == ActionType.Research;
+            bool diplomacyType = DiplomacySet.Contains(type);
             if (!VocabularySet.Contains(type) && !(allowAttack && attackType)
-                && !(allowResearch && researchType))
+                && !(allowResearch && researchType) && !(allowDiplomacy && diplomacyType))
                 return ParseResult.Failure("unsupported action type");
 
             bool endTurn = type == EndTurnType;
@@ -182,6 +216,13 @@ namespace LuanShi.Engine
             // Research has no hex: a coordinate field is a schema violation even when it is 0.
             if (researchType && (hasParamA || hasParamB))
                 return ParseResult.Failure("invalid field");
+            // A diplomacy order names a seat, never a hex, so a coordinate field is equally invalid.
+            if (diplomacyType && (hasParamA || hasParamB))
+                return ParseResult.Failure("invalid field");
+
+            // A message must actually say something; a proposal note stays optional.
+            if (type == ActionType.SendMessage && string.IsNullOrEmpty(text))
+                return ParseResult.Failure("text is required");
 
             // Defaults are explicit here so an omitted field is not confused with a value of 0.
             if (!hasParamA) paramA = 0;
@@ -201,11 +242,15 @@ namespace LuanShi.Engine
                         return ParseResult.Failure("unsupported unit type");
                     if (researchType && !ResearchLine.IsValid(argValue))
                         return ParseResult.Failure("unsupported research line");
+                    string diplomacyError = DiplomacyArgError(type, arg.Key, argValue);
+                    if (diplomacyError != null) return ParseResult.Failure(diplomacyError);
                     args.Add(arg.Key, argValue);
                 }
             }
             if (researchType && (args == null || !args.ContainsKey("line")))
                 return ParseResult.Failure("line is required");
+            string missingArgument = DiplomacyRequiredArgument(type, args);
+            if (missingArgument != null) return ParseResult.Failure(missingArgument);
 
             return new ParseResult
             {
@@ -218,6 +263,7 @@ namespace LuanShi.Engine
                     ParamA = paramA,
                     ParamB = paramB,
                     Args = args,
+                    Text = text,
                     Reason = reason,
                     Summary = summary,
                 },
@@ -226,7 +272,8 @@ namespace LuanShi.Engine
 
         /// <summary>
         /// The trusted host builds the command. ActorSeatId, ControllerType and ActionId stay null:
-        /// the host binds seat and token, and the engine assigns the action id.
+        /// the host binds seat and token, and the engine assigns the action id. <c>Text</c> is copied
+        /// because a message or offer note must reach the engine, which revalidates and records it.
         /// </summary>
         public static ActionCommand ToCommand(LlmAction action)
         {
@@ -241,6 +288,7 @@ namespace LuanShi.Engine
                 ParamA = action.ParamA,
                 ParamB = action.ParamB,
                 Args = args,
+                Text = action.Text,
                 Reason = action.Reason,
             };
         }
@@ -249,7 +297,7 @@ namespace LuanShi.Engine
         {
             if (type == ActionType.Recruit) return key == "unit_type";
             if (type == ActionType.Research) return key == "line";
-            return false;
+            return DiplomacyArgKeyAllowed(type, key);
         }
 
         private static bool TryString(JsonNode node, out string value, out string error)

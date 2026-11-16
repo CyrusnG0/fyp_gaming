@@ -170,7 +170,8 @@ namespace LuanShi.Engine
                         continue;
                     }
 
-                    ParseResult p = LlmActionParser.Parse(req.RawModelText);
+                    ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,
+                        PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion));
                     if (!p.Ok || p.Action == null) { lookupsKnown = false; side.InvalidRequests++; continue; }
                     if (p.Action.EndTurn) { side.EndTurns++; continue; }
 

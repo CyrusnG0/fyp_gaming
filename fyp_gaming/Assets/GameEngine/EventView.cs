@@ -45,6 +45,36 @@ namespace LuanShi.Engine
             Text = text;
         }
 
+        private EventView(EventView source, Dictionary<string, string> payload, string text)
+        {
+            Seq = source.Seq;
+            GameId = source.GameId;
+            Season = source.Season;
+            Phase = source.Phase;
+            ActorSeatId = source.ActorSeatId;
+            ControllerType = source.ControllerType;
+            EventType = source.EventType;
+            Visibility = source.Visibility;
+            Payload = new ReadOnlyDictionary<string, string>(
+                payload ?? new Dictionary<string, string>());
+            SourceActionId = source.SourceActionId;
+            Args = source.Args;
+            Text = text;
+        }
+
+        /// <summary>
+        /// Internal prompt projection used only by the opt-in diplomacy prompt: a copy of this view
+        /// with one payload key and the event's free text removed, so a player-written message or
+        /// proposal note cannot reach a prompt in a second, unsanitized copy. The canonical record
+        /// and every other seat-facing view are unchanged.
+        /// </summary>
+        internal EventView WithoutText(string payloadKey)
+        {
+            var payload = new Dictionary<string, string>(Payload);
+            if (!string.IsNullOrEmpty(payloadKey)) payload.Remove(payloadKey);
+            return new EventView(this, payload, null);
+        }
+
         /// <summary>Canonical record shape — byte-identical to <see cref="EventRecord.ToJson"/>.</summary>
         public string ToJson()
         {

@@ -74,6 +74,8 @@ namespace LuanShi.Engine
             sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
             sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
             sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
+            sb.Append(",\"diplomacy_enabled\":")
+              .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
               .Append(config != null && config.EffectiveVisibleMarchRoutes ? "true" : "false");
             Field(sb, "spatial_context_level",
@@ -97,14 +99,15 @@ namespace LuanShi.Engine
             bool rich = config != null && config.ExperimentActive;
             bool research = config != null && config.EnableResearch;
             bool spatial = config != null && config.SpatialContext != null && config.SpatialContext.IsEnabled;
+            bool diplomacy = config != null && config.EnableDiplomacy;
             LlmPersona versionPersona = personas ? new LlmPersona("summary", "summary", "", "", false) : null;
             Field(sb, "prompt_version",
-                PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial),
+                PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial, diplomacy),
                 config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
-                    : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial),
+                    : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);

@@ -307,6 +307,15 @@ namespace LuanShi.Engine
             if (attackOn && !TryPlanAttacks(out attacks, out string attackFailure))
             { FinishFailed(attackFailure, EndReason.HostError); return; }
 
+            // Opt-in diplomacy: the player-written messages and notes are rendered once, bounded and
+            // neutralised, and the same text is stripped from the observation this prompt carries.
+            // Building the section first means it reads the seat's own unfiltered copies; the
+            // projection is a new observation, so the host's snapshot is never mutated.
+            bool diplomacy = _config.EnableDiplomacy;
+            string diplomacySection = diplomacy
+                ? PromptBuilder.DiplomacyMessagesSection(observation) : null;
+            if (diplomacy) observation = PromptBuilder.ProjectDiplomacyObservation(observation);
+
             // The prompt carries a bounded event history; record exactly that same JSON, not the full one.
             string observationJson = PromptBuilder.BoundedObservationJson(observation);
             // The private result is consumed by exactly this prompt; it never survives into a
@@ -329,12 +338,12 @@ namespace LuanShi.Engine
             if (spatialOn && spatialOpts.ProviderCharLimit > 0)
                 promptLimit = Math.Min(promptLimit, spatialOpts.ProviderCharLimit);
             string system = PromptBuilder.CombinedSystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn);
+                deliberation, rich, research, spatialOn, diplomacy);
             string promptVersion = PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn);
+                deliberation, rich, research, spatialOn, diplomacy);
             string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn);
-            List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research);
+                deliberation, rich, research, spatialOn, diplomacy);
+            List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research, diplomacy);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             int requestsLeft = RemainingRequests();
@@ -375,6 +384,13 @@ namespace LuanShi.Engine
                         inquiry, persona, research);
                 LastSpatialTruncation = spatialReport;
             }
+            // The bounded diplomacy section sits before the candidate list, so the model reads the
+            // untrusted text immediately next to the legal orders. It is added after the builder (and
+            // after the rich assembler's own truncation ladder): a section that cannot fit still
+            // fails closed on the size check below. The version line is then aligned with the system
+            // prompt and the run record, because the shared builders carry no diplomacy flag.
+            if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
+            if (diplomacy) user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
             if (system.Length + user.Length > promptLimit)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 

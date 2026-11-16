@@ -186,6 +186,10 @@ namespace LuanShi.Engine
             }
 
             Observation obs = _engine.Observe(req.SeatId);
+            // A recorded diplomacy run has its player-written text projected out of the dispatched
+            // observation JSON, so the same projection is applied here before hashing and parsing.
+            bool diplomacy = PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
+            if (diplomacy) obs = PromptBuilder.ProjectDiplomacyObservation(obs);
             string obsJson = PromptBuilder.BoundedObservationJson(obs);
             string obsHash = Hash(obsJson);
             if (string.Equals(obsHash, req.ObservationHash, StringComparison.Ordinal)) _observationHashesMatched++;
@@ -199,7 +203,7 @@ namespace LuanShi.Engine
                 }
             }
 
-            ParseResult parsed = LlmActionParser.Parse(req.RawModelText);
+            ParseResult parsed = LlmActionParser.Parse(req.RawModelText, false, false, diplomacy);
             bool isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
             bool replayedOk = false;
 
@@ -374,7 +378,10 @@ namespace LuanShi.Engine
         private static bool IsEndTurnRecord(ReplayRequestRecord req)
         {
             if (req == null) return false;
-            ParseResult p = LlmActionParser.Parse(req.RawModelText);
+            // Same feature flags as the replay step's own parse, derived from the record's identity, so
+            // a diplomacy reply is classified exactly as it will be re-parsed.
+            ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,
+                PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion));
             return p.Ok && p.Action != null && p.Action.EndTurn;
         }
 

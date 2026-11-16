@@ -81,6 +81,11 @@ namespace LuanShi.Engine
                 // A fresh, seat-filtered observation per inquiry. A foreign or missing snapshot is
                 // reported as a bounded failure, never used.
                 Observation fresh = _host == null ? null : _host.Observe();
+                // With the diplomacy orders enabled, player-written text is projected out of the
+                // tool context too: the prompt's bounded untrusted section is the only copy a model
+                // may read, so a history search cannot hand back the raw string.
+                if (fresh != null && _config != null && _config.EnableDiplomacy)
+                    fresh = PromptBuilder.ProjectDiplomacyObservation(fresh);
                 if (fresh == null
                     || !string.Equals(fresh.SeatId, _seatId, StringComparison.Ordinal)
                     || !string.Equals(fresh.GameId, _deliberationMatchId, StringComparison.Ordinal))
