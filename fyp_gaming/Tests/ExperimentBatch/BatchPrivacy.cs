@@ -24,9 +24,9 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("requests_without_witness")] public int RequestsWithoutWitness { get; set; }
         /// <summary>Sum over requests of how many tokens were hidden from that seat at that dispatch (each one was searched for in the prompt).</summary>
         [JsonPropertyName("hidden_token_checks")] public int HiddenTokenChecks { get; set; }
-        /// <summary>A token hidden at dispatch that the seat had NEVER been shown, yet appears in that request's prompt.</summary>
+        /// <summary>A token hidden at dispatch that no earlier (or this) prompt to the seat actually contained while it was visible or scouted, yet appears in this request's prompt.</summary>
         [JsonPropertyName("leaks")] public List<string> Leaks { get; set; } = new List<string>();
-        /// <summary>A token hidden now but shown or scouted at this or an earlier dispatch to the same seat, mentioned in the prompt: legitimate retained knowledge, counted not judged.</summary>
+        /// <summary>A token hidden now whose text was delivered to the same seat in an earlier prompt while it was visible or scouted: retained knowledge, counted not judged.</summary>
         [JsonPropertyName("retained_known_mentions")] public int RetainedKnownMentions { get; set; }
     }
 
@@ -34,11 +34,12 @@ namespace LuanShi.ExperimentBatch
     {
         public const string Scope =
             "Per request: every other-seat city id, city name and army id that the engine's seat-filtered Observe(seat) at that "
-            + "dispatch showed neither as visible nor as a scouting report, and that the seat had not been shown at an earlier "
-            + "dispatch, is searched for as plain text in that request's system and user prompt. Proves absence of those exact "
-            + "strings only. Does not prove the observation filter itself is right (Observe is the oracle), nor covers numbers, "
-            + "treaty or event text, paraphrases, or neutral cities. A token shown earlier and hidden again is retained "
-            + "knowledge, not a leak; whether its retained wording is accurate or stale is not judged here.";
+            + "dispatch showed neither as visible nor as a scouting report is searched for as plain text in that request's system "
+            + "and user prompt. A token is 'delivered' to a seat only when a prompt sent to that seat contained its text while the "
+            + "observation had it visible or scouted; being visible in an observation alone is not delivery. Proves absence of "
+            + "those exact strings only. Does not prove the observation filter itself is right (Observe is the oracle), nor covers numbers, "
+            + "treaty or event text, paraphrases, or neutral cities. A hidden token whose text was delivered earlier is retained "
+            + "knowledge, not a leak; delivery is judged on that seat's prompt text only, so it cannot show that the model used or remembered it; whether its retained wording is accurate or stale is not judged here.";
 
         /// <summary>The seat's view of every other seat's entities right now, from the same Observe(seat) the production host calls.</summary>
         public static DispatchWitness Witness(GameEngine engine, string seat)
@@ -61,7 +62,7 @@ namespace LuanShi.ExperimentBatch
             return witness;
         }
 
-        /// <summary>Scans captures in dispatch order. A token counts as known to a seat once any of its dispatches showed it visible or scouted.</summary>
+        /// <summary>Scans captures in dispatch order. A token counts as delivered to a seat once a prompt to that seat contained its text while it was visible or scouted.</summary>
         public static PrivacyEvidence Scan(IEnumerable<ExchangeCapture> captures)
         {
             var e = new PrivacyEvidence();
@@ -72,17 +73,19 @@ namespace LuanShi.ExperimentBatch
                 if (c.Witness == null) { e.RequestsWithoutWitness++; continue; }
                 if (!known.TryGetValue(c.Seat, out HashSet<string> seatKnown)) known[c.Seat] = seatKnown = new HashSet<string>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, string> t in c.Witness.Tokens)
-                    if (t.Value != DispatchWitness.Hidden) seatKnown.Add(t.Key);
+                    if (t.Value != DispatchWitness.Hidden && Contains(c, t.Key)) seatKnown.Add(t.Key);   // observation alone is not delivery
                 foreach (KeyValuePair<string, string> t in c.Witness.Tokens)
                 {
                     if (t.Value != DispatchWitness.Hidden) continue;
                     e.HiddenTokenChecks++;
-                    if (!(c.System ?? "").Contains(t.Key) && !(c.User ?? "").Contains(t.Key)) continue;
+                    if (!Contains(c, t.Key)) continue;
                     if (seatKnown.Contains(t.Key)) e.RetainedKnownMentions++;
-                    else e.Leaks.Add(c.Seat + " request " + c.SeatRequest + " shows '" + t.Key + "', hidden at dispatch and never shown to this seat");
+                    else e.Leaks.Add(c.Seat + " request " + c.SeatRequest + " shows '" + t.Key + "', hidden at dispatch and not delivered to this seat in any earlier prompt");
                 }
             }
             return e;
         }
+
+        private static bool Contains(ExchangeCapture c, string token) => (c.System ?? "").Contains(token) || (c.User ?? "").Contains(token);
     }
 }

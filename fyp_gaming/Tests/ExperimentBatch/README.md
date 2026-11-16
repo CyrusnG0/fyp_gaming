@@ -116,9 +116,10 @@ prompt sections, `finish_reason=length`, empty replies, unknown cost and reasoni
   dropped and keeps the largest prompt size. In the example pair every treatment request truncates the move list.
 - **Privacy, per dispatch.** At every dispatch the batch records what that seat's own `Observe(seat)` showed of the other
   seats' cities and armies (visible, scouted or hidden). A city id, city name or army id that was hidden at that dispatch
-  and had never been shown to the seat must not appear in that request's prompt; any hit fails the pair. One that was shown
-  earlier and is hidden again is retained knowledge: it is counted (`retained_known_mentions`), not called a leak, and
-  whether its wording is stale is not judged. This proves absence of those exact strings only. It trusts `Observe` as the
+  and had not been delivered to the seat must not appear in that request's prompt; any hit fails the pair. "Delivered"
+  means a prompt sent to that seat contained the text while the observation had it visible or scouted; being visible in an
+  observation alone is not delivery. A hidden one that was delivered earlier is retained knowledge: it is counted
+  (`retained_known_mentions`), not called a leak, and whether its wording is stale is not judged. This proves absence of those exact strings only. It trusts `Observe` as the
   oracle, and does not cover numbers, treaty or event text, paraphrase or neutral cities (`BatchPrivacy.Scope`).
 - **World digest.** A deterministic digest walks every public field and property reachable from `GameState` (factions,
   diplomacy, cities, armies, watch towers and the whole map: size, walkable, costs, neighbour tables) plus the balance

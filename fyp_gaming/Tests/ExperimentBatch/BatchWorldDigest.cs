@@ -34,6 +34,14 @@ namespace LuanShi.ExperimentBatch
             return BatchPlan.Sha256(sb.ToString());
         }
 
+        /// <summary>Digest of any object graph with the same walk; lets the set and dictionary rules be tested on their own.</summary>
+        public static string Fingerprint(object value)
+        {
+            var sb = new StringBuilder();
+            Walk("value", value, sb, new List<object>(), 0);
+            return BatchPlan.Sha256(sb.ToString());
+        }
+
         private static void Walk(string path, object value, StringBuilder sb, List<object> ancestors, int depth)
         {
             sb.Append(path).Append('=');
@@ -64,14 +72,16 @@ namespace LuanShi.ExperimentBatch
         private static void Sequence(string path, Type type, IEnumerable items, StringBuilder sb, List<object> ancestors, int depth)
         {
             var parts = new List<string>();
+            bool set = IsSet(type);
             int index = 0;
             foreach (object item in items)
             {
                 var one = new StringBuilder();
-                Walk(path + "[" + (index++) + "]", item, one, ancestors, depth + 1);
+                // A set member carries no position: an index in its path would make the sorted text depend on enumeration order.
+                Walk(path + (set ? "{}" : "[" + (index++) + "]"), item, one, ancestors, depth + 1);
                 parts.Add(one.ToString());
             }
-            if (IsSet(type)) parts.Sort(StringComparer.Ordinal);   // set order is not part of the state
+            if (set) parts.Sort(StringComparer.Ordinal);   // set order is not part of the state
             sb.Append("[count=").Append(parts.Count).Append("]\n");
             foreach (string part in parts) sb.Append(part);
         }

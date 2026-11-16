@@ -46,6 +46,16 @@ namespace LuanShi.ExperimentBatch
             GameEngine other = BatchWorld.Create(m, "digest", 1);
             log.Check(BatchWorld.WorldDigest(other) == baseline,
                 "documented scope: the private RNG stream is NOT part of the digest (a different seed with the same state gives the same value)");
+            // Two equal sets that enumerate differently (a freed slot is reused), then a set with one member changed.
+            HashSet<string> s1 = new HashSet<string> { "a", "b", "c" }, s2 = new HashSet<string> { "b", "c" };
+            s1.Remove("a"); s1.Add("d"); s2.Add("d");
+            log.Check(s1.SetEquals(s2) && !s1.SequenceEqual(s2), "precondition: the two sets are equal but enumerate in different orders");
+            log.Check(BatchWorldDigest.Fingerprint(s1) == BatchWorldDigest.Fingerprint(s2), "equal sets inserted in different orders hash identically");
+            log.Check(BatchWorldDigest.Fingerprint(new Dictionary<string, HashSet<string>> { { "k", s1 } }) == BatchWorldDigest.Fingerprint(new Dictionary<string, HashSet<string>> { { "k", s2 } }),
+                "the same holds for a set nested in another structure");
+            s2.Remove("d"); s2.Add("e");
+            log.Check(BatchWorldDigest.Fingerprint(s1) != BatchWorldDigest.Fingerprint(s2), "a changed set member changes the digest");
+            log.Check(BatchWorldDigest.Fingerprint(new List<string> { "x", "y" }) != BatchWorldDigest.Fingerprint(new List<string> { "y", "x" }), "list order still matters");
             log.Check(BatchWorldDigest.Scope.Contains("map topology and costs") && BatchWorldDigest.Scope.Contains("excludes private fields"),
                 "the scope text says what is and is not covered");
             BatchManifest manifest = Example();
@@ -105,6 +115,24 @@ namespace LuanShi.ExperimentBatch
             var scouted = new List<ExchangeCapture> { Dispatch("seat-0", 1, "scouting says X", "X=scouted"), Dispatch("seat-0", 2, "report on X", "X=hidden") };
             e = BatchPrivacy.Scan(scouted);
             log.Check(e.Leaks.Count == 0 && e.RetainedKnownMentions == 1, "a scouted entity counts as shown");
+
+            // X was VISIBLE in an observation at request 1 but the prompt never contained it; naming it later while hidden is a leak.
+            var undelivered = new List<ExchangeCapture>
+            {
+                Dispatch("seat-0", 1, "nothing here", "X=visible"),
+                Dispatch("seat-0", 2, "the rival X again", "X=hidden"),
+            };
+            e = BatchPrivacy.Scan(undelivered);
+            log.Check(e.Leaks.Count == 1 && e.RetainedKnownMentions == 0 && e.Leaks[0].Contains("'X'"),
+                "visible in an earlier observation but absent from that prompt is not prior delivery: the later hidden mention is a leak");
+            undelivered[0].User = "X is in view";
+            e = BatchPrivacy.Scan(undelivered);
+            log.Check(e.Leaks.Count == 0 && e.RetainedKnownMentions == 1, "once a prompt actually carried X while visible, the later mention is retained knowledge");
+            undelivered.Add(Dispatch("seat-1", 1, "the rival X", "X=hidden"));
+            e = BatchPrivacy.Scan(undelivered);
+            log.Check(e.Leaks.Count == 1 && e.Leaks[0].StartsWith("seat-1"), "delivery to one seat does not excuse another seat");
+            log.Check(BatchPrivacy.Scope.Contains("observation alone is not delivery") || BatchPrivacy.Scope.Contains("visible in an observation alone is not delivery"),
+                "the scope text says an observation alone is not delivery");
 
             captures.Add(new ExchangeCapture { Seat = "seat-0", SeatRequest = 4, System = "s", User = "u" });
             e = BatchPrivacy.Scan(captures);
