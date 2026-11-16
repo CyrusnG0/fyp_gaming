@@ -143,9 +143,23 @@ namespace LuanShi.ControlledScenarios
     /// <summary>Human/machine summary. An incomplete or unknown-usage run is never printed as a pass.</summary>
     public static class CsReport
     {
+        /// <summary>
+        /// First line of every text report. Live output is model-written and must never be read as
+        /// a fixture; fake output is plumbing evidence only.
+        /// </summary>
+        public static string ProviderBanner(string kind, string model, bool live)
+            => live
+                ? "PROVIDER: LIVE " + kind + " " + model
+                    + " -- model-written output, NOT fixtures\n"
+                : "PROVIDER: FAKE (scripted fixtures, plumbing only)\n";
+
         public static string Text(CsRunResult result)
         {
             var sb = new StringBuilder();
+            sb.Append(ProviderBanner(result.ProviderKind ?? "unknown",
+                result.ProviderModel ?? "unknown", result.ProviderLive));
+            if (result.ProviderLive)
+                sb.Append("limits: ").Append(CsLimits.LimitsNote).Append('\n');
             sb.Append("run ").Append(result.RunId).Append("  status=").Append(result.Status);
             sb.Append("  scenarios=").Append(result.Scenarios.Count);
             sb.Append("  requests=").Append(result.Requests);

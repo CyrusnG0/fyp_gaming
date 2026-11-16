@@ -194,6 +194,7 @@ namespace LuanShi.ControlledScenarios
                     { "late_responses_discarded", s.LateResponsesDiscarded },
                     { "settings_hash", s.SettingsHash },
                     { "files", s.Files },
+                    { "provider", ScenarioProviderBlock(s, result, git) },
                 });
             }
             var manifestOut = new Dictionary<string, object>
@@ -207,9 +208,24 @@ namespace LuanShi.ControlledScenarios
                 { "provider", new Dictionary<string, object>
                     {
                         { "kind", result.ProviderKind ?? manifest.Provider.Kind },
-                        { "model", manifest.Provider.Model },
+                        { "model", result.ProviderModel ?? manifest.Provider.Model },
                         { "live", result.ProviderLive },
-                        { "status_note", "no network; fake scripts are plumbing evidence, not model behaviour" },
+                        { "base_url_display", result.ProviderBaseUrlDisplay },
+                        { "env_var_names", result.ProviderEnvVarNames },
+                        { "max_output_tokens", result.ProviderMaxOutputTokens },
+                        { "request_timeout_ms", manifest.RunCeilings?.RequestTimeoutMs },
+                        { "max_requests", manifest.RunCeilings?.MaxRunRequests },
+                        { "max_wall_seconds", manifest.RunCeilings?.MaxRunWallSeconds },
+                        { "effective_max_requests", manifest.RunCeilings?.MaxRunRequests },
+                        { "effective_max_wall_seconds", manifest.RunCeilings?.MaxRunWallSeconds },
+                        { "commit", git.HeadCommit ?? CsGitInfo.BaseCommit },
+                        { "dirty", result.DirtyFiles.Count > 0 },
+                        // Scenario-specific identity lives in each scenario entry below.
+                        { "seed", null }, { "scenario_id", null }, { "settings_hash", null },
+                        { "limits_note", CsLimits.LimitsNote },
+                        { "status_note", result.ProviderLive
+                            ? "live provider prepared; model-written output, NOT fixtures"
+                            : "no network; fake scripts are plumbing evidence, not model behaviour" },
                     } },
                 { "scenarios", scenarios },
                 { "run_ceilings", new Dictionary<string, object>
@@ -227,7 +243,7 @@ namespace LuanShi.ControlledScenarios
                         { "input_tokens", result.InputTokens },
                         { "output_tokens", result.OutputTokens },
                         { "unknown_requests", result.UnknownUsageRequests },
-                        { "source", "fake_deterministic" },
+                        { "source", result.ProviderLive ? "provider_reported" : "fake_deterministic" },
                     } },
                 { "status", result.Status }, { "detail", result.Detail },
                 { "late_responses_discarded", result.LateResponsesDiscarded },
@@ -235,6 +251,37 @@ namespace LuanShi.ControlledScenarios
             };
             File.WriteAllText(Path.Combine(runDir, "run-manifest.json"),
                 JsonSerializer.Serialize(manifestOut, CsJson.Indented), new UTF8Encoding(false));
+        }
+
+        /// <summary>Per-scenario provider identity, repeated so every manifest entry is self-contained.</summary>
+        private static Dictionary<string, object> ScenarioProviderBlock(CsScenarioResult scenario,
+            CsRunResult result, CsGitInfo git)
+        {
+            return new Dictionary<string, object>
+            {
+                { "kind", scenario.ProviderKind ?? result.ProviderKind },
+                { "model", scenario.ProviderModel ?? result.ProviderModel },
+                { "live", scenario.ProviderKind == null ? result.ProviderLive : scenario.ProviderLive },
+                { "base_url_display", result.ProviderBaseUrlDisplay },
+                { "env_var_names", result.ProviderEnvVarNames },
+                { "max_output_tokens", scenario.MaxOutputTokens > 0
+                    ? scenario.MaxOutputTokens : result.ProviderMaxOutputTokens },
+                { "request_timeout_ms", scenario.RequestTimeoutMs > 0
+                    ? scenario.RequestTimeoutMs : (int?)null },
+                { "max_requests", scenario.EffectiveMaxRequests > 0
+                    ? scenario.EffectiveMaxRequests : (int?)null },
+                { "max_wall_seconds", scenario.EffectiveWallSeconds > 0
+                    ? scenario.EffectiveWallSeconds : (int?)null },
+                { "effective_max_requests", scenario.EffectiveMaxRequests > 0
+                    ? scenario.EffectiveMaxRequests : (int?)null },
+                { "effective_max_wall_seconds", scenario.EffectiveWallSeconds > 0
+                    ? scenario.EffectiveWallSeconds : (int?)null },
+                { "commit", git.HeadCommit ?? CsGitInfo.BaseCommit },
+                { "dirty", result.DirtyFiles.Count > 0 },
+                { "seed", scenario.Seed }, { "scenario_id", scenario.ScenarioId },
+                { "settings_hash", scenario.SettingsHash },
+                { "limits_note", CsLimits.LimitsNote },
+            };
         }
 
         private static void WriteJson(string directory, string name, object value)

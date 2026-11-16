@@ -12,16 +12,36 @@ namespace LuanShi.ControlledScenarios
     // One scenario inside the whole run: staged setup, fake scripts, bounded spectator loop, evidence.
     public static partial class CsRunner
     {
+        /// <summary>
+        /// Compatibility overload for existing callers and tests. It applies the same selection
+        /// gate, so asking for a live kind here is refused rather than silently made offline.
+        /// </summary>
         public static CsScenarioResult RunScenario(CsScenarioSpec spec, string runDirectory,
             string providerModel, CsGitInfo git, string runId, CsRunBudget budget = null,
             string providerKind = "fake", CsRunCeilings runCeilings = null)
         {
+            IScenarioProvider provider = CsProviderFactory.Create(providerKind, providerModel);
+            return RunScenario(spec, runDirectory, provider, git, runId, budget, runCeilings,
+                runCeilings?.MaxOutputTokens);
+        }
+
+        public static CsScenarioResult RunScenario(CsScenarioSpec spec, string runDirectory,
+            IScenarioProvider provider, CsGitInfo git, string runId, CsRunBudget budget = null,
+            CsRunCeilings runCeilings = null, int? maxOutputTokens = null)
+        {
+            if (provider == null) throw new ArgumentNullException(nameof(provider));
+            int outputTokens = maxOutputTokens ?? 400;
+            if (provider.IsLive && outputTokens <= 0)
+                throw new CsLiveConfigException("live runs require run_ceilings.max_output_tokens > 0");
             string scenarioDir = Path.Combine(runDirectory, spec.ScenarioId);
             Directory.CreateDirectory(scenarioDir);
             var result = new CsScenarioResult
             {
                 ScenarioId = spec.ScenarioId, Seed = spec.Seed, StudySeat = spec.StudySeat,
                 Directory = scenarioDir, Status = CsStatus.Failed, SeasonsPlanned = spec.Seasons,
+                ProviderKind = provider.Kind, ProviderModel = provider.Model,
+                ProviderLive = provider.IsLive, MaxOutputTokens = outputTokens,
+                RequestTimeoutMs = spec.RequestTimeoutMs,
             };
             var clock = Stopwatch.StartNew();
             budget ??= CsRunBudget.Unbounded();
@@ -57,13 +77,40 @@ namespace LuanShi.ControlledScenarios
                 bool runWallConstrained = runRemainingMs < specWallMs;
                 long scenarioDeadlineMs = scenarioStartMs + effectiveWallMs;
 
-                IScenarioProvider provider = CsProviderFactory.Create(providerKind, providerModel);
-                LlmConfig config = CsSettings.Build(spec, provider.Model, effectiveRequests, effectiveWallSeconds);
-                result.SettingsHash = CsSettings.Hash(spec, config);
+                LlmConfig config = provider.IsLive
+                    ? CsSettings.BuildLive(spec, provider.Model, effectiveRequests,
+                        effectiveWallSeconds, outputTokens)
+                    : CsSettings.Build(spec, provider.Model, effectiveRequests,
+                        effectiveWallSeconds, outputTokens);
+                string baseUrlDisplay = provider.IsLive
+                    ? CsLiveEnvironment.DisplayBaseUrl(config.BaseUrl) : null;
+                result.SettingsHash = provider.IsLive
+                    ? CsSettings.HashLive(spec, config, baseUrlDisplay)
+                    : CsSettings.Hash(spec, config);
+                result.EffectiveMaxRequests = effectiveRequests;
+                result.EffectiveWallSeconds = effectiveWallSeconds;
+                var providerBlock = new Dictionary<string, object>
+                {
+                    { "kind", provider.Kind }, { "model", provider.Model },
+                    { "live", provider.IsLive }, { "base_url_display", baseUrlDisplay },
+                    { "env_var_names", provider.IsLive ? CsLiveEnvironment.EnvVarNames : Array.Empty<string>() },
+                    { "max_output_tokens", outputTokens },
+                    { "request_timeout_ms", spec.RequestTimeoutMs },
+                    { "max_requests", effectiveRequests },
+                    { "max_wall_seconds", effectiveWallSeconds },
+                    { "effective_max_requests", effectiveRequests },
+                    { "effective_max_wall_seconds", effectiveWallSeconds },
+                    { "commit", git.HeadCommit ?? CsGitInfo.BaseCommit },
+                    { "dirty", git.DirtyFiles.Count > 0 }, { "seed", spec.Seed },
+                    { "scenario_id", spec.ScenarioId },
+                    { "settings_hash", result.SettingsHash },
+                    { "limits_note", CsLimits.LimitsNote },
+                };
                 WriteJson(scenarioDir, "settings.json", new Dictionary<string, object>
                 {
                     { "scenario_id", spec.ScenarioId }, { "seed", spec.Seed },
                     { "settings_hash", result.SettingsHash },
+                    { "provider", providerBlock },
                     { "config_redacted", config.Redacted() },
                     { "flags", new Dictionary<string, object>
                         {
@@ -76,6 +123,7 @@ namespace LuanShi.ControlledScenarios
                             { "max_requests", effectiveRequests },
                             { "max_wall_seconds", effectiveWallSeconds },
                             { "request_timeout_ms", spec.RequestTimeoutMs },
+                            { "max_output_tokens", outputTokens },
                             { "declared_max_requests", spec.MaxRequests },
                             { "declared_max_wall_seconds", spec.MaxWallSeconds },
                         } },
@@ -102,7 +150,8 @@ namespace LuanShi.ControlledScenarios
                 var transport = new CsRecordingTransport(inner, context.ActiveSeatId, budget,
                     effectiveRequests, scenarioDeadlineMs,
                     seat => CsWorld.Capture(engine, seat, config, true),
-                    seat => CsWorld.Capture(engine, seat, config, false));
+                    seat => CsWorld.Capture(engine, seat, config, false),
+                    provider.IsLive);
 
                 var recorder = new CsEvidenceRecorder(scenarioDir)
                 {
@@ -167,6 +216,10 @@ namespace LuanShi.ControlledScenarios
                     ProviderKind = provider.Kind, ProviderModel = provider.Model,
                     ProviderLive = provider.IsLive,
                     UsageSource = provider.IsLive ? "provider_reported" : "fake_deterministic",
+                    ProviderBaseUrlDisplay = baseUrlDisplay,
+                    ProviderEnvVarNames = provider.IsLive
+                        ? new List<string>(CsLiveEnvironment.EnvVarNames) : new List<string>(),
+                    ProviderMaxOutputTokens = outputTokens,
                     Dirty = git.DirtyFiles.Count > 0, Seed = spec.Seed,
                     ScenarioMaxRequests = effectiveRequests, ScenarioWallSeconds = effectiveWallSeconds,
                     RequestTimeoutMs = spec.RequestTimeoutMs, PromptLimit = CsSettings.PromptLimit(config),
@@ -205,7 +258,8 @@ namespace LuanShi.ControlledScenarios
                 result.PrivacyLeaks = PrivacyLeaks(spec, captures);
                 WriteJson(scenarioDir, "result.json", ResultObject(result, captures));
                 File.WriteAllText(Path.Combine(scenarioDir, spec.ScenarioId + "-report.txt"),
-                    CsReport.ScenarioText(result), new UTF8Encoding(false));
+                    CsReport.ProviderBanner(provider.Kind, provider.Model, provider.IsLive)
+                        + CsReport.ScenarioText(result), new UTF8Encoding(false));
                 result.Files.Add(spec.ScenarioId + "-report.txt");
                 result.Files.Add("result.json");
             }

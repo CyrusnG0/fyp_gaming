@@ -176,10 +176,11 @@ namespace LuanShi.ControlledScenarios
         private static Dictionary<string, object> StateObject(CsDispatchCapture cap, CsRunLine run,
             List<string> unknown)
         {
-            // The run line is written after the runner handled the reply (including submitting an
-            // accepted action), so it is the authoritative after-state. The wrapper's post-response
-            // snapshot is the fallback when no run line exists.
-            CsWorldSnapshot after = run?.After ?? cap.After;
+            // Decision 8: only the run line is authoritative, because it is written after the
+            // runner processed the reply (including submitting an accepted action). Where no run
+            // line is joinable, after stays null and is named -- never borrowed from the snapshot
+            // taken when the provider returned, and never borrowed from another dispatch.
+            CsWorldSnapshot after = run?.After;
             if (cap.Before == null) unknown.Add("state.before");
             if (after == null) { unknown.Add("state.after"); unknown.Add("after_state"); }
             return new Dictionary<string, object>

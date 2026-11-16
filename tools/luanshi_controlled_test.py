@@ -3,8 +3,10 @@
 
     python3 tools/luanshi_controlled_test.py
 
-Every test builds a tiny synthetic run folder in a temp dir. Nothing here needs the C# project
-to be built, touches Tests/ControlledScenarios/, reads a credential or makes a network call.
+Every fake test builds a tiny synthetic run folder in a temp dir, except LiveAuditTests, which
+copies a saved fake run from runs/controlled-scenarios/ and relabels it in a temp dir. Nothing
+here needs the C# project to build, touches Tests/ControlledScenarios/, reads a credential or
+makes a network call.
 """
 import contextlib
 import copy
@@ -87,7 +89,8 @@ def make_dispatch(index, prompt, reply, turn_token):
         "request_index": index, "seat_request_index": index,
         "provider": {"kind": "fake", "model": "fake-model", "live": False,
                      "usage_source": "fake_deterministic"},
-        "settings": {"settings_hash": hex64("c"), "config_redacted": "{}",
+        "settings": {"settings_hash": hex64("c"),
+                     "config_redacted": "provider=fake; api_key=<missing>",
                      "flags": {"attack": False, "research": False,
                                "manual_lookup": False, "deliberation": False},
                      "ceilings": {"max_request_seconds": 30, "max_scenario_seconds": 60}},
@@ -185,6 +188,32 @@ def build_run(root, *, usage="known", dispatch_count=1, tokens=None,
     write_json(os.path.join(run_dir, "run-manifest.json"), manifest)
     write_lines(os.path.join(run_dir, "dispatches.ndjson"), dispatches)
     return run_dir, manifest, dispatches
+
+
+WORKTREE = os.path.dirname(HERE)
+RUNS_ROOT = os.path.join(WORKTREE, "runs", "controlled-scenarios")
+LIVE_ENV_NAMES = ["LUANSHI_LLM_API_KEY", "LUANSHI_LLM_BASE_URL", "LUANSHI_LLM_MODEL"]
+
+
+def find_fake_run():
+    """The most recent saved fake run, or LUANSHI_CONTROLLED_RUN when set."""
+    override = os.environ.get("LUANSHI_CONTROLLED_RUN")
+    if override and os.path.isfile(os.path.join(override, "run-manifest.json")):
+        return override
+    try:
+        names = sorted(os.listdir(RUNS_ROOT), reverse=True)
+    except OSError:
+        return None
+    for name in names:
+        candidate = os.path.join(RUNS_ROOT, name)
+        try:
+            manifest = schema.read_json(os.path.join(candidate, "run-manifest.json"))
+        except (OSError, ValueError):
+            continue
+        provider = manifest.get("provider") if isinstance(manifest, dict) else None
+        if isinstance(provider, dict) and provider.get("live") is False:
+            return candidate
+    return None
 
 
 class Fixture(unittest.TestCase):
@@ -319,6 +348,175 @@ class AuditTests(Fixture):
         write_json(os.path.join(scenario_dir, "script.json"), [{"text": "changed"}])
         self.assertTrue(any("script.json does not match" in p
                             for p in self.audit(run_dir)["problems"]))
+
+
+class LiveAuditTests(Fixture):
+    """Copy one real fake run, relabel it live, and assert each audit outcome.
+
+    Nothing here runs the provider or reads a credential: the copied fake evidence is only a
+    schema-valid skeleton whose labels and provider blocks are rewritten in a temp directory.
+    """
+
+    def setUp(self):
+        self.source = find_fake_run()
+        if self.source is None:
+            self.skipTest("no fake run under %s; run the fake runner first" % RUNS_ROOT)
+
+    def clone(self):
+        run_dir = os.path.join(self.tempdir(), "run")
+        shutil.copytree(self.source, run_dir)
+        return run_dir
+
+    def paths(self, run_dir):
+        return (os.path.join(run_dir, "run-manifest.json"),
+                os.path.join(run_dir, "dispatches.ndjson"))
+
+    def rewrite_live(self, run_dir):
+        manifest_path, dispatch_path = self.paths(run_dir)
+        manifest = schema.read_json(manifest_path)
+        manifest["provider"].update({
+            "kind": "openai-compatible", "model": "live-model", "live": True,
+            "base_url_display": "https://api.example.com/v1",
+            "env_var_names": list(LIVE_ENV_NAMES), "max_output_tokens": 512,
+            "request_timeout_ms": 25000, "effective_max_requests": 200,
+            "effective_max_wall_seconds": 120, "commit": "abc1234", "dirty": False,
+            "seed": None, "scenario_id": None, "settings_hash": None,
+        })
+        manifest["usage"]["source"] = "provider_reported"
+        for scenario in manifest.get("scenarios", []):
+            block = scenario.get("provider") if isinstance(scenario, dict) else None
+            if isinstance(block, dict):
+                block.update({
+                    "kind": "openai-compatible", "model": "live-model", "live": True,
+                    "base_url_display": "https://api.example.com/v1",
+                    "env_var_names": list(LIVE_ENV_NAMES), "max_output_tokens": 512,
+                    "request_timeout_ms": 25000, "effective_max_requests": 40,
+                    "effective_max_wall_seconds": 30, "commit": "abc1234", "dirty": False,
+                    "seed": scenario.get("seed"), "scenario_id": scenario.get("scenario_id"),
+                    "settings_hash": scenario.get("settings_hash"),
+                })
+        write_json(manifest_path, manifest)
+        rows = schema.read_lines(dispatch_path)
+        for row in rows:
+            block = row.setdefault("provider", {})
+            block.update({
+                "kind": "openai-compatible", "model": "live-model", "live": True,
+                "usage_source": "provider_reported",
+                "base_url_display": "https://api.example.com/v1",
+                "env_var_names": list(LIVE_ENV_NAMES), "max_output_tokens": 512,
+                "request_timeout_ms": 25000, "effective_max_requests": 40,
+                "effective_max_wall_seconds": 30, "commit": "abc1234", "dirty": False,
+                "seed": row.get("seed"), "scenario_id": row.get("scenario_id"),
+                "settings_hash": block.get("settings_hash"),
+            })
+            row["reply"]["source"] = "provider"
+        write_lines(dispatch_path, rows)
+        return manifest, rows
+
+    def test_live_labelled_run_is_consistent(self):
+        run_dir = self.clone()
+        self.rewrite_live(run_dir)
+        result = self.audit(run_dir)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["incomplete"], [])
+        self.assertEqual(audit.exit_code_of(result), 0)
+        self.assertTrue(any("cannot prove a live run was valid" in note
+                            for note in result["notes"]))
+
+    def test_live_fake_source_is_rejected(self):
+        run_dir = self.clone()
+        _manifest, rows = self.rewrite_live(run_dir)
+        rows[0]["reply"]["source"] = "fake_scripted"
+        write_lines(self.paths(run_dir)[1], rows)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("source" in problem and "fake_scripted" in problem
+                            for problem in problems))
+
+    def test_fake_run_provider_source_is_rejected(self):
+        run_dir = self.clone()
+        path = self.paths(run_dir)[1]
+        rows = schema.read_lines(path)
+        rows[0]["reply"]["source"] = "provider"
+        write_lines(path, rows)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("provider" in problem and "fake run" in problem
+                            for problem in problems))
+
+    def test_secret_value_is_rejected(self):
+        run_dir = self.clone()
+        self.rewrite_live(run_dir)
+        with open(os.path.join(run_dir, "credential-leak.txt"), "w", encoding="utf-8") as handle:
+            handle.write("token sk-ABCDEFGHIJKLMNOPQRST\n")
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("credential-like value" in problem for problem in problems))
+        self.assertTrue(all("ABCDEFGHIJKLMNOPQRST" not in problem for problem in problems))
+
+    def test_api_key_with_value_is_rejected(self):
+        run_dir = self.clone()
+        _manifest, rows = self.rewrite_live(run_dir)
+        rows[0]["settings"]["config_redacted"] = "provider=fake; api_key=sk-ABCDEFGHIJKLMNOPQRST"
+        write_lines(self.paths(run_dir)[1], rows)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("credential-like value" in problem for problem in problems))
+        self.assertTrue(any("must show api_key" in problem for problem in problems))
+
+    def test_config_redacted_requires_allowed_form(self):
+        run_dir = self.clone()
+        path = self.paths(run_dir)[1]
+        rows = schema.read_lines(path)
+        rows[0]["settings"]["config_redacted"] = "{}"
+        write_lines(path, rows)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("must show api_key=<set> or api_key=<missing>" in problem
+                            for problem in problems))
+
+    def test_live_cost_claim_is_rejected(self):
+        run_dir = self.clone()
+        self.rewrite_live(run_dir)
+        with open(os.path.join(run_dir, "cost-report.txt"), "w", encoding="utf-8") as handle:
+            handle.write("Estimated cost: USD 12.34\n")
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("USD figure" in problem or "dollar-cap claim" in problem
+                            for problem in problems))
+
+    def test_live_requires_positive_output_token_limit(self):
+        run_dir = self.clone()
+        _manifest, rows = self.rewrite_live(run_dir)
+        manifest_path, dispatch_path = self.paths(run_dir)
+        manifest = schema.read_json(manifest_path)
+        manifest["provider"]["max_output_tokens"] = 0
+        write_json(manifest_path, manifest)
+        for row in rows:
+            row["provider"]["max_output_tokens"] = 0
+        write_lines(dispatch_path, rows)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("max_output_tokens" in problem and "positive" in problem
+                            for problem in problems))
+
+    def test_live_unknown_usage_is_counted_not_zero(self):
+        run_dir = self.clone()
+        _manifest, rows = self.rewrite_live(run_dir)
+        manifest_path, dispatch_path = self.paths(run_dir)
+        rows[0]["reply"]["input_tokens"] = None
+        rows[0]["reply"]["output_tokens"] = None
+        unknown = rows[0]["reply"].setdefault("unknown_fields", [])
+        for field in ("input_tokens", "output_tokens"):
+            if field not in unknown:
+                unknown.append(field)
+        write_lines(dispatch_path, rows)
+        manifest = schema.read_json(manifest_path)
+        manifest["usage"] = {"input_tokens": None, "output_tokens": None,
+                             "unknown_requests": 1, "source": "provider_reported"}
+        write_json(manifest_path, manifest)
+        result = self.audit(run_dir)
+        self.assertEqual(result["problems"], [])
+        self.assertTrue(any("counted as unknown, not zero" in note for note in result["notes"]))
+
+        manifest["usage"]["input_tokens"] = 0
+        write_json(manifest_path, manifest)
+        problems = self.audit(run_dir)["problems"]
+        self.assertTrue(any("null, never zero" in problem or "zero total" in problem
+                            for problem in problems))
 
 
 class ProviderStatusTests(unittest.TestCase):

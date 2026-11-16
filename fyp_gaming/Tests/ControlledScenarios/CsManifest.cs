@@ -54,6 +54,11 @@ namespace LuanShi.ControlledScenarios
         [JsonPropertyName("max_scenario_requests")] public int? MaxScenarioRequests { get; set; }
         [JsonPropertyName("max_scenario_wall_seconds")] public int? MaxScenarioWallSeconds { get; set; }
         [JsonPropertyName("request_timeout_ms")] public int? RequestTimeoutMs { get; set; }
+        /// <summary>
+        /// Optional output-token ceiling. The fake provider defaults to 400 when absent (so its
+        /// settings hash is unchanged); the live provider requires a finite value in 1..16384.
+        /// </summary>
+        [JsonPropertyName("max_output_tokens")] public int? MaxOutputTokens { get; set; }
         /// <summary>Only "report" is implemented: an unknown total is reported, never treated as zero.</summary>
         [JsonPropertyName("unknown_usage_policy")] public string UnknownUsagePolicy { get; set; }
     }
@@ -68,8 +73,12 @@ namespace LuanShi.ControlledScenarios
 
     public sealed class CsProviderManifest
     {
-        /// <summary>"fake" is the only accepted kind in this task; live kinds are refused.</summary>
+        /// <summary>"fake" or "openai-compatible"; an unknown kind is refused.</summary>
         [JsonPropertyName("kind")] public string Kind { get; set; }
+        /// <summary>
+        /// Fake: any non-empty model. Live: the literal "from-env" or a value that must match
+        /// LUANSHI_LLM_MODEL exactly (the equality check is made by the run, after the env read).
+        /// </summary>
         [JsonPropertyName("model")] public string Model { get; set; }
     }
 
@@ -128,14 +137,17 @@ namespace LuanShi.ControlledScenarios
             if (manifest == null) { errors.Add("manifest is empty"); return errors; }
             if (manifest.Schema != SchemaId)
                 errors.Add("schema must be " + SchemaId);
+            bool live = false;
             if (manifest.Provider == null) errors.Add("provider block is required");
             else
             {
                 if (string.IsNullOrWhiteSpace(manifest.Provider.Kind))
                     errors.Add("provider.kind is required");
-                else if (manifest.Provider.Kind != "fake")
-                    errors.Add("provider.kind '" + manifest.Provider.Kind
-                        + "' is refused: this build accepts only 'fake' and makes no live call");
+                else if (manifest.Provider.Kind != "fake"
+                    && manifest.Provider.Kind != "openai-compatible")
+                    errors.Add("unknown provider.kind '" + manifest.Provider.Kind
+                        + "'; accepted kinds are 'fake' and 'openai-compatible'");
+                else live = manifest.Provider.Kind == "openai-compatible";
                 if (string.IsNullOrWhiteSpace(manifest.Provider.Model))
                     errors.Add("provider.model is required");
             }
@@ -150,6 +162,18 @@ namespace LuanShi.ControlledScenarios
                 Positive(errors, "run_ceilings.max_scenario_requests", c.MaxScenarioRequests);
                 Positive(errors, "run_ceilings.max_scenario_wall_seconds", c.MaxScenarioWallSeconds);
                 Positive(errors, "run_ceilings.request_timeout_ms", c.RequestTimeoutMs);
+                if (live)
+                {
+                    // A live request must be bounded in output tokens, or the wrapper refuses it.
+                    if (!c.MaxOutputTokens.HasValue)
+                        errors.Add("run_ceilings.max_output_tokens is required for the live provider");
+                    else if (c.MaxOutputTokens.Value <= 0)
+                        errors.Add("run_ceilings.max_output_tokens must be a positive integer");
+                    else if (c.MaxOutputTokens.Value > CsLimits.MaxOutputTokensCeiling)
+                        errors.Add("run_ceilings.max_output_tokens must not exceed "
+                            + CsLimits.MaxOutputTokensCeiling);
+                }
+                else OptionalPositive(errors, "run_ceilings.max_output_tokens", c.MaxOutputTokens);
                 if (c.UnknownUsagePolicy != "report")
                     errors.Add("run_ceilings.unknown_usage_policy must be 'report' (unknown usage is never counted as zero)");
             }
@@ -229,8 +253,10 @@ namespace LuanShi.ControlledScenarios
     }
 
     /// <summary>
-    /// Effective production configuration for one scenario and its reproducibility identity. Only
-    /// explicit ceilings are set; the API key is never read (a new LlmConfig, not LlmConfig.Load).
+    /// Effective production configuration for one scenario and its reproducibility identity. The
+    /// fake path constructs a new config and reads no key. The live path starts from
+    /// <see cref="LlmConfig.Load"/> (the only path that carries the key to the transport) and
+    /// overwrites the same public ceiling/flag fields.
     /// </summary>
     internal static class CsSettings
     {
@@ -244,6 +270,11 @@ namespace LuanShi.ControlledScenarios
         /// </summary>
         public static LlmConfig Build(CsScenarioSpec spec, string model, int? effectiveMaxRequests,
             int? effectiveWallSeconds)
+            => Build(spec, model, effectiveMaxRequests, effectiveWallSeconds, 400);
+
+        /// <summary>Fake config with an explicit output-token limit (400 when the manifest omits it).</summary>
+        public static LlmConfig Build(CsScenarioSpec spec, string model, int? effectiveMaxRequests,
+            int? effectiveWallSeconds, int maxOutputTokens)
         {
             return new LlmConfig
             {
@@ -258,11 +289,38 @@ namespace LuanShi.ControlledScenarios
                 MaxInvalidPerTurn = 2,
                 MaxTurnSeconds = effectiveWallSeconds ?? spec.MaxWallSeconds,
                 RequestTimeoutMs = spec.RequestTimeoutMs,
-                MaxOutputTokens = 400,
+                MaxOutputTokens = maxOutputTokens,
                 MaxTotalRequests = effectiveMaxRequests ?? spec.MaxRequests,
                 MaxInquiriesPerTurn = 4,
                 MaxInquiriesPerSession = 20,
             };
+        }
+
+        /// <summary>
+        /// Live config: starts from the environment-loaded config (so the key and base URL stay in
+        /// the private field and reach the same transport object) and then overwrites exactly the
+        /// fake path's public ceiling/flag fields.
+        /// </summary>
+        public static LlmConfig BuildLive(CsScenarioSpec spec, string model, int? effectiveMaxRequests,
+            int? effectiveWallSeconds, int maxOutputTokens)
+        {
+            LlmConfig config = LlmConfig.Load();
+            config.Provider = "openai-compatible";
+            config.Model = string.IsNullOrWhiteSpace(model) ? "from-env" : model;
+            config.EnableAttack = spec.EnableAttack;
+            config.EnableResearch = spec.EnableResearch;
+            config.EnableManualLookup = spec.EnableManualLookup;
+            config.EnableDeliberation = spec.EnableDeliberation;
+            config.MaxRequestsPerTurn = 6;
+            config.MaxActionsPerTurn = 5;
+            config.MaxInvalidPerTurn = 2;
+            config.MaxTurnSeconds = effectiveWallSeconds ?? spec.MaxWallSeconds;
+            config.RequestTimeoutMs = spec.RequestTimeoutMs;
+            config.MaxOutputTokens = maxOutputTokens;
+            config.MaxTotalRequests = effectiveMaxRequests ?? spec.MaxRequests;
+            config.MaxInquiriesPerTurn = 4;
+            config.MaxInquiriesPerSession = 20;
+            return config;
         }
 
         public static string Hash(CsScenarioSpec spec, LlmConfig config)
@@ -272,6 +330,39 @@ namespace LuanShi.ControlledScenarios
                 { "scenario_id", spec.ScenarioId },
                 { "provider", "fake" },
                 { "model", config.Model },
+                { "attack", config.EnableAttack },
+                { "research", config.EnableResearch },
+                { "manual_lookup", config.EnableManualLookup },
+                { "deliberation", config.EnableDeliberation },
+                { "max_requests_per_turn", config.MaxRequestsPerTurn },
+                { "max_actions_per_turn", config.MaxActionsPerTurn },
+                { "max_invalid_per_turn", config.MaxInvalidPerTurn },
+                { "max_turn_seconds", config.MaxTurnSeconds },
+                { "request_timeout_ms", config.RequestTimeoutMs },
+                { "max_output_tokens", config.MaxOutputTokens },
+                { "max_total_requests", config.MaxTotalRequests },
+                { "max_inquiries_per_turn", config.MaxInquiriesPerTurn },
+                { "max_inquiries_per_session", config.MaxInquiriesPerSession },
+                { "scenario_max_requests", spec.MaxRequests },
+                { "scenario_wall_seconds", spec.MaxWallSeconds },
+                { "prompt_limit", PromptLimit(config) },
+            };
+            return CsWorld.Sha256(JsonSerializer.Serialize(canonical, CsJson.Compact));
+        }
+
+        /// <summary>
+        /// Live identity. It includes the provider kind, resolved model, display-only base URL,
+        /// output-token limit and every effective ceiling, and NEVER the key or any query string.
+        /// </summary>
+        public static string HashLive(CsScenarioSpec spec, LlmConfig config, string baseUrlDisplay)
+        {
+            var canonical = new Dictionary<string, object>
+            {
+                { "scenario_id", spec.ScenarioId },
+                { "kind", "openai-compatible" },
+                { "provider", "openai-compatible" },
+                { "model", config.Model },
+                { "base_url_display", baseUrlDisplay },
                 { "attack", config.EnableAttack },
                 { "research", config.EnableResearch },
                 { "manual_lookup", config.EnableManualLookup },

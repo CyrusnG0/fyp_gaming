@@ -12,7 +12,28 @@ import re
 MANIFEST_SCHEMA = "luanshi-controlled-scenarios/1"
 DISPATCH_SCHEMA = "luanshi-controlled-dispatch/1"
 SECRET_KEY = re.compile(r"^(api_?key|apikey|secret|password|passwd|authorization|bearer|credentials?|access_?token|auth_?token)$", re.I)
-SECRET_VALUE = re.compile(r"(sk-[A-Za-z0-9_\-]{12,}|Bearer\s+[A-Za-z0-9._\-]{12,})")
+# The two permitted redacted forms, including JSON-escaped angle brackets as written by
+# System.Text.Json. Anything else after api_key= is a credential-like value.
+_REDACTED_API_KEY = r"<set>|<missing>|\\u003[cC](?:set|missing)\\u003[eE]"
+SECRET_VALUE = re.compile(
+    r"(sk-[A-Za-z0-9_\-]{12,}"
+    r"|Bearer\s+[A-Za-z0-9._\-]{12,}"
+    r"|(?i:api_?key)[\"']?\s*[:=]\s*[\"']?(?!(?:" + _REDACTED_API_KEY + r"))[^\s\"',;{]+)")
+
+# Fixed text every live run must carry (design decision 5). It explicitly denies a dollar cap.
+LIMITS_NOTE = ("Ceilings are request-count, wall-time and output-token limits only. They are NOT a "
+               "dollar or token-cost cap; usage and cost may be unknown or incomplete.")
+
+# A USD figure, or a dollar-cap assertion with a numeric value. The fixed LIMITS_NOTE contains the
+# words "dollar" and "cap" but no digits, so it never matches.
+USD_CLAIM = re.compile(
+    r"(\$\s?\d"
+    r"|\b\d+(?:\.\d+)?\s*usd\b"
+    r"|\busd\s*\d+(?:\.\d+)?"
+    r"|\busd[a-z_]*\s*[=:]\s*\$?\d"
+    r"|\b(?:max_usd|usd_cap|dollar_cap|cost_cap|usd_budget)\s*[=:]\s*\$?\d"
+    r"|\b(?:dollar|usd)\s+cap\s+(?:of\s+)?\$?\d)",
+    re.I)
 HEX64 = re.compile(r"[0-9a-f]{64}")
 REPLY_NULLABLE = ("finish_reason", "input_tokens", "output_tokens", "reasoning_tokens",
                   "total_tokens", "http_status", "provider_request_id")

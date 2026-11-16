@@ -15,8 +15,9 @@ namespace LuanShi.ControlledScenarios
         }
 
         /// <summary>
-        /// CS-11: credentials, unset ceilings, a live provider kind, unknown ids and an output
-        /// directory outside runs/controlled-scenarios/ are all refused before anything runs.
+        /// CS-11: credentials, unset ceilings, a live manifest without an output-token ceiling,
+        /// unknown ids and an output directory outside runs/controlled-scenarios/ are all refused
+        /// before anything runs.
         /// </summary>
         private static void ManifestRefusesBadInput(TestLog log)
         {
@@ -58,8 +59,10 @@ namespace LuanShi.ControlledScenarios
             node = JsonNode.Parse(json);
             node["provider"]["kind"] = "openai-compatible";
             manifest = CsManifest.Parse(node.ToJsonString(), out errors);
-            log.Check(manifest == null && Has(errors, "is refused") && Has(errors, "only 'fake'"),
-                "[CS-11] a live provider kind is refused by this offline build", string.Join("; ", errors));
+            log.Check(manifest == null && Has(errors, "max_output_tokens")
+                    && Has(errors, "live provider"),
+                "[CS-11] a live provider manifest without an output-token ceiling is refused",
+                string.Join("; ", errors));
 
             node = JsonNode.Parse(json);
             node["scenarios"][0]["scenario_id"] = "cs-nowhere-v9";

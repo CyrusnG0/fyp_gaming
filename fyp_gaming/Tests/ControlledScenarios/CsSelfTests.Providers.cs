@@ -8,9 +8,9 @@ namespace LuanShi.ControlledScenarios
     public static partial class CsSelfTests
     {
         /// <summary>
-        /// CS-12: the provider status must be honest. Fake is available; a real provider is
-        /// interface-ready but has not been exercised or validated, and no command or refusal
-        /// prints a credential even when one is present in the environment.
+        /// CS-12: the provider status must be honest. Fake is available; the live provider is
+        /// prepared and offline-tested but has not been exercised against a network, and no
+        /// command or refusal prints a credential even when one is present in the environment.
         /// </summary>
         private static void ProviderStatusHonesty(TestLog log)
         {
@@ -50,7 +50,7 @@ namespace LuanShi.ControlledScenarios
 
                 string refusal = null;
                 try { CsProviderFactory.Create("openai-compatible", FakeModel); }
-                catch (NotSupportedException e) { refusal = e.Message; }
+                catch (CsLiveRefusedException e) { refusal = e.Message; }
                 log.Check(refusal != null && refusal.IndexOf("refused", StringComparison.Ordinal) >= 0
                         && refusal.IndexOf("no live call", StringComparison.Ordinal) >= 0,
                     "[CS-12] selecting a live provider is refused, not silently downgraded");

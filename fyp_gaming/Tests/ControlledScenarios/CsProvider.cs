@@ -56,48 +56,52 @@ namespace LuanShi.ControlledScenarios
     }
 
     /// <summary>
-    /// Selection gate. This task accepts "fake" only: a live kind is refused loudly instead of
-    /// silently falling back or making a paid call. See <see cref="StatusText"/> for the exact,
-    /// smallest next step to add a live provider.
+    /// Selection gate. A live kind is PREPARED and offline-tested, but it is only returned when
+    /// the caller explicitly allows it; otherwise the refusal is loud. There is no silent
+    /// live-to-fake fallback and an unknown kind always throws.
     /// </summary>
     public static class CsProviderFactory
     {
         public const string LiveRefusal =
-            "provider kind 'openai-compatible' is refused: this build makes no live call and has not "
-            + "exercised or validated a real provider. The smallest exact next step is documented by "
-            + "'provider-status': add CsLiveScenarioProvider.CreateTransport returning "
-            + "new OpenAiChatTransport(context.Config), require an explicit --allow-live, and select "
-            + "provider.kind=\"openai-compatible\". No engine, runner, prompt or transport edit is needed.";
+            "provider kind 'openai-compatible' is refused without --allow-live: a live run is "
+            + "PREPARED and offline-tested, but this build has NOT exercised or validated a network "
+            + "provider and makes no live call unless the explicit flag is passed. No environment "
+            + "value or credential is read at this point.";
 
-        public static IScenarioProvider Create(string kind, string model)
+        public static IScenarioProvider Create(string kind, string model, bool allowLive = false)
         {
             if (string.Equals(kind, "fake", StringComparison.Ordinal))
                 return new CsFakeScenarioProvider(model);
-            if (string.Equals(kind, "openai-compatible", StringComparison.Ordinal)
-                || string.Equals(kind, "live", StringComparison.Ordinal))
-                throw new NotSupportedException(LiveRefusal);
-            throw new NotSupportedException("unknown provider kind '" + kind + "'; this build accepts only 'fake'");
+            if (string.Equals(kind, "openai-compatible", StringComparison.Ordinal))
+            {
+                if (!allowLive) throw new CsLiveRefusedException(LiveRefusal);
+                return new CsLiveScenarioProvider(model);
+            }
+            throw new NotSupportedException("unknown provider kind '" + kind
+                + "'; accepted kinds are 'fake' and 'openai-compatible'");
         }
 
         /// <summary>
-        /// Exact provider-status text. It must remain honest: fake is available; a real connection
-        /// is possible via the public OpenAiChatTransport but is NOT exercised or validated here.
+        /// Exact provider-status text. It must remain honest: fake is available; the live kind is
+        /// prepared and offline-tested but NOT exercised against a network. Reading this constant
+        /// never reads an environment variable.
         /// </summary>
-        public const string StatusText =
+        public static readonly string StatusText =
             "LuanShi controlled scenarios - provider status\n" +
             "fake: AVAILABLE. No network call, no credential read. Replies are labelled fixtures\n" +
             "  (source=fake_scripted) with usage_source=fake_deterministic. They are plumbing\n" +
             "  evidence, never model behaviour, and no test treats a scripted choice as a pass.\n" +
-            "real provider: NOT exercised or validated here.\n" +
-            "  A real provider connection is possible today via the public OpenAiChatTransport\n" +
-            "  (already an ILlmTransport) with no production edit. Exact next step from design\n" +
-            "  section 4: add CsLiveScenarioProvider.CreateTransport returning\n" +
-            "  new OpenAiChatTransport(context.Config), constructed from LlmConfig.LoadFromFile(path)\n" +
-            "  (or LlmConfig.Load()), which reads LUANSHI_LLM_API_KEY / LUANSHI_LLM_BASE_URL /\n" +
-            "  LUANSHI_LLM_MODEL; require an explicit --allow-live; select\n" +
-            "  provider.kind=\"openai-compatible\". No engine/runner/prompt/transport change is needed.\n" +
-            "  This build makes no live call, performs no paid call, and does not claim live\n" +
-            "  validation or real-provider readiness.\n" +
+            "openai-compatible: PREPARED and offline-tested; NOT exercised or validated against a\n" +
+            "  network. Selection returns CsLiveScenarioProvider only with --allow-live; its\n" +
+            "  transport is new OpenAiChatTransport(context.Config), where the same LlmConfig the\n" +
+            "  runner uses comes from LlmConfig.Load(). No engine, runner, prompt or transport edit\n" +
+            "  is needed. The live kind reads these environment variable NAMES (values are never\n" +
+            "  printed): LUANSHI_LLM_API_KEY, LUANSHI_LLM_BASE_URL, LUANSHI_LLM_MODEL.\n" +
+            "  A live run also requires run_ceilings.max_output_tokens (1.." +
+            CsLimits.MaxOutputTokensCeiling + "). This build makes no live call and no paid call\n" +
+            "  unless --allow-live is passed, and does not claim live validation or real-provider\n" +
+            "  readiness.\n" +
+            "Limits: " + CsLimits.LimitsNote + "\n" +
             "No credential is read or printed by this command.";
     }
 }

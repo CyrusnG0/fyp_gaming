@@ -16,7 +16,11 @@ namespace LuanShi.ControlledScenarios
         public string Branch { get; set; }
         public string HeadCommit { get; set; }
         public string ProviderKind { get; set; }
+        public string ProviderModel { get; set; }
         public bool ProviderLive { get; set; }
+        public string ProviderBaseUrlDisplay { get; set; }
+        public int ProviderMaxOutputTokens { get; set; }
+        public List<string> ProviderEnvVarNames { get; } = new List<string>();
         public int Requests { get; set; }
         public long? InputTokens { get; set; }
         public long? OutputTokens { get; set; }
@@ -43,8 +47,46 @@ namespace LuanShi.ControlledScenarios
     /// </summary>
     public static partial class CsRunner
     {
-        public static CsRunResult Run(CsManifest manifest, string baseOut, string repoRoot)
+        public static CsRunResult Run(CsManifest manifest, string baseOut, string repoRoot,
+            CsRunOptions options = null)
         {
+            options ??= new CsRunOptions();
+            if (manifest == null) throw new ArgumentNullException(nameof(manifest));
+            bool liveManifest = manifest.Provider != null
+                && string.Equals(manifest.Provider.Kind, "openai-compatible", StringComparison.Ordinal);
+            bool liveOverride = options.ProviderOverride != null && options.ProviderOverride.IsLive;
+
+            // Decision 2: the gate runs before any directory, provider construction, env read,
+            // transport or dispatch. The same gate is enforced for library callers.
+            if ((liveManifest || liveOverride) && !options.AllowLive)
+                throw new CsLiveRefusedException(CsProviderFactory.LiveRefusal);
+
+            // Decision 3: the environment is validated once, before the first scenario. Only
+            // variable names ever leave Read(); the key travels via LlmConfig.Load inside settings.
+            bool needsEnvironment = liveOverride || (liveManifest && options.ProviderOverride == null);
+            CsLiveEnvironmentResult environment = null;
+            if (needsEnvironment)
+            {
+                environment = CsLiveEnvironment.Read();
+                if (!environment.Ok)
+                    throw new CsLiveConfigException(string.Join("; ", environment.Errors));
+            }
+
+            IScenarioProvider provider;
+            if (options.ProviderOverride != null)
+                provider = options.ProviderOverride;
+            else if (liveManifest)
+            {
+                string resolved = CsLiveEnvironment.ResolveModel(
+                    manifest.Provider.Model, environment.Model);
+                provider = CsProviderFactory.Create(manifest.Provider.Kind, resolved, true);
+            }
+            else provider = CsProviderFactory.Create(manifest.Provider.Kind, manifest.Provider.Model);
+
+            int maxOutputTokens = manifest.RunCeilings?.MaxOutputTokens ?? 400;
+            string baseUrlDisplay = provider.IsLive && environment != null
+                ? CsLiveEnvironment.DisplayBaseUrl(environment.BaseUrl) : null;
+
             string outRoot = CsPaths.ResolveOut(baseOut, repoRoot);
             string runId = CsPaths.NewRunId();
             string runDir = Path.Combine(outRoot, runId);
@@ -53,7 +95,12 @@ namespace LuanShi.ControlledScenarios
             var result = new CsRunResult
             {
                 RunId = runId, RunDirectory = runDir, Branch = git.Branch, HeadCommit = git.HeadCommit,
+                ProviderKind = provider.Kind, ProviderModel = provider.Model,
+                ProviderLive = provider.IsLive, ProviderBaseUrlDisplay = baseUrlDisplay,
+                ProviderMaxOutputTokens = maxOutputTokens,
             };
+            if (provider.IsLive)
+                result.ProviderEnvVarNames.AddRange(CsLiveEnvironment.EnvVarNames);
             result.DirtyFiles.AddRange(git.DirtyFiles);
             result.UntrackedBuildInputs.AddRange(git.UntrackedBuildInputs);
 
@@ -65,9 +112,6 @@ namespace LuanShi.ControlledScenarios
             // One budget for the whole run: every dispatch reserves from it, so the actual total
             // can never exceed max_run_requests even when a scenario's own cap is larger.
             var budget = new CsRunBudget(maxRunRequests, maxRunMs);
-            IScenarioProvider provider = CsProviderFactory.Create(manifest.Provider.Kind, manifest.Provider.Model);
-            result.ProviderKind = provider.Kind;
-            result.ProviderLive = provider.IsLive;
 
             for (int i = 0; i < manifest.Scenarios.Count; i++)
             {
@@ -86,8 +130,8 @@ namespace LuanShi.ControlledScenarios
                 spec.MaxRequests = manifest.ScenarioRequests(entry);
                 spec.MaxWallSeconds = manifest.ScenarioWallSeconds(entry);
                 spec.RequestTimeoutMs = manifest.ScenarioRequestTimeoutMs(entry);
-                CsScenarioResult scenario = RunScenario(spec, runDir, manifest.Provider.Model, git, runId,
-                    budget, manifest.Provider.Kind, manifest.RunCeilings);
+                CsScenarioResult scenario = RunScenario(spec, runDir, provider, git, runId,
+                    budget, manifest.RunCeilings, maxOutputTokens);
                 result.Scenarios.Add(scenario);
                 bool more = i + 1 < manifest.Scenarios.Count;
                 if (scenario.Status == CsStatus.Failed) { stopLimit = "scenario_failed"; break; }
@@ -137,8 +181,17 @@ namespace LuanShi.ControlledScenarios
             result.Status = anyFailed ? CsStatus.Failed
                 : anyStopped || !allCompleted ? CsStatus.Stopped : CsStatus.Completed;
             result.Detail = stopLimit == null ? null : "run ceiling or stop: " + stopLimit;
-            result.Limitations.Add("fake replies are fixtures (source=fake_scripted), not model behaviour");
-            result.Limitations.Add("no USD cap and no live/provider validation: usage is fake_deterministic");
+            if (result.ProviderLive)
+            {
+                result.Limitations.Add("live replies are model-written (source=provider), NOT fixtures");
+                result.Limitations.Add("usage is provider_reported; missing usage stays unknown");
+                result.Limitations.Add(CsLimits.LimitsNote);
+            }
+            else
+            {
+                result.Limitations.Add("fake replies are fixtures (source=fake_scripted), not model behaviour");
+                result.Limitations.Add("no USD cap and no live/provider validation: usage is fake_deterministic");
+            }
             result.Limitations.Add("unknown usage is reported as null, never as zero");
             if (result.UnknownUsageRequests > 0)
                 result.Detail = (result.Detail == null ? "" : result.Detail + "; ")
@@ -156,14 +209,32 @@ namespace LuanShi.ControlledScenarios
             if (!File.Exists(manifestPath))
                 throw new FileNotFoundException("run-manifest.json not found", manifestPath);
             string providerModel = "fake-model", providerKind = "fake";
+            bool recordedLive = false;
+            int? maxOutputTokens = null;
             using (JsonDocument doc = JsonDocument.Parse(File.ReadAllText(manifestPath)))
-                if (doc.RootElement.TryGetProperty("provider", out JsonElement p))
+            {
+                JsonElement root = doc.RootElement;
+                if (root.TryGetProperty("provider", out JsonElement p))
                 {
                     if (p.TryGetProperty("model", out JsonElement m)
                         && m.ValueKind == JsonValueKind.String) providerModel = m.GetString();
                     if (p.TryGetProperty("kind", out JsonElement k)
                         && k.ValueKind == JsonValueKind.String) providerKind = k.GetString();
+                    if (p.TryGetProperty("live", out JsonElement l)
+                        && l.ValueKind == JsonValueKind.True) recordedLive = true;
                 }
+                if (root.TryGetProperty("run_ceilings", out JsonElement rc)
+                    && rc.ValueKind == JsonValueKind.Object
+                    && rc.TryGetProperty("max_output_tokens", out JsonElement tokens)
+                    && tokens.ValueKind == JsonValueKind.Number
+                    && tokens.TryGetInt32(out int tokenValue)) maxOutputTokens = tokenValue;
+            }
+            // Replay is fake-only. A recorded live run is never re-dispatched: that would call a
+            // provider and could spend money, and its replies were not fixtures.
+            if (recordedLive || string.Equals(providerKind, "openai-compatible", StringComparison.Ordinal))
+                throw new CsLiveRefusedException(
+                    "replay is fake-only: the recorded run used the live provider "
+                    + "'openai-compatible'. A live run cannot be replayed and no provider is called.");
 
             string outRoot = CsPaths.ResolveOut(baseOut, repoRoot);
             string runId = CsPaths.NewRunId();
@@ -175,6 +246,7 @@ namespace LuanShi.ControlledScenarios
             // Replay must not inherit the recorded run's ceiling; it reproduces the scenario's own
             // recorded caps, so an unbounded run budget is used for the whole replay.
             CsRunBudget replayBudget = CsRunBudget.Unbounded();
+            IScenarioProvider provider = CsProviderFactory.Create(providerKind, providerModel);
 
             foreach (string dir in Directory.GetDirectories(runDirectory))
             {
@@ -189,8 +261,8 @@ namespace LuanShi.ControlledScenarios
                     replay.Details.Add(file.ScenarioId + ": recorded ceilings are incomplete");
                     continue;
                 }
-                CsScenarioResult rerun = RunScenario(spec, newDir, providerModel, git, runId,
-                    replayBudget, providerKind);
+                CsScenarioResult rerun = RunScenario(spec, newDir, provider, git, runId,
+                    replayBudget, null, maxOutputTokens);
                 string oldPath = Path.Combine(dir, "result.json");
                 string newPath = Path.Combine(newDir, spec.ScenarioId, "result.json");
                 if (!File.Exists(oldPath)) { replay.Matched = false; replay.Details.Add(file.ScenarioId + ": no original result.json"); continue; }

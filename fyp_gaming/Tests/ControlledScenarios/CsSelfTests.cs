@@ -47,6 +47,8 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-11] ManifestRefusesBadInput", ManifestRefusesBadInput),
                 Entry("[CS-12] ProviderStatusHonesty", ProviderStatusHonesty),
                 Entry("[CS-13] CeilingsAndTransportRegression", CeilingsAndTransportRegression),
+                Entry("[CS-22] LiveProviderPlumbing", LiveProviderPlumbing),
+                Entry("[CS-27] LiveTransportConfigAndBoundedRun", LiveTransportConfigAndBoundedRun),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

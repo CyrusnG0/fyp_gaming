@@ -3,9 +3,11 @@
 
 Checks design section 5 evidence (run-manifest.json, dispatches.ndjson), link joins, prompt
 sha256, recomputed token totals, null-not-zero unknown usage, setup/script reproduction, and
-credential patterns. Incomplete/stopped/failed scenarios are reported as NOT pass. No network
-call is made and no environment credential is read. Schema details live in
-luanshi_controlled_audit_schema.py.
+credential patterns. Live-labelled runs are additionally checked for provider source labels, the
+provider identity block, the exact limits note, redacted api_key forms and USD/dollar-cap claims;
+the audit still cannot prove a live run was valid or that the model reasoned. Incomplete/stopped/
+failed scenarios are reported as NOT pass. No network call is made and no environment credential
+is read. Schema details live in luanshi_controlled_audit_schema.py.
 
   audit <run-dir> [--json]
 Exit codes: 0 consistent and complete; 1 schema/evidence mismatch; 2 unreadable run folder;
@@ -14,11 +16,13 @@ Exit codes: 0 consistent and complete; 1 schema/evidence mismatch; 2 unreadable 
 import argparse
 import json
 import os
+import re
 import sys
 
 from luanshi_controlled_audit_schema import (
-    MANIFEST_SCHEMA, REPLY_NULLABLE, SECRET_VALUE, TEXT_EXTENSIONS, canonical_hash, need,
-    read_json, read_lines, scan, sha256_file, sha256_text, validate_dispatch, validate_manifest)
+    LIMITS_NOTE, MANIFEST_SCHEMA, REPLY_NULLABLE, SECRET_VALUE, TEXT_EXTENSIONS, USD_CLAIM,
+    canonical_hash, is_int, need, read_json, read_lines, scan, sha256_file, sha256_text,
+    validate_dispatch, validate_manifest)
 
 
 class AuditError(Exception):
@@ -230,6 +234,214 @@ def scan_tree(run_dir, skip, problems):
                 problems.append("credential-like value in %s (not shown)" % os.path.relpath(path, run_dir))
 
 
+# Provider identity fields the C# runner writes for every run. A live run must carry all of them;
+# seed/scenario_id/settings_hash are scenario-specific and stay null in the run-level block.
+LIVE_PROVIDER_FIELDS = (
+    "kind", "model", "live", "base_url_display", "env_var_names", "max_output_tokens",
+    "request_timeout_ms", "effective_max_requests", "effective_max_wall_seconds",
+    "commit", "dirty", "seed", "scenario_id", "settings_hash")
+LIVE_ENV_NAMES = ("LUANSHI_LLM_API_KEY", "LUANSHI_LLM_BASE_URL", "LUANSHI_LLM_MODEL")
+API_KEY_REDACTED = re.compile(r"(?i:api_?key)\s*=\s*([^;\s]*)")
+LIVE_HONESTY = ("audit limitation: this checks internal consistency only; it cannot prove a live "
+                "run was valid or that the model reasoned")
+
+
+def iter_text_files(run_dir):
+    """Yield (relative path, text) for the small text artefacts, without recursing forever."""
+    for base, _directories, files in os.walk(run_dir):
+        for name in files:
+            path = os.path.join(base, name)
+            if not name.lower().endswith(TEXT_EXTENSIONS):
+                continue
+            try:
+                if os.path.getsize(path) > 8 * 1024 * 1024:
+                    continue
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    yield os.path.relpath(path, run_dir), handle.read()
+            except OSError:
+                continue
+
+
+def carries_string(node, target):
+    if isinstance(node, str):
+        return target in node
+    if isinstance(node, dict):
+        return any(carries_string(value, target) for value in node.values())
+    if isinstance(node, list):
+        return any(carries_string(item, target) for item in node)
+    return False
+
+
+def check_sources(manifest, dispatches, problems):
+    """Live replies with text must be source=provider; a fake run never uses source=provider."""
+    provider = manifest.get("provider") if isinstance(manifest, dict) else None
+    live = isinstance(provider, dict) and provider.get("live") is True
+    for index, dispatch in enumerate(dispatches):
+        if not isinstance(dispatch, dict):
+            continue
+        reply = dispatch.get("reply") if isinstance(dispatch.get("reply"), dict) else {}
+        source = reply.get("source")
+        has_text = isinstance(reply.get("raw_text"), str) and reply.get("raw_text") != ""
+        if live:
+            if has_text and source != "provider":
+                problems.append("dispatch[%d].reply.source is %r for a live run; every reply with "
+                                "text must be 'provider' (never fake_scripted)" % (index, source))
+            elif source == "fake_scripted":
+                problems.append("dispatch[%d].reply.source is 'fake_scripted' in a live run" % index)
+        elif source == "provider":
+            problems.append("dispatch[%d].reply.source is 'provider' in a fake run" % index)
+        block = dispatch.get("provider") if isinstance(dispatch.get("provider"), dict) else {}
+        if not live and block.get("usage_source") == "provider_reported":
+            problems.append("dispatch[%d].provider.usage_source is 'provider_reported' in a fake "
+                            "run" % index)
+
+
+def check_config_redacted(dispatches, run_dir, problems):
+    """config_redacted may show only api_key=<set> or api_key=<missing>."""
+    values = []
+    for index, dispatch in enumerate(dispatches):
+        settings = dispatch.get("settings") if isinstance(dispatch, dict) else None
+        if isinstance(settings, dict) and "config_redacted" in settings:
+            values.append(("dispatch[%d].settings.config_redacted" % index,
+                           settings.get("config_redacted")))
+    for base, _directories, files in os.walk(run_dir):
+        for name in files:
+            if not name.lower().endswith(".json"):
+                continue
+            path = os.path.join(base, name)
+            try:
+                saved = read_json(path)
+            except (OSError, ValueError):
+                continue
+            if isinstance(saved, dict) and "config_redacted" in saved:
+                values.append((os.path.relpath(path, run_dir) + ".config_redacted",
+                               saved.get("config_redacted")))
+    for where, text in values:
+        if not isinstance(text, str):
+            continue
+        match = API_KEY_REDACTED.search(text)
+        if match is None:
+            problems.append("%s must show api_key=<set> or api_key=<missing>" % where)
+        elif match.group(1) not in ("<set>", "<missing>"):
+            problems.append("%s must show api_key=<set> or <missing> only (a value was present)" % where)
+
+
+def check_live_usage(live, manifest, dispatches, problems, notes):
+    """Unknown live usage stays null and is named/counted, never turned into zero."""
+    if not live:
+        return
+    unknown = 0
+    for index, dispatch in enumerate(dispatches):
+        if not isinstance(dispatch, dict):
+            continue
+        provider = dispatch.get("provider") if isinstance(dispatch.get("provider"), dict) else {}
+        if provider.get("live") is not True:
+            continue
+        if provider.get("usage_source") != "provider_reported":
+            problems.append("dispatch[%d].provider.usage_source must be 'provider_reported' for a "
+                            "live dispatch" % index)
+        reply = dispatch.get("reply") if isinstance(dispatch.get("reply"), dict) else {}
+        named = reply.get("unknown_fields") if isinstance(reply.get("unknown_fields"), list) else []
+        missing = [field for field in ("input_tokens", "output_tokens") if reply.get(field) is None]
+        for field in missing:
+            if field not in named:
+                problems.append("dispatch[%d].reply.%s is unknown on a live dispatch but is not "
+                                "named in unknown_fields" % (index, field))
+        if missing:
+            unknown += 1
+    if unknown:
+        usage = manifest.get("usage") if isinstance(manifest, dict) else None
+        if isinstance(usage, dict):
+            if usage.get("unknown_requests") != unknown:
+                problems.append("live usage is unknown for %d dispatch(es) but "
+                                "manifest.usage.unknown_requests is %s (unknown is never zero)"
+                                % (unknown, usage.get("unknown_requests")))
+            if usage.get("input_tokens") is not None or usage.get("output_tokens") is not None:
+                problems.append("live usage is unknown for %d dispatch(es); manifest totals must "
+                                "be null, never zero or partial" % unknown)
+        notes.append("live usage unknown for %d of %d request(s); counted as unknown, not zero"
+                     % (unknown, len(dispatches)))
+
+
+def check_live_block(block, path, problems, run_level=False):
+    """Every live provider block carries the identity/ceiling fields with sane values."""
+    if not isinstance(block, dict):
+        problems.append(path + " is required for a live run")
+        return
+    for key in LIVE_PROVIDER_FIELDS:
+        if key not in block:
+            problems.append("%s.%s is required for a live run" % (path, key))
+    if "kind" in block and block.get("kind") != "openai-compatible":
+        problems.append(path + ".kind must be 'openai-compatible' for a live run")
+    if "model" in block and (not isinstance(block.get("model"), str) or not block.get("model")):
+        problems.append(path + ".model must be a non-empty string")
+    if "live" in block and block.get("live") is not True:
+        problems.append(path + ".live must be true")
+    base = block.get("base_url_display")
+    if "base_url_display" in block and (
+            not isinstance(base, str) or not base.lower().startswith("https://")):
+        problems.append(path + ".base_url_display must be an https scheme://host[:port]/path value")
+    names = block.get("env_var_names")
+    if "env_var_names" in block and (
+            not isinstance(names, list) or not all(isinstance(name, str) for name in names)
+            or not set(LIVE_ENV_NAMES).issubset(names)):
+        problems.append(path + ".env_var_names must name " + ", ".join(LIVE_ENV_NAMES))
+    tokens = block.get("max_output_tokens")
+    if "max_output_tokens" in block and (not is_int(tokens) or tokens <= 0):
+        problems.append(path + ".max_output_tokens must be a finite positive integer")
+    for key in ("request_timeout_ms", "effective_max_requests", "effective_max_wall_seconds"):
+        value = block.get(key)
+        if key in block and (not is_int(value) or value <= 0):
+            problems.append("%s.%s must be a positive integer" % (path, key))
+    if "commit" in block and (not isinstance(block.get("commit"), str) or not block.get("commit")):
+        problems.append(path + ".commit must be a non-empty string")
+    if "dirty" in block and not isinstance(block.get("dirty"), bool):
+        problems.append(path + ".dirty must be a boolean")
+    if run_level:
+        return                              # seed/scenario_id/settings_hash are per scenario
+    if "seed" in block and not is_int(block.get("seed")):
+        problems.append(path + ".seed must be an integer")
+    for key in ("scenario_id", "settings_hash"):
+        if key in block and (not isinstance(block.get(key), str) or not block.get(key)):
+            problems.append(path + ".%s must be a non-empty string" % key)
+
+
+def check_limits_note(run_dir, manifest, problems):
+    if carries_string(manifest, LIMITS_NOTE):
+        return
+    if any(LIMITS_NOTE in text for _name, text in iter_text_files(run_dir)):
+        return
+    problems.append("live run must carry the exact limits note in its manifest or report: "
+                    + LIMITS_NOTE)
+
+
+def check_usd_claims(run_dir, manifest, dispatches, problems):
+    blobs = [json.dumps(manifest), json.dumps(dispatches)]
+    blobs.extend(text for _name, text in iter_text_files(run_dir))
+    for text in blobs:
+        if USD_CLAIM.search(text):
+            problems.append("live evidence contains a USD figure or a dollar-cap claim "
+                            "(value not shown); no dollar cap is claimed")
+            return
+
+
+def check_live_rules(run_dir, manifest, dispatches, problems, notes):
+    provider = manifest.get("provider") if isinstance(manifest, dict) else None
+    live = isinstance(provider, dict) and provider.get("live") is True
+    check_sources(manifest, dispatches, problems)
+    check_config_redacted(dispatches, run_dir, problems)
+    check_live_usage(live, manifest, dispatches, problems, notes)
+    if not live:
+        return
+    check_live_block(provider, "manifest.provider", problems, run_level=True)
+    for index, dispatch in enumerate(dispatches):
+        if isinstance(dispatch, dict):
+            check_live_block(dispatch.get("provider"), "dispatch[%d].provider" % index, problems)
+    check_limits_note(run_dir, manifest, problems)
+    check_usd_claims(run_dir, manifest, dispatches, problems)
+    notes.append(LIVE_HONESTY)
+
+
 def audit_run(run_dir):
     run_dir = os.path.abspath(run_dir)
     if not os.path.isdir(run_dir):
@@ -270,6 +482,7 @@ def audit_run(run_dir):
     if isinstance(manifest, dict):
         recompute_usage(manifest, dispatches, problems, notes)
         check_setup(run_dir, manifest, problems, notes)
+        check_live_rules(run_dir, manifest, dispatches, problems, notes)
         incomplete = collect_incomplete(manifest, dispatches)
     else:
         incomplete = ["run manifest is not a JSON object"]

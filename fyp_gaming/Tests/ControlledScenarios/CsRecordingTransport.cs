@@ -26,6 +26,7 @@ namespace LuanShi.ControlledScenarios
         private readonly long _scenarioDeadlineMs;   // absolute on the budget's monotonic clock
         private readonly Func<string, CsWorldSnapshot> _before;
         private readonly Func<string, CsWorldSnapshot> _after;
+        private readonly bool _requireOutputTokenLimit;
         private readonly List<CsDispatchCapture> _captures = new List<CsDispatchCapture>();
         private int _dispatched;
         private int _lateDiscarded;
@@ -33,7 +34,8 @@ namespace LuanShi.ControlledScenarios
 
         public CsRecordingTransport(ILlmTransport inner, Func<string> activeSeat, CsRunBudget budget,
             int maxScenarioRequests, long scenarioDeadlineMs,
-            Func<string, CsWorldSnapshot> beforeSnapshot, Func<string, CsWorldSnapshot> afterSnapshot)
+            Func<string, CsWorldSnapshot> beforeSnapshot, Func<string, CsWorldSnapshot> afterSnapshot,
+            bool requireOutputTokenLimit = false)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -42,6 +44,7 @@ namespace LuanShi.ControlledScenarios
             _scenarioDeadlineMs = scenarioDeadlineMs;
             _before = beforeSnapshot;
             _after = afterSnapshot;
+            _requireOutputTokenLimit = requireOutputTokenLimit;
         }
 
         public string Provider => _inner.Provider;
@@ -98,9 +101,13 @@ namespace LuanShi.ControlledScenarios
             if (string.IsNullOrEmpty(seat)) seat = "unknown";
             CsWorldSnapshot before = Snapshot(_before, seat);
 
-            // Gates run before the inner transport is touched, in the specified order.
+            // Gates run before the inner transport is touched, in the specified order. The
+            // output-token gate is first so a request that can never be bounded consumes no
+            // request allowance and is never counted as dispatched.
             string refusal = null;
-            if (DispatchedCount >= _maxScenarioRequests) refusal = "max_scenario_requests";
+            if (_requireOutputTokenLimit && (req == null || req.MaxOutputTokens <= 0))
+                refusal = "no_output_token_limit";
+            else if (DispatchedCount >= _maxScenarioRequests) refusal = "max_scenario_requests";
             else if (!_budget.TryReserve()) refusal = "max_run_requests";
             else if (_budget.DeadlineReached) refusal = "max_run_wall_seconds";
             else if (ScenarioDeadlineReached()) refusal = "max_scenario_wall_seconds";

@@ -28,6 +28,13 @@ namespace LuanShi.ControlledScenarios
         public int UnknownUsageRequests { get; set; }
         public long ElapsedMs { get; set; }
         public string SettingsHash { get; set; }
+        public string ProviderKind { get; set; }
+        public string ProviderModel { get; set; }
+        public bool ProviderLive { get; set; }
+        public int EffectiveMaxRequests { get; set; }
+        public int EffectiveWallSeconds { get; set; }
+        public int RequestTimeoutMs { get; set; }
+        public int MaxOutputTokens { get; set; }
         public string SetupHash { get; set; }
         public string ScriptSha256 { get; set; }
         public string StartWorldDigest { get; set; }
@@ -49,6 +56,9 @@ namespace LuanShi.ControlledScenarios
         public string ProviderKind, ProviderModel;
         public bool ProviderLive;
         public string UsageSource;
+        public string ProviderBaseUrlDisplay;
+        public List<string> ProviderEnvVarNames = new List<string>();
+        public int ProviderMaxOutputTokens;
         public bool Dirty;
         public int Seed, ScenarioMaxRequests, ScenarioWallSeconds, RequestTimeoutMs, PromptLimit;
         public int LateResponsesDiscarded;
@@ -181,6 +191,18 @@ namespace LuanShi.ControlledScenarios
                     {
                         { "kind", context.ProviderKind }, { "model", context.ProviderModel },
                         { "live", context.ProviderLive }, { "usage_source", context.UsageSource },
+                        { "base_url_display", context.ProviderBaseUrlDisplay },
+                        { "env_var_names", context.ProviderEnvVarNames },
+                        { "max_output_tokens", context.ProviderMaxOutputTokens },
+                        { "request_timeout_ms", context.RequestTimeoutMs },
+                        { "max_requests", context.ScenarioMaxRequests },
+                        { "max_wall_seconds", context.ScenarioWallSeconds },
+                        { "effective_max_requests", context.ScenarioMaxRequests },
+                        { "effective_max_wall_seconds", context.ScenarioWallSeconds },
+                        { "commit", context.Commit }, { "dirty", context.Dirty },
+                        { "seed", context.Seed }, { "scenario_id", context.ScenarioId },
+                        { "settings_hash", context.SettingsHash },
+                        { "limits_note", CsLimits.LimitsNote },
                     } },
                 { "settings", SettingsObject(context) },
                 { "prompt", PromptObject(context, cap, run, linked) },
