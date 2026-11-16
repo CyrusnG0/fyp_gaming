@@ -53,6 +53,10 @@ namespace LuanShi.ControlledScenarios
             "LUANSHI_LLM_API_KEY", "LUANSHI_LLM_BASE_URL", "LUANSHI_LLM_MODEL",
         };
 
+        /// <summary>Keys shorter than this are ignored for exact matching, so a tiny value cannot
+        /// mangle ordinary text or reject every path. Empty values are always ignored.</summary>
+        internal const int MinimumCredentialLength = 8;
+
         public static CsLiveEnvironmentResult Read(Func<string, string> getenv = null)
         {
             getenv ??= Environment.GetEnvironmentVariable;
@@ -69,11 +73,15 @@ namespace LuanShi.ControlledScenarios
                 result.Errors.Add("LUANSHI_LLM_BASE_URL is not set");
             else
             {
-                string display = DisplayBaseUrl(baseUrl.Trim());
+                string trimmed = baseUrl.Trim();
+                string display = DisplayBaseUrl(trimmed);
                 if (display == null)
                     result.Errors.Add("LUANSHI_LLM_BASE_URL must be an absolute https URL with no "
                         + "userinfo, query or fragment");
-                else result.BaseUrl = baseUrl.Trim();
+                else if (HasUnsafePath(trimmed, key))
+                    result.Errors.Add("LUANSHI_LLM_BASE_URL must not carry a credential in its "
+                        + "path (value not shown)");
+                else result.BaseUrl = trimmed;
             }
             return result;
         }
@@ -94,8 +102,10 @@ namespace LuanShi.ControlledScenarios
         }
 
         /// <summary>
-        /// scheme://host[:port]/path only. User info, query and fragment are never displayed, so a
-        /// credential or query parameter cannot leak into evidence, settings or reports.
+        /// scheme://host[:port] plus a path ONLY when every path segment is short, plain and not
+        /// secret-like; otherwise scheme://host[:port]/... User info, query and fragment are never
+        /// displayed, so a credential, token-like segment or query parameter cannot leak into
+        /// evidence, settings or reports. The original value is never returned in an error.
         /// </summary>
         public static string DisplayBaseUrl(string baseUrl)
         {
@@ -104,7 +114,56 @@ namespace LuanShi.ControlledScenarios
             if (!string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) return null;
             if (!string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query)
                 || !string.IsNullOrEmpty(uri.Fragment)) return null;
-            return uri.Scheme + "://" + uri.Authority + uri.AbsolutePath;
+            string root = uri.Scheme + "://" + uri.Authority;
+            string path = uri.AbsolutePath;
+            if (string.IsNullOrEmpty(path) || path == "/") return root + (path ?? "");
+            return PathIsSafe(path) ? root + path : root + "/...";
+        }
+
+        /// <summary>
+        /// True when a URL's path carries a credential: the configured key itself, a token-like
+        /// segment (sk-..., key=..., user:pass, or a long plain token) or any over-long plain
+        /// segment. Messages never echo the URL or the key.
+        /// </summary>
+        private static bool HasUnsafePath(string baseUrl, string key)
+        {
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri uri)) return false;
+            string path = uri.AbsolutePath ?? "";
+            if (!string.IsNullOrEmpty(key) && key.Length >= MinimumCredentialLength
+                && path.IndexOf(key, StringComparison.Ordinal) >= 0) return true;
+            foreach (string segment in path.Split('/'))
+                if (IsSecretLikeSegment(segment)) return true;
+            return false;
+        }
+
+        private static bool PathIsSafe(string path)
+        {
+            foreach (string segment in path.Split('/'))
+            {
+                if (segment.Length == 0) continue;
+                if (segment.Length >= 24 || IsSecretLikeSegment(segment)) return false;
+                foreach (char c in segment)
+                    if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.')) return false;
+            }
+            return true;
+        }
+
+        private static bool IsSecretLikeSegment(string segment)
+        {
+            if (string.IsNullOrEmpty(segment)) return false;
+            if (segment.StartsWith("sk-", StringComparison.OrdinalIgnoreCase)) return true;
+            if (segment.IndexOf("key=", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (segment.IndexOf("token", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (segment.IndexOf("secret", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (segment.IndexOf(':') >= 0) return true;            // user:pass
+            if (segment.Length >= 24)
+            {
+                bool plain = true;
+                foreach (char c in segment)
+                    if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_')) { plain = false; break; }
+                if (plain) return true;
+            }
+            return false;
         }
 
         private static string Value(Func<string, string> getenv, string name)

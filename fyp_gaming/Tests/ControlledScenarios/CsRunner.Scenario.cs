@@ -27,12 +27,14 @@ namespace LuanShi.ControlledScenarios
 
         public static CsScenarioResult RunScenario(CsScenarioSpec spec, string runDirectory,
             IScenarioProvider provider, CsGitInfo git, string runId, CsRunBudget budget = null,
-            CsRunCeilings runCeilings = null, int? maxOutputTokens = null)
+            CsRunCeilings runCeilings = null, int? maxOutputTokens = null, bool allowLive = false)
         {
             if (provider == null) throw new ArgumentNullException(nameof(provider));
-            int outputTokens = maxOutputTokens ?? 400;
-            if (provider.IsLive && outputTokens <= 0)
-                throw new CsLiveConfigException("live runs require run_ceilings.max_output_tokens > 0");
+            int? requestedOutputTokens = maxOutputTokens ?? runCeilings?.MaxOutputTokens;
+            // Every live path is authorized, bounded and token-limited BEFORE any directory is
+            // created or the provider is asked for a transport. The fake path keeps its defaults.
+            ValidateLiveDispatch(provider, allowLive, budget, requestedOutputTokens);
+            int outputTokens = provider.IsLive ? requestedOutputTokens.Value : requestedOutputTokens ?? 400;
             string scenarioDir = Path.Combine(runDirectory, spec.ScenarioId);
             Directory.CreateDirectory(scenarioDir);
             var result = new CsScenarioResult
@@ -56,7 +58,8 @@ namespace LuanShi.ControlledScenarios
                 WriteJson(scenarioDir, "scenario.json", file);
                 // Hash the exact bytes written, so the audit can re-derive it from script.json.
                 string scriptJson = StagedScriptJson(spec);
-                File.WriteAllText(Path.Combine(scenarioDir, "script.json"), scriptJson, new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(scenarioDir, "script.json"),
+                    CsEvidence.Redact(scriptJson), new UTF8Encoding(false));
                 result.SetupHash = CsWorld.Sha256(JsonSerializer.Serialize(file.Setup, CsJson.Compact));
                 result.ScriptSha256 = CsWorld.Sha256(scriptJson);
 
@@ -192,22 +195,8 @@ namespace LuanShi.ControlledScenarios
                 // wins the race by a fraction of a millisecond, the runner sees a timeout failure
                 // before the loop can call Stop(). Attribute that abandonment to the same named
                 // ceiling so a wall boundary is never misreported as a provider failure.
-                bool wallCutByTransport = false;
-                if (wallLimit == null)
-                {
-                    foreach (CsDispatchCapture cap in captures)
-                    {
-                        if (cap.State == "deadline_abandoned")
-                            wallLimit = runWallConstrained
-                                ? "max_run_wall_seconds" : "max_scenario_wall_seconds";
-                        else if (cap.RefusalReason == "max_run_wall_seconds"
-                            || cap.RefusalReason == "max_scenario_wall_seconds")
-                            wallLimit = cap.RefusalReason;
-                        else continue;
-                        wallCutByTransport = true;
-                        break;
-                    }
-                }
+                bool wallCutByTransport = WallCutByTransport(captures, runWallConstrained,
+                    ref wallLimit);
 
                 var contextData = new CsDispatchContext
                 {
@@ -246,7 +235,13 @@ namespace LuanShi.ControlledScenarios
 
                 try
                 {
-                    SpectatorSummary.Write(scenarioDir, session, config, transport, runner);
+                    string summaryPath = SpectatorSummary.Write(scenarioDir, session, config,
+                        transport, runner);
+                    // The production summary redacts the config key itself; this second pass runs
+                    // the whole file through the same central redaction as every other artefact.
+                    if (!string.IsNullOrEmpty(summaryPath) && File.Exists(summaryPath))
+                        File.WriteAllText(summaryPath, CsEvidence.Redact(File.ReadAllText(summaryPath)),
+                            new UTF8Encoding(false));
                     foreach (string path in Directory.GetFiles(scenarioDir, "pilot-*-summary.json"))
                         result.Files.Add(Path.GetFileName(path));
                 }
@@ -258,18 +253,43 @@ namespace LuanShi.ControlledScenarios
                 result.PrivacyLeaks = PrivacyLeaks(spec, captures);
                 WriteJson(scenarioDir, "result.json", ResultObject(result, captures));
                 File.WriteAllText(Path.Combine(scenarioDir, spec.ScenarioId + "-report.txt"),
-                    CsReport.ProviderBanner(provider.Kind, provider.Model, provider.IsLive)
-                        + CsReport.ScenarioText(result), new UTF8Encoding(false));
+                    CsEvidence.Redact(CsReport.ProviderBanner(
+                        provider.Kind, provider.Model, provider.IsLive)
+                        + CsReport.ScenarioText(result)), new UTF8Encoding(false));
                 result.Files.Add(spec.ScenarioId + "-report.txt");
                 result.Files.Add("result.json");
             }
             catch (Exception e)
             {
                 result.Status = CsStatus.Failed;
-                result.Detail = e.GetType().Name + ": " + e.Message;
+                // Exception text is provider-influenced; redact before it can reach result.json
+                // or a report.
+                result.Detail = CsEvidence.Redact(e.GetType().Name + ": " + e.Message);
             }
             result.ElapsedMs = clock.ElapsedMilliseconds;
             return result;
+        }
+
+        /// <summary>
+        /// Explicit live authorization and bounded limits. Rejection happens before a scenario
+        /// directory exists and before provider.CreateTransport, with the refusal/limit exception
+        /// required by the public boundary. The fake path is deliberately unchanged.
+        /// </summary>
+        internal static void ValidateLiveDispatch(IScenarioProvider provider, bool allowLive,
+            CsRunBudget budget, int? maxOutputTokens)
+        {
+            if (provider == null || !provider.IsLive) return;
+            if (!allowLive) throw new CsLiveRefusedException(CsProviderFactory.LiveRefusal);
+            if (budget == null || !budget.IsBounded)
+                throw new CsLiveConfigException("live runs require a bounded whole-run budget with "
+                    + "a finite positive max_run_requests and max_run_wall_seconds; an unbounded "
+                    + "budget is refused");
+            if (!maxOutputTokens.HasValue || maxOutputTokens.Value <= 0)
+                throw new CsLiveConfigException(
+                    "live runs require run_ceilings.max_output_tokens > 0 (there is no 400 default)");
+            if (maxOutputTokens.Value > CsLimits.MaxOutputTokensCeiling)
+                throw new CsLiveConfigException("live runs require run_ceilings.max_output_tokens <= "
+                    + CsLimits.MaxOutputTokensCeiling);
         }
     }
 }

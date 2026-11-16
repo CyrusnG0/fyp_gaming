@@ -210,7 +210,7 @@ namespace LuanShi.ControlledScenarios
         [JsonPropertyName("ceilings")] public CsScenarioCeilings Ceilings { get; set; }
     }
 
-    /// <summary>Shared staged shell and helpers for the six built-in situations.</summary>
+    /// <summary>Shared staged shell and helpers for the built-in situations.</summary>
     internal static class CsScenarioFactory
     {
         public const string HomeCityId = "cs-city-home";

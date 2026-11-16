@@ -34,7 +34,7 @@ namespace LuanShi.ControlledScenarios
                 if (command == "test") return CsSelfTests.RunAll();
                 if (command == "provider-status")
                 {
-                    Console.WriteLine(CsProviderFactory.StatusText);
+                    Console.WriteLine(CsEvidence.Redact(CsProviderFactory.StatusText));
                     return 0;
                 }
                 if (command == "validate")
@@ -42,13 +42,13 @@ namespace LuanShi.ControlledScenarios
                     CsManifest manifest = LoadManifest(Required(args, "--manifest"), out int exit);
                     if (manifest == null) return exit;
                     bool live = manifest.Provider.Kind == "openai-compatible";
-                    Console.WriteLine("manifest ok: " + manifest.Scenarios.Count
+                    Console.WriteLine(CsEvidence.Redact("manifest ok: " + manifest.Scenarios.Count
                         + " scenario(s), provider.kind=" + manifest.Provider.Kind
                         + (live
                             ? "; running needs --allow-live and LUANSHI_LLM_API_KEY / "
                                 + "LUANSHI_LLM_BASE_URL / LUANSHI_LLM_MODEL (validate reads no env "
                                 + "value); " + CsLimits.LimitsNote
-                            : " (scripted fixtures, plumbing only)"));
+                            : " (scripted fixtures, plumbing only)")));
                     return 0;
                 }
                 if (command == "run")
@@ -66,28 +66,32 @@ namespace LuanShi.ControlledScenarios
                     string runDir = Required(args, "--run");
                     string repo = CsPaths.RepoRoot();
                     CsReplayResult replay = CsRunner.Replay(runDir, Optional(args, "--out"), repo);
-                    foreach (string detail in replay.Details) Console.WriteLine("replay: " + detail);
-                    Console.WriteLine("replay " + (replay.Matched ? "reproduced" : "MISMATCH")
-                        + " -> " + replay.NewRunDirectory);
+                    foreach (string detail in replay.Details)
+                        Console.WriteLine(CsEvidence.Redact("replay: " + detail));
+                    Console.WriteLine(CsEvidence.Redact("replay "
+                        + (replay.Matched ? "reproduced" : "MISMATCH")
+                        + " -> " + replay.NewRunDirectory));
                     return replay.Matched ? 0 : 1;
                 }
             }
             catch (CsLiveRefusedException e)
             {
                 // Gate messages name the flag only; they never contain a value or credential.
-                Console.Error.WriteLine("error: " + e.Message);
+                Console.Error.WriteLine(CsEvidence.Redact("error: " + e.Message));
                 return 2;
             }
             catch (CsLiveConfigException e)
             {
                 // Environment messages name variables only, never their values.
-                Console.Error.WriteLine("error: " + e.Message);
+                Console.Error.WriteLine(CsEvidence.Redact("error: " + e.Message));
                 return 2;
             }
             catch (Exception e)
             {
-                // Never print provider bodies, keys or stack traces.
-                Console.Error.WriteLine("error: " + e.GetType().Name + ": " + e.Message);
+                // Never print provider bodies, keys or stack traces; the same central redaction
+                // also covers exception text influenced by a provider.
+                Console.Error.WriteLine(CsEvidence.Redact(
+                    "error: " + e.GetType().Name + ": " + e.Message));
                 return 2;
             }
             Console.Error.WriteLine(Usage);
@@ -105,7 +109,8 @@ namespace LuanShi.ControlledScenarios
             string json = File.ReadAllText(path);
             CsManifest manifest = CsManifest.Parse(json, out List<string> errors);
             if (manifest != null) return manifest;
-            foreach (string error in errors) Console.Error.WriteLine("invalid: " + error);
+            foreach (string error in errors)
+                Console.Error.WriteLine(CsEvidence.Redact("invalid: " + error));
             return null;
         }
 

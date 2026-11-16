@@ -242,6 +242,19 @@ LIVE_PROVIDER_FIELDS = (
     "commit", "dirty", "seed", "scenario_id", "settings_hash")
 LIVE_ENV_NAMES = ("LUANSHI_LLM_API_KEY", "LUANSHI_LLM_BASE_URL", "LUANSHI_LLM_MODEL")
 API_KEY_REDACTED = re.compile(r"(?i:api_?key)\s*=\s*([^;\s]*)")
+# A display URL must not retain a token-like path segment (>=24 alnum/-/_ chars).
+_SECRET_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9_-]{24,}$")
+
+
+def secret_like_display_path(base):
+    """True when base_url_display keeps a long plain path segment that looks like a secret."""
+    if not isinstance(base, str) or "://" not in base:
+        return False
+    rest = base.split("://", 1)[1].split("?", 1)[0].split("#", 1)[0]
+    if "/" not in rest:
+        return False
+    path = rest.split("/", 1)[1]
+    return any(_SECRET_PATH_SEGMENT.match(segment) for segment in path.split("/"))
 LIVE_HONESTY = ("audit limitation: this checks internal consistency only; it cannot prove a live "
                 "run was valid or that the model reasoned")
 
@@ -381,6 +394,8 @@ def check_live_block(block, path, problems, run_level=False):
     if "base_url_display" in block and (
             not isinstance(base, str) or not base.lower().startswith("https://")):
         problems.append(path + ".base_url_display must be an https scheme://host[:port]/path value")
+    elif secret_like_display_path(base):
+        problems.append(path + ".base_url_display must not contain a secret-like path segment")
     names = block.get("env_var_names")
     if "env_var_names" in block and (
             not isinstance(names, list) or not all(isinstance(name, str) for name in names)

@@ -96,7 +96,7 @@ namespace LuanShi.ControlledScenarios
                     { "system", Redact(cap.System) }, { "user", Redact(cap.User) },
                     { "script", cap.ScriptNote }, { "reply", Redact(cap.ReplyText) },
                 };
-                sb.Append(JsonSerializer.Serialize(line, CsJson.Compact)).Append('\n');
+                sb.Append(Redact(JsonSerializer.Serialize(line, CsJson.Compact))).Append('\n');
             }
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
         }
@@ -107,7 +107,7 @@ namespace LuanShi.ControlledScenarios
             for (int i = 0; i < context.Captures.Count; i++)
             {
                 Dictionary<string, object> record = Build(context, i);
-                sb.Append(JsonSerializer.Serialize(record, CsJson.Compact)).Append('\n');
+                sb.Append(Redact(JsonSerializer.Serialize(record, CsJson.Compact))).Append('\n');
             }
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
         }
@@ -173,7 +173,7 @@ namespace LuanShi.ControlledScenarios
             var record = new Dictionary<string, object>
             {
                 { "dispatch_state", cap.State },
-                { "refusal_reason", cap.RefusalReason },
+                { "refusal_reason", Redact(cap.RefusalReason) },
                 { "schema", "luanshi-controlled-dispatch/1" },
                 { "run_id", context.RunId },
                 { "scenario_id", context.ScenarioId },
@@ -214,7 +214,9 @@ namespace LuanShi.ControlledScenarios
                 { "status", StatusOf(cap, linked, kind) },
                 { "unknown_fields", unknown },
             };
-            return record;
+            // Every field (prompts, reply, provider block, explanation, error-derived values)
+            // passes through the one central redaction function before it can be serialized.
+            return (Dictionary<string, object>)RedactValue(record);
         }
 
         private static string KindOf(CsDispatchCapture cap, bool linked, bool parseOk,

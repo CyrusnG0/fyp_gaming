@@ -173,7 +173,7 @@ namespace LuanShi.ControlledScenarios
             foreach (string limitation in result.Limitations)
                 sb.Append("  limitation: ").Append(limitation).Append('\n');
             sb.Append("evidence: ").Append(result.RunDirectory).Append('\n');
-            return sb.ToString();
+            return CsEvidence.Redact(sb.ToString());
         }
 
         public static string ScenarioText(CsScenarioResult scenario)
@@ -195,7 +195,7 @@ namespace LuanShi.ControlledScenarios
             sb.Append("  elapsed_ms=").Append(scenario.ElapsedMs).Append('\n');
             if (!string.IsNullOrEmpty(scenario.Detail))
                 sb.Append("    detail: ").Append(scenario.Detail).Append('\n');
-            return sb.ToString();
+            return CsEvidence.Redact(sb.ToString());
         }
 
         private static string Token(long? value) => value.HasValue ? value.Value.ToString() : "unknown";

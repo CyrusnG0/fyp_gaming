@@ -519,6 +519,27 @@ class LiveAuditTests(Fixture):
                             for problem in problems))
 
 
+class BaseUrlDisplayAuditTests(unittest.TestCase):
+    """The audit flags a non-sk- secret-like path segment without echoing the value."""
+
+    def test_secret_like_display_path_is_flagged(self):
+        sentinel = "SENTINELKEY-ab12cd34ef56gh78"
+        block = {"kind": "openai-compatible", "model": "m", "live": True,
+                 "base_url_display": "https://example.invalid/v1/%s" % sentinel,
+                 "env_var_names": list(LIVE_ENV_NAMES), "max_output_tokens": 512,
+                 "request_timeout_ms": 25000, "effective_max_requests": 200,
+                 "effective_max_wall_seconds": 120, "commit": "abc1234", "dirty": False}
+        problems = []
+        audit.check_live_block(block, "provider", problems, run_level=True)
+        self.assertTrue(any("secret-like path segment" in problem for problem in problems))
+        self.assertTrue(all(sentinel not in problem for problem in problems))
+
+        block["base_url_display"] = "https://example.invalid/v1"
+        problems = []
+        audit.check_live_block(block, "provider", problems, run_level=True)
+        self.assertFalse(any("secret-like path segment" in problem for problem in problems))
+
+
 class ProviderStatusTests(unittest.TestCase):
     def test_provider_status(self):
         output = io.StringIO()

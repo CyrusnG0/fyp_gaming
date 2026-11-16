@@ -34,14 +34,17 @@ namespace LuanShi.ControlledScenarios
         }
 
         /// <summary>
-        /// Situation 3: a stronger visible threat with legal movement/retreat available. Staged:
-        /// own army 500 at (8,8), enemy army 3000 at (9,8). The fixture retreats to (7,8); the
-        /// fixture is not a pass condition and proves only that the retreat path is advertised.
+        /// Situation 3a: a stronger visible threat with attacks disabled, so the only offered
+        /// response is retreat. The title and saved display_name say "retreat-only" explicitly;
+        /// the scenario id stays stable. Staged: own army 500 at (8,8), enemy army 3000 at (9,8).
+        /// The fixture retreats to (7,8); it is a labelled fake_scripted fixture, not a pass
+        /// condition and not model behaviour.
         /// </summary>
         private static CsScenarioSpec StrongThreatRetreat(int? seed)
         {
             return CsScenarioFactory.Common(
-                "cs-strong-threat-retreat-v1", "Strong threat with legal retreat", seed ?? 0, 1,
+                "cs-strong-threat-retreat-v1", "Strong threat, retreat-only (attack disabled)",
+                seed ?? 0, 1,
                 attack: false, research: false, manualLookup: false, deliberation: false,
                 researchPoints: 0,
                 ownArmy: new CsArmySetup
@@ -58,6 +61,37 @@ namespace LuanShi.ControlledScenarios
                 {
                     CsScenarioFactory.Step(CsScenarioFactory.March(7, 8)),
                     CsScenarioFactory.Step(CsScenarioFactory.EndTurn("retreat completed")),
+                },
+                opponentScript: null);
+        }
+
+        /// <summary>
+        /// Situation 3b: the same stronger visible threat with attacks enabled, so the engine's
+        /// legal actions include BOTH an attack on the enemy army and a retreat move. Staged: own
+        /// army 500 at (8,8), enemy army 3000 at (9,8). The fixture retreats to (7,8); it is a
+        /// labelled fake_scripted fixture, not a pass condition and not model behaviour.
+        /// </summary>
+        private static CsScenarioSpec StrongThreatFightOrRetreat(int? seed)
+        {
+            return CsScenarioFactory.Common(
+                "cs-strong-threat-fight-or-retreat-v1",
+                "Strong threat, fight or retreat (attack enabled)", seed ?? 0, 1,
+                attack: true, research: false, manualLookup: false, deliberation: false,
+                researchPoints: 0,
+                ownArmy: new CsArmySetup
+                {
+                    Id = CsScenarioFactory.OwnArmyId, Name = "Outnumbered Host", OwnerSeatId = "seat-0",
+                    X = 8, Z = 8, Troops = 500,
+                },
+                enemyArmy: new CsArmySetup
+                {
+                    Id = CsScenarioFactory.EnemyArmyId, Name = "Enemy Main Host", OwnerSeatId = "seat-1",
+                    X = 9, Z = 8, Troops = 3000,
+                },
+                studyScript: new List<CsScriptStep>
+                {
+                    CsScenarioFactory.Step(CsScenarioFactory.March(7, 8)),
+                    CsScenarioFactory.Step(CsScenarioFactory.EndTurn("retreat fixture completed")),
                 },
                 opponentScript: null);
         }

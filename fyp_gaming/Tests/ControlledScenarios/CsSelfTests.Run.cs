@@ -8,18 +8,18 @@ namespace LuanShi.ControlledScenarios
     public static partial class CsSelfTests
     {
         /// <summary>
-        /// CS-01: the tracked six-scenario manifest runs fully offline through the production
-        /// spectator session, and each scenario keeps its setup, script, settings, exact prompts,
-        /// linked dispatches, production run log, exchange capture and report.
+        /// CS-01: the tracked seven-scenario default manifest runs fully offline through the
+        /// production spectator session, and each scenario keeps its setup, script, settings, exact
+        /// prompts, linked dispatches, production run log, exchange capture and report.
         /// </summary>
-        private static void SixScenariosEvidence(TestLog log)
+        private static void SevenScenariosEvidence(TestLog log)
         {
             string outRoot = NewRunDir("cs01");
             try
             {
                 CsRunResult run = CsRunner.Run(DefaultManifest(), outRoot, CsPaths.RepoRoot());
-                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 6,
-                    "[CS-01] all six fake scenarios complete", run.Status + " (" + run.Detail + ")");
+                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 7,
+                    "[CS-01] all seven fake scenarios complete", run.Status + " (" + run.Detail + ")");
                 log.Check(File.Exists(Path.Combine(run.RunDirectory, "run-manifest.json"))
                         && File.Exists(Path.Combine(run.RunDirectory, "dispatches.ndjson")),
                     "[CS-01] the run manifest and aggregate dispatch file exist");

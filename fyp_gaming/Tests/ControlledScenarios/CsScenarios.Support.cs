@@ -14,6 +14,7 @@ namespace LuanShi.ControlledScenarios
         {
             "cs-visible-contact-v1", "cs-advantageous-attack-v1", "cs-strong-threat-retreat-v1",
             "cs-research-purchase-v1", "cs-inquiry-manual-v1", "cs-memory-note-followup-v1",
+            "cs-strong-threat-fight-or-retreat-v1",
         };
 
         public static IReadOnlyList<string> Keys { get; } = Array.AsReadOnly(AllIds);
@@ -25,6 +26,8 @@ namespace LuanShi.ControlledScenarios
                 case "cs-visible-contact-v1": spec = VisibleContact(seed); return true;
                 case "cs-advantageous-attack-v1": spec = AdvantageousAttack(seed); return true;
                 case "cs-strong-threat-retreat-v1": spec = StrongThreatRetreat(seed); return true;
+                case "cs-strong-threat-fight-or-retreat-v1":
+                    spec = StrongThreatFightOrRetreat(seed); return true;
                 case "cs-research-purchase-v1": spec = ResearchPurchase(seed); return true;
                 case "cs-inquiry-manual-v1": spec = InquiryManual(seed); return true;
                 case "cs-memory-note-followup-v1": spec = MemoryNoteFollowup(seed); return true;

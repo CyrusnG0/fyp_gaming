@@ -72,8 +72,8 @@ namespace LuanShi.ControlledScenarios
             try
             {
                 CsRunResult run = CsRunner.Run(DefaultManifest(), outRoot, CsPaths.RepoRoot());
-                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 6,
-                    "[CS-03] all six scenarios provide dispatches to check", run.Status + " " + run.Detail);
+                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 7,
+                    "[CS-03] all seven scenarios provide dispatches to check", run.Status + " " + run.Detail);
 
                 var hidden = new[] { CsScenarioFactory.EnemyCityId, CsScenarioFactory.HiddenArmyId };
                 bool actingSeat = true, fogBoundary = true, ownVisible = false, leaksOk = true;

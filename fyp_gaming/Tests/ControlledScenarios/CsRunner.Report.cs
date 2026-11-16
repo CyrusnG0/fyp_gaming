@@ -10,6 +10,30 @@ namespace LuanShi.ControlledScenarios
     // Status classification and the per-scenario / per-run JSON artefacts.
     public static partial class CsRunner
     {
+        /// <summary>
+        /// True when the sealed captures show the transport abandoned or refused a dispatch at a
+        /// named wall ceiling. The runner loop and the transport deadline race; whichever loses,
+        /// the evidence must attribute the cut to the wall. Assigns <paramref name="wallLimit"/>
+        /// only while it is still null, so a limit already set by the loop is preserved.
+        /// </summary>
+        internal static bool WallCutByTransport(List<CsDispatchCapture> captures,
+            bool runWallConstrained, ref string wallLimit)
+        {
+            foreach (CsDispatchCapture cap in captures)
+            {
+                if (cap.State != "deadline_abandoned"
+                    && cap.RefusalReason != "max_run_wall_seconds"
+                    && cap.RefusalReason != "max_scenario_wall_seconds")
+                    continue;
+                if (wallLimit == null)
+                    wallLimit = cap.State == "deadline_abandoned"
+                        ? (runWallConstrained ? "max_run_wall_seconds" : "max_scenario_wall_seconds")
+                        : cap.RefusalReason;
+                return true;
+            }
+            return false;
+        }
+
         private static void Classify(CsScenarioResult result, SpectatorSession session,
             CsScenarioSpec spec, List<CsDispatchCapture> captures, List<CsRunLine> runLines,
             string wallLimit, string requestLimitName, bool wallCutByTransport = false)
@@ -29,7 +53,7 @@ namespace LuanShi.ControlledScenarios
                 && session.PauseReason.IndexOf("session request limit", StringComparison.Ordinal) >= 0)
                 limit = string.IsNullOrEmpty(requestLimitName) ? "max_scenario_requests" : requestLimitName;
             result.Limit = limit;
-            result.Detail = session.PauseReason ?? session.StopReason;
+            result.Detail = CsEvidence.Redact(session.PauseReason ?? session.StopReason);
             // A request abandoned by the transport exactly at the wall boundary makes the runner
             // report a failure; the real cause is the named wall ceiling, so keep it a stop.
             result.Status = failedTurn && !wallCutByTransport ? CsStatus.Failed
@@ -250,7 +274,8 @@ namespace LuanShi.ControlledScenarios
                 { "limitations", result.Limitations },
             };
             File.WriteAllText(Path.Combine(runDir, "run-manifest.json"),
-                JsonSerializer.Serialize(manifestOut, CsJson.Indented), new UTF8Encoding(false));
+                CsEvidence.Redact(JsonSerializer.Serialize(manifestOut, CsJson.Indented)),
+                new UTF8Encoding(false));
         }
 
         /// <summary>Per-scenario provider identity, repeated so every manifest entry is self-contained.</summary>
@@ -287,7 +312,8 @@ namespace LuanShi.ControlledScenarios
         private static void WriteJson(string directory, string name, object value)
         {
             File.WriteAllText(Path.Combine(directory, name),
-                JsonSerializer.Serialize(value, CsJson.Indented), new UTF8Encoding(false));
+                CsEvidence.Redact(JsonSerializer.Serialize(value, CsJson.Indented)),
+                new UTF8Encoding(false));
         }
 
         private static string Str(JsonElement element, string name)

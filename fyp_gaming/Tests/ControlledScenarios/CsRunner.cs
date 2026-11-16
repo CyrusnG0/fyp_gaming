@@ -83,7 +83,17 @@ namespace LuanShi.ControlledScenarios
             }
             else provider = CsProviderFactory.Create(manifest.Provider.Kind, manifest.Provider.Model);
 
-            int maxOutputTokens = manifest.RunCeilings?.MaxOutputTokens ?? 400;
+            // A live path never gets the fake 400 default: the same validated token limit, bounded
+            // budget and explicit authorization are checked here before the run directory exists.
+            int maxOutputTokens = manifest.RunCeilings?.MaxOutputTokens
+                ?? (provider.IsLive ? 0 : 400);
+            int maxScenarios = manifest.RunCeilings.MaxScenarios.Value;
+            int maxRunRequests = manifest.RunCeilings.MaxRunRequests.Value;
+            long maxRunMs = manifest.RunCeilings.MaxRunWallSeconds.Value * 1000L;
+            // One budget for the whole run: every dispatch reserves from it, so the actual total
+            // can never exceed max_run_requests even when a scenario's own cap is larger.
+            var budget = new CsRunBudget(maxRunRequests, maxRunMs);
+            ValidateLiveDispatch(provider, options.AllowLive, budget, maxOutputTokens);
             string baseUrlDisplay = provider.IsLive && environment != null
                 ? CsLiveEnvironment.DisplayBaseUrl(environment.BaseUrl) : null;
 
@@ -105,13 +115,7 @@ namespace LuanShi.ControlledScenarios
             result.UntrackedBuildInputs.AddRange(git.UntrackedBuildInputs);
 
             var clock = Stopwatch.StartNew();
-            int maxScenarios = manifest.RunCeilings.MaxScenarios.Value;
-            int maxRunRequests = manifest.RunCeilings.MaxRunRequests.Value;
-            long maxRunMs = manifest.RunCeilings.MaxRunWallSeconds.Value * 1000L;
             string stopLimit = null;
-            // One budget for the whole run: every dispatch reserves from it, so the actual total
-            // can never exceed max_run_requests even when a scenario's own cap is larger.
-            var budget = new CsRunBudget(maxRunRequests, maxRunMs);
 
             for (int i = 0; i < manifest.Scenarios.Count; i++)
             {
@@ -131,7 +135,7 @@ namespace LuanShi.ControlledScenarios
                 spec.MaxWallSeconds = manifest.ScenarioWallSeconds(entry);
                 spec.RequestTimeoutMs = manifest.ScenarioRequestTimeoutMs(entry);
                 CsScenarioResult scenario = RunScenario(spec, runDir, provider, git, runId,
-                    budget, manifest.RunCeilings, maxOutputTokens);
+                    budget, manifest.RunCeilings, maxOutputTokens, options.AllowLive);
                 result.Scenarios.Add(scenario);
                 bool more = i + 1 < manifest.Scenarios.Count;
                 if (scenario.Status == CsStatus.Failed) { stopLimit = "scenario_failed"; break; }

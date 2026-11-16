@@ -32,6 +32,14 @@ namespace LuanShi.ControlledScenarios
         public long MaxMs => _maxMs;
         public long ElapsedMs => _clock.ElapsedMilliseconds;
 
+        /// <summary>
+        /// True only for a genuinely finite whole-run allowance. <see cref="Unbounded"/> (and the
+        /// zeroed budget produced by non-positive inputs) is not bounded, so it can never
+        /// authorize a live dispatch.
+        /// </summary>
+        public bool IsBounded => _maxRequests > 0 && _maxMs > 0
+            && _maxRequests < int.MaxValue && _maxMs < long.MaxValue;
+
         /// <summary>Atomically consumes one request allowance; false when the run cap is exhausted.</summary>
         public bool TryReserve()
         {
