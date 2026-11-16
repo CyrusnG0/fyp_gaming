@@ -16,9 +16,10 @@ namespace LuanShi.Engine
         /// <summary>
         /// The demo-equivalent policy: the same six requests per turn, five accepted action admissions
         /// per turn, sixty-second turn window and sixty-request session cap that <see cref="LlmConfig"/>
-        /// already defaults to. Inquiry is a zero allowance because the live demo exposes no inquiry
-        /// tool; an integration that enables LS-018 must supply its own policy. Token limits are left
-        /// unenforced, so <see cref="DeliberationBudgetPolicy.TokenBudgetEnforced"/> is false.
+        /// already defaults to. Inquiry mirrors the configured tool: zero with every opt-in off, the
+        /// per-turn deliberation allowance when deliberation is enabled, and the request allowance for
+        /// the legacy manual_lookup-only loop. Token limits are left unenforced, so
+        /// <see cref="DeliberationBudgetPolicy.TokenBudgetEnforced"/> is false.
         /// </summary>
         public static DeliberationBudgetPolicy DemoDefaults() => FromDemoConfig(new LlmConfig());
 
@@ -38,8 +39,8 @@ namespace LuanShi.Engine
                 MaxRequestsPerSession = NonNegative(config.MaxTotalRequests),
                 MaxActionsPerTurn = NonNegative(config.MaxActionsPerTurn),
                 MaxActionsPerSession = DeliberationBudgetLimits.Unenforced,
-                MaxInquiryPerTurn = 0,
-                MaxInquiryPerSession = 0,
+                MaxInquiryPerTurn = InquiryAllowance(config),
+                MaxInquiryPerSession = DeliberationBudgetLimits.Unenforced,
                 MaxWallMillisPerTurn = Milliseconds(config.MaxTurnSeconds, nameof(config.MaxTurnSeconds)),
                 MaxWallMillisPerSession = DeliberationBudgetLimits.Unenforced,
                 MaxInputTokensPerTurn = DeliberationBudgetLimits.Unenforced,
@@ -60,6 +61,18 @@ namespace LuanShi.Engine
             => new DeliberationBudgetPolicy(profileId, ResearchProfileVersion, mode, limits);
 
         private static int NonNegative(int value) => value < 0 ? 0 : value;
+
+        /// <summary>
+        /// Inquiry allowance derived from the same live configuration. Deliberation uses its own
+        /// documented cap; the legacy manual_lookup loop can spend at most one inquiry per request.
+        /// Every tool disabled means no inquiry work can be admitted.
+        /// </summary>
+        private static int InquiryAllowance(LlmConfig config)
+        {
+            if (config.EnableDeliberation) return NonNegative(config.MaxInquiriesPerTurn);
+            if (config.EnableManualLookup) return NonNegative(config.MaxRequestsPerTurn);
+            return 0;
+        }
 
         private static int Milliseconds(int seconds, string name)
         {

@@ -65,6 +65,8 @@ namespace LuanShi.Engine
             string endedBy;
             if (runnerState == RunnerState.Finished && _runner.EndReason == EndReason.GameOver)
                 endedBy = "game over";
+            else if (runnerState == RunnerState.Finished && _runner.EndReason == EndReason.NoteEndedTurn)
+                endedBy = "strategic_note";
             else if (runnerState == RunnerState.Failed)
                 endedBy = "failed: " + (failure ?? "runner failed");
             else if (runnerState == RunnerState.Finished && !string.IsNullOrEmpty(failure))
@@ -162,6 +164,8 @@ namespace LuanShi.Engine
                 SeatId = host.SeatId,
                 FactionName = host.FactionName,
                 Requests = _runner.RequestsThisTurn,
+                Inquiries = _runner.InquiriesThisTurn,
+                Notes = _runner.NotesThisTurn,
                 Actions = _runner.ActionsThisTurn,
                 Accepted = host.Accepted,
                 Rejected = host.Rejected,
@@ -173,6 +177,7 @@ namespace LuanShi.Engine
                 EndedBy = endedBy,
                 EndReason = _runner.EndReason,
                 EndReasonText = _runner.EndReasonText,
+                DeliberationStopCode = _runner.DeliberationStopCode,
             };
         }
 

@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost
+        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost, IDeliberationHost
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -80,6 +80,9 @@ namespace LuanShi.Engine
 
             /// <summary>Authoritative terminal signal, never a cached observation or display value.</summary>
             public bool IsGameOver => _engine.State.WinnerSeatId != null;
+
+            /// <summary>Authoritative match identity for the deliberation ledger, never a model value.</summary>
+            public string MatchId => _engine.State.GameId;
         }
 
         private readonly GameEngine _engine;
@@ -172,10 +175,32 @@ namespace LuanShi.Engine
             }
         }
 
-        public int VoluntaryEndTurns => CountEndings(EndReason.ModelEndedTurn);
+        public int TotalInquiries
+        {
+            get
+            {
+                int total = 0;
+                for (int i = 0; i < _records.Count; i++) total += _records[i].Inquiries;
+                return total;
+            }
+        }
+
+        public int TotalNotes
+        {
+            get
+            {
+                int total = 0;
+                for (int i = 0; i < _records.Count; i++) total += _records[i].Notes;
+                return total;
+            }
+        }
+
+        public int VoluntaryEndTurns => CountEndings(EndReason.ModelEndedTurn,
+            EndReason.NoteEndedTurn);
         public int LimitEndings => CountEndings(EndReason.ActionLimit, EndReason.RequestLimit,
             EndReason.InvalidResponseLimit, EndReason.TurnTimeLimit,
-            EndReason.SessionRequestLimit, EndReason.UsdBudgetLimit);
+            EndReason.SessionRequestLimit, EndReason.UsdBudgetLimit,
+            EndReason.DeliberationBudget);
         public int FailedEndings => CountEndings(EndReason.ProviderError, EndReason.RequestTimeout,
             EndReason.HostError, EndReason.PromptTooLarge, EndReason.TransportError,
             EndReason.UsdBudgetUnknown);

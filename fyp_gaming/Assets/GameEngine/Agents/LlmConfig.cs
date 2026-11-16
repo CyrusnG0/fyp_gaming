@@ -28,6 +28,27 @@ namespace LuanShi.Engine
         public bool EnableManualLookup;
 
         /// <summary>
+        /// Opt-in deliberation, default OFF. When true, the model may spend replies on any of the
+        /// four read-only inquiry routes (rules, visible entity, own history, own memory) and may
+        /// end its turn with a bounded strategic note that is read back next turn. It implies
+        /// <see cref="EnableManualLookup"/> for the inquiry contract. The flag off keeps the legacy
+        /// prompt text, version, hash and action-only behaviour byte-identical.
+        /// </summary>
+        public bool EnableDeliberation;
+
+        /// <summary>Per-turn read-only inquiry allowance while deliberation is enabled.</summary>
+        public int MaxInquiriesPerTurn = 3;
+
+        /// <summary>
+        /// Hard character cap for one inquiry result injected into the next prompt. The service
+        /// default is larger; a smaller prompt-facing cap keeps room for the observation.
+        /// </summary>
+        public int MaxInquiryResultChars = 4000;
+
+        /// <summary>Maximum characters in one strategic note.</summary>
+        public int MaxNoteChars = 400;
+
+        /// <summary>
         /// Opt-in per-country strategic personas, default OFF. When true, the prompt appends the
         /// advisory persona for the acting seat's trusted faction and uses prompt version
         /// <see cref="PromptBuilder.PersonaPromptVersion"/>. Rules, observations and validation are unchanged.
@@ -105,6 +126,7 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
+        /// enable_deliberation, max_inquiries_per_turn, max_inquiry_result_chars, max_note_chars,
         /// enable_personas, enable_attack, personas.
         /// </summary>
         public static LlmConfig LoadFromFile(string path)
@@ -153,6 +175,13 @@ namespace LuanShi.Engine
             sb.Append("; max_usd=").Append(Number(MaxUsd));
             // Appending only when enabled keeps the legacy disabled diagnostic byte-for-byte unchanged.
             if (EnableManualLookup) sb.Append("; manual_lookup=true");
+            if (EnableDeliberation)
+            {
+                sb.Append("; deliberation=true");
+                sb.Append("; inquiries/turn=").Append(MaxInquiriesPerTurn.ToString(CultureInfo.InvariantCulture));
+                sb.Append("; max_inquiry_result_chars=").Append(MaxInquiryResultChars.ToString(CultureInfo.InvariantCulture));
+                sb.Append("; max_note_chars=").Append(MaxNoteChars.ToString(CultureInfo.InvariantCulture));
+            }
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
             return sb.ToString();
@@ -186,6 +215,14 @@ namespace LuanShi.Engine
                     case "max_usd": MaxUsd = Number(field.Value, MaxUsd); break;
                     case "enable_manual_lookup":
                         EnableManualLookup = Bool(field.Value, EnableManualLookup); break;
+                    case "enable_deliberation":
+                        EnableDeliberation = Bool(field.Value, EnableDeliberation); break;
+                    case "max_inquiries_per_turn":
+                        MaxInquiriesPerTurn = Int(field.Value, MaxInquiriesPerTurn); break;
+                    case "max_inquiry_result_chars":
+                        MaxInquiryResultChars = Int(field.Value, MaxInquiryResultChars); break;
+                    case "max_note_chars":
+                        MaxNoteChars = Int(field.Value, MaxNoteChars); break;
                     case "enable_personas":
                         EnablePersonas = Bool(field.Value, EnablePersonas); break;
                     case "enable_attack":

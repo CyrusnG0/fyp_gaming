@@ -24,6 +24,10 @@ namespace LuanShi.Engine
         TransportError,
         GameOver,
         Cancelled,
+        /// <summary>The model ended its turn with a strategic note instead of an order.</summary>
+        NoteEndedTurn,
+        /// <summary>The deliberation ledger refused the next unit of work (never a model error).</summary>
+        DeliberationBudget,
     }
 
     public sealed partial class LlmTurnRunner
@@ -62,6 +66,9 @@ namespace LuanShi.Engine
                     case EndReason.TransportError:
                         return "Failed - " + (FailureReason ?? "transport error");
                     case EndReason.GameOver: return "Finished - game over";
+                    case EndReason.NoteEndedTurn: return "Finished - strategic note";
+                    case EndReason.DeliberationBudget:
+                        return "Stopped - deliberation budget (" + (FailureReason ?? "limit") + ")";
                     case EndReason.Cancelled:
                         return "Cancelled - " + (FailureReason ?? "by host");
                     default: return "Turn not finished";
@@ -74,6 +81,10 @@ namespace LuanShi.Engine
             string commandJson = null;
             bool? resultOk = null;
             string resultError = null;
+
+            // The provider request is settled exactly once, before any parse or execute path, so a
+            // malformed, empty or stale answer still reports its measured usage.
+            SettleRequestReservation(flight, response);
 
             // Terminal stop: a winner declared while this request was in flight makes the response
             // stale. Discard it (never parse or execute it) and stop before any new dispatch.
@@ -108,9 +119,17 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // Deliberation first: a note is terminal and can never be mistaken for an action or an
+            // inquiry, even though all three share the "tool" field.
+            if (DeliberationActive && StrategicNoteParser.IsCandidate(response.Text))
+            {
+                HandleStrategicNote(flight, response);
+                return;
+            }
+
             // Opt-in only: an inquiry-shaped reply is classified before the action parser. The
             // disabled path below is untouched, so legacy replies are handled exactly as before.
-            if (_config.EnableManualLookup && IsInquiryCandidate(response.Text))
+            if ((_config.EnableManualLookup || DeliberationActive) && IsInquiryCandidate(response.Text))
             {
                 HandleInquiry(flight, response);
                 return;
@@ -204,8 +223,35 @@ namespace LuanShi.Engine
             }
 
             ActionCommand command = LlmActionParser.ToCommand(action);
+            // Admit the candidate order before it reaches the engine. The ledger counts accepted
+            // actions, so a rejected order releases its reservation and does not consume the
+            // allowance; the runner's own attempt cap above still governs the turn.
+            DeliberationAdmission actionAdmission = null;
+            if (_ledger != null)
+            {
+                actionAdmission = _ledger.TryAdmitGameAction();
+                if (!actionAdmission.Allowed)
+                {
+                    FinishDeliberationDenied(actionAdmission);
+                    WriteRecord(flight, response, true, null, null, actionAdmission.Code);
+                    return;
+                }
+                DeliberationBindingResult dispatch =
+                    _ledger.MarkDispatched(actionAdmission.ReservationId);
+                if (!dispatch.Ok)
+                {
+                    _ledger.Cancel(actionAdmission.ReservationId, DeliberationCancelReason.Aborted);
+                    _deliberationStopCode = dispatch.Code;
+                    FinishLimit("deliberation dispatch refused: " + dispatch.Code,
+                        EndReason.DeliberationBudget);
+                    WriteRecord(flight, response, true, null, null, dispatch.Code);
+                    return;
+                }
+            }
+
             ActionsThisTurn++;
             bool accepted = false;
+            bool submitThrew = false;
             try
             {
                 ValidationResult validation = _host.Submit(command);
@@ -217,8 +263,18 @@ namespace LuanShi.Engine
             }
             catch (Exception)
             {
+                submitThrew = true;
                 resultError = "host submit failed";
             }
+
+            // Settle exactly once after validation: an accepted order becomes a permanent accepted
+            // action; a rejected order releases its reservation so a later attempt is still possible.
+            if (_ledger != null && actionAdmission != null)
+                _ledger.Settle(actionAdmission.ReservationId, new DeliberationSettlement
+                {
+                    Accepted = accepted,
+                    Failed = submitThrew,
+                });
 
             commandJson = Redact(command == null ? null : command.ToJson());
             LastCommandJson = commandJson;

@@ -72,6 +72,7 @@ namespace LuanShi.Engine
             sb.Append(",\"seed\":").Append(session.Seed.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"balance_profile\":").Append(session.Balance.ToJson());
             sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
+            sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
             sb.Append(",\"seasons_planned\":")
               .Append(session.SeasonsPlanned.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"seasons_played\":")
@@ -80,16 +81,21 @@ namespace LuanShi.Engine
             Field(sb, "state", session.State.ToString(), config, true);
             Field(sb, "provider", provider, config, true);
             Field(sb, "model", model, config, true);
-            bool inquiry = config != null && config.EnableManualLookup;
+            bool inquiry = config != null && (config.EnableManualLookup || config.EnableDeliberation);
+            bool deliberation = config != null && config.EnableDeliberation;
+            int noteChars = config == null || config.MaxNoteChars < 1 ? 1 : config.MaxNoteChars;
             bool personas = config != null && config.EnablePersonas;
             // Spectator seats always expose attack planning, so the opt-in flag alone selects the
             // attack prompt identity here.
             bool attack = config != null && config.EnableAttack;
             Field(sb, "prompt_version",
-                PromptBuilder.VersionFor(true, inquiry, personas, attack), config, true);
+                PromptBuilder.VersionFor(true, inquiry, personas, attack, deliberation), config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
-                personas ? "per-request" : PromptBuilder.SchemaHashFor(true, inquiry, null, attack),
+                personas
+                    ? "per-request"
+                    : PromptBuilder.SchemaHashFor(true, inquiry, null, attack, deliberation,
+                        noteChars),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);
             Field(sb, "start_utc", Utc(session.StartedUtc), config, true);
@@ -102,6 +108,8 @@ namespace LuanShi.Engine
             sb.Append(",\"totals\":{");
             sb.Append("\"requests\":").Append(runner.TotalRequests.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"actions\":").Append(session.TotalActions.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"inquiries\":").Append(session.TotalInquiries.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"strategic_notes\":").Append(session.TotalNotes.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"accepted\":").Append(session.TotalAccepted.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"rejected\":").Append(session.TotalRejected.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"rejected_actions\":")
@@ -163,7 +171,7 @@ namespace LuanShi.Engine
         private static void AppendSeat(StringBuilder sb, SpectatorSession session, int season,
             string seatId, LlmConfig config)
         {
-            int requests = 0, actions = 0, accepted = 0, rejected = 0;
+            int requests = 0, inquiries = 0, notes = 0, actions = 0, accepted = 0, rejected = 0;
             var commands = new List<string>();
             var results = new List<string>();
             var endedBy = new List<string>();
@@ -174,6 +182,8 @@ namespace LuanShi.Engine
                 if (record.Season != season || !string.Equals(record.SeatId, seatId,
                         StringComparison.Ordinal)) continue;
                 requests += record.Requests;
+                inquiries += record.Inquiries;
+                notes += record.Notes;
                 actions += record.Actions;
                 accepted += record.Accepted;
                 rejected += record.Rejected;
@@ -187,6 +197,8 @@ namespace LuanShi.Engine
             Field(sb, "seat_id", seatId, config, false);
             Field(sb, "faction", faction, config, true);
             sb.Append(",\"requests\":").Append(requests.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"inquiries\":").Append(inquiries.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"strategic_notes\":").Append(notes.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"actions\":").Append(actions.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"accepted\":").Append(accepted.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"rejected\":").Append(rejected.ToString(CultureInfo.InvariantCulture));
@@ -237,6 +249,8 @@ namespace LuanShi.Engine
                 Field(sb, "seat_id", record.SeatId, config, true);
                 Field(sb, "faction", record.FactionName, config, true);
                 sb.Append(",\"requests\":").Append(record.Requests.ToString(CultureInfo.InvariantCulture));
+                sb.Append(",\"inquiries\":").Append(record.Inquiries.ToString(CultureInfo.InvariantCulture));
+                sb.Append(",\"strategic_notes\":").Append(record.Notes.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"actions\":").Append(record.Actions.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"accepted\":").Append(record.Accepted.ToString(CultureInfo.InvariantCulture));
                 sb.Append(",\"rejected\":").Append(record.Rejected.ToString(CultureInfo.InvariantCulture));
@@ -248,6 +262,7 @@ namespace LuanShi.Engine
                 Field(sb, "ended_by", record.EndedBy, config, true);
                 Field(sb, "end_reason", record.EndReason.ToString(), config, true);
                 Field(sb, "end_reason_text", record.EndReasonText, config, true);
+                Field(sb, "deliberation_stop_code", record.DeliberationStopCode, config, true);
                 sb.Append('}');
             }
             sb.Append(']');
