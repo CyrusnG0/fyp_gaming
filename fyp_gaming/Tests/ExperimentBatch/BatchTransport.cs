@@ -6,20 +6,6 @@ using LuanShi.Engine;
 
 namespace LuanShi.ExperimentBatch
 {
-    /// <summary>
-    /// Stand-in for the spatial-context feature, which is NOT integrated in the production runner or
-    /// prompt. The switch only steers the scripted responder (which march it picks) and is recorded in
-    /// every result as "fake-switch, not integrated". It never changes a production prompt, so the
-    /// arms' prompts stay identical and a difference in outcome is scripting, not model behaviour.
-    /// </summary>
-    public sealed class SpatialSwitch
-    {
-        public const string AdapterId = "fake-switch";
-        public const bool ProductionIntegrated = false;
-        public bool On;
-        public SpatialSwitch(bool on) { On = on; }
-    }
-
     /// <summary>One dispatched request and the reply the fake returned, captured independently of the recorder.</summary>
     public sealed class ExchangeCapture
     {
@@ -36,6 +22,7 @@ namespace LuanShi.ExperimentBatch
         public string FinishReason;
         public string Error;
         public string ScriptNote;       // "scripted" | "defaulted_end_turn"
+        public DispatchWitness Witness; // the seat's fog-filtered view of the other seats at this dispatch; null when no witness hook is set
     }
 
     /// <summary>
@@ -65,6 +52,9 @@ namespace LuanShi.ExperimentBatch
         public string Provider => "fake";
         public string Model { get; }
 
+        /// <summary>Optional: called with the active seat at each dispatch to record what that seat's observation showed then.</summary>
+        public Func<string, DispatchWitness> WitnessHook;
+
         public int CallCount { get { lock (_gate) return _captures.Count; } }
         public int Defaulted { get { lock (_gate) return _captures.FindAll(c => c.ScriptNote == "defaulted_end_turn").Count; } }
 
@@ -88,6 +78,7 @@ namespace LuanShi.ExperimentBatch
                 {
                     Index = _captures.Count + 1, Seat = seat, SeatRequest = seatRequest,
                     System = req.System, User = req.User,
+                    Witness = WitnessHook?.Invoke(seat),
                 };
                 string fault = FaultFor(seat, seatRequest);
                 cap.Fault = fault;

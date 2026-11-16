@@ -36,6 +36,12 @@ namespace LuanShi.ExperimentBatch
             config.EnableResearch = f.Research;
             config.EnableAttack = f.Attack;
             config.RequireVisibleMarchRoutes = f.VisibleMarchRoutes;
+            // The production switch: LlmConfig.SpatialContext.Level (off by default). Nothing else about the arm changes.
+            config.SpatialContext = new SpatialContextOptions
+            {
+                Level = !f.SpatialContext ? SpatialDetailLevel.Off
+                    : m.Spatial != null && m.Spatial.Level == "rich" ? SpatialDetailLevel.Rich : SpatialDetailLevel.Standard,
+            };
             config.EnablePersonas = m.Personas.Enabled;
             foreach (KeyValuePair<string, string> kv in m.Personas.BySeat) config.SetPersonaOverride(kv.Key, kv.Value);
             config.MaxRequestsPerTurn = c.MaxRequestsPerTurn.Value;
@@ -53,6 +59,9 @@ namespace LuanShi.ExperimentBatch
             config.MaxPromptChars = c.MaxPromptChars.Value;
             return config;
         }
+
+        /// <summary>Digest of the canonical state (see <see cref="BatchWorldDigest.Scope"/> for exactly what it covers). Researcher-side only.</summary>
+        public static string WorldDigest(GameEngine engine) => BatchWorldDigest.Compute(engine);
 
         /// <summary>Researcher-side end-of-match facts, read directly from canonical state (never a prompt input).</summary>
         public static List<string> FinalState(GameEngine engine)

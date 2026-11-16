@@ -29,6 +29,7 @@ namespace LuanShi.ExperimentBatch
                 if (!string.IsNullOrEmpty(o.Detail)) sb.Append(" - ").Append(o.Detail);
                 sb.Append('\n');
                 foreach (string t in o.TurnEndings) sb.Append("    ").Append(t).Append('\n');
+                if (o.Spatial != null) sb.Append("    spatial: ").Append(BatchSpatial.Summary(o.Spatial)).Append('\n');
                 if (o.Audit == null) continue;
                 sb.Append("    audit: ").Append(o.Audit.Ok ? "ok" : "MISMATCH").Append('\n');
                 foreach (string s in o.Audit.Mismatches) sb.Append("      mismatch: ").Append(s).Append('\n');
@@ -43,6 +44,10 @@ namespace LuanShi.ExperimentBatch
                 foreach (string d in p.SettingsCheck.Problems) sb.Append("    problem: ").Append(d).Append('\n');
                 sb.Append("    complete: ").Append(p.Complete ? "yes" : "NO - " + p.IncompleteReason).Append('\n');
                 if (p.SystemPromptComparison != null) sb.Append("    system prompts: ").Append(p.SystemPromptComparison).Append('\n');
+                if (p.SpatialProblems != null)
+                    sb.Append("    spatial pair check: ").Append(p.SpatialProblems.Count == 0 ? "ok (treatment = control + production spatial addendum; same observations, versions and hashes differ)" : "PROBLEMS").Append('\n');
+                if (p.SpatialProblems != null) foreach (string problem in p.SpatialProblems) sb.Append("      problem: ").Append(problem).Append('\n');
+                if (p.FinalWorldIdentical.HasValue) sb.Append("    final canonical world identical: ").Append(p.FinalWorldIdentical.Value ? "yes" : "no").Append('\n');
             }
             return sb.ToString();
         }

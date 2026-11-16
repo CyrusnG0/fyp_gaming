@@ -21,7 +21,8 @@ python tools/test_luanshi_experiment_batch.py
 | `pinned_commit`, `scenario`, `balance_profile`, `seasons`, `first_mover`, `factions` | what is played; `first_mover` and the seat→faction map are checked against the scenario (`compact-contact-v1`, or `-swapped` to give the other faction the first move) |
 | `personas` | `enabled` plus seat→persona overrides, applied through `LlmConfig.SetPersonaOverride` |
 | `provider` | `kind` must be `fake`; `model`; optional `faults` (seat, nth request of that seat, `provider_error` / `missing_usage` / `length_truncated` / `empty_reply`) |
-| `features` | `deliberation`, `rich_profile`, `research`, `spatial_context`, `visible_march_routes`, `attack`, `manual_lookup` |
+| `features` | `deliberation`, `rich_profile`, `research`, `spatial_context`, `visible_march_routes`, `attack`, `manual_lookup`. `spatial_context` drives the production `LlmConfig.SpatialContext.Level`; a spatial pair needs `visible_march_routes=true` (both arms) |
+| `spatial` | `level`: `standard` or `rich`, the production preset the arm with `spatial_context=true` uses. Identical in both arms; the other arm is `off` |
 | `ceilings` | per-match: requests/turn and total, actions, inquiries, turn and session seconds, request timeout, output and session input/output tokens, prompt chars. All required and positive. |
 | `batch_ceilings` | whole batch: matches, requests, input/output tokens, wall seconds, per-match wall seconds, `unknown_usage_policy` |
 | `seeds`, `experiment` | one pair (control, treatment) per seed; `experiment.variable` names the single flag that differs |
@@ -81,6 +82,10 @@ lost to Git's quoted display form. `--allow-dirty` is the explicit override for 
 `provenance.json` (HEAD, dirty files, untracked build inputs, flags) into the batch directory and the audit prints it.
 The check covers **repository inputs only**: external .NET configuration (user or machine NuGet config, `DOTNET_*`
 environment variables, the installed SDK and runtime) is separate environment evidence and is not verified here.
+The example manifest's `pinned_commit` is the commit its code was tested at; a manifest cannot name the commit that
+contains it. For a real batch generate a copy pinned to the final integration commit and keep it outside the tracked
+tree, so writing it does not move HEAD: `python tools/luanshi_pin_manifest.py <example> --out <path>/manifest.json`
+(HEAD by default, `--commit <rev>` otherwise; never overwrites), then `run ... --require-head`.
 `LUANSHI_BATCH_TEST_DELAY_MS` is a test-only seam that delays every fake reply; it is never set in a real run.
 
 ## Audit rules
@@ -91,11 +96,50 @@ accepted orders. The summary's per-turn `commands` list holds only the **last** 
 in the turn are reported as not visible there. Missing usage makes a total *unknown* (never zero); cut
 prompt sections, `finish_reason=length`, empty replies, unknown cost and reasoning counts are listed.
 
+## The spatial-context pair
+
+`experiment.variable = "spatial_context"` runs the PRODUCTION spatial map context as the one difference:
+
+- **Configuration.** Control sets `LlmConfig.SpatialContext.Level = Off`, treatment sets it to `spatial.level`.
+  `RequireVisibleMarchRoutes` is true in both arms (validation refuses a spatial pair otherwise, because spatial context
+  would silently enforce it in one arm only). Seed, scenario, factions, personas, research, deliberation and every ceiling
+  are the same, which the settings check proves (`features.spatial_context` is the only difference). Both arms get the
+  same `game_id`, so the arm name never reaches a prompt.
+- **The prompts are production prompts.** The fake provider receives exactly what `LlmTurnRunner` builds. The pair check
+  (`spatial_problems` in `batch-result.json`, "spatial pair check" in the report, `spatial_evidence` in each `match.json`)
+  verifies on the dispatched requests: the control carries no spatial material and every treatment request carries the
+  production addendum and `SPATIAL CONTEXT` section; the treatment system prompt is exactly the control's plus the
+  addendum; the prompt version names spatial only in the treatment and the schema hashes differ; the seat observation hash
+  is equal in every aligned request. `tools/luanshi_batch_spatial_audit.py` repeats these checks from the saved files.
+- **Truncation is recorded, not assumed.** Each treatment request carries the production `spatial_truncation` report; the
+  evidence counts reports and truncated requests, names the reasons (for example `move_option_cap`), sums the items
+  dropped and keeps the largest prompt size. In the example pair every treatment request truncates the move list.
+- **Privacy, per dispatch.** At every dispatch the batch records what that seat's own `Observe(seat)` showed of the other
+  seats' cities and armies (visible, scouted or hidden). A city id, city name or army id that was hidden at that dispatch
+  and had not been delivered to the seat must not appear in that request's prompt; any hit fails the pair. "Delivered"
+  means a prompt sent to that seat contained the text while the observation had it visible or scouted; being visible in an
+  observation alone is not delivery. A hidden one that was delivered earlier is retained knowledge: it is counted
+  (`retained_known_mentions`), not called a leak, and whether its wording is stale is not judged. This proves absence of those exact strings only. It trusts `Observe` as the
+  oracle, and does not cover numbers, treaty or event text, paraphrase or neutral cities (`BatchPrivacy.Scope`).
+- **World digest.** A deterministic digest walks every public field and property reachable from `GameState` (factions,
+  diplomacy, cities, armies, watch towers and the whole map: size, walkable, costs, neighbour tables) plus the balance
+  profile. It does not cover private fields (the RNG stream, the action counter, the next proposal id) or the event log
+  (`BatchWorldDigest.Scope`, copied into each result as `world_digest_scope`). It is compared at the start (must match) and
+  the end (`final_world_identical`). The scripted replies ignore the spatial setting, so the end states match by
+  construction: that shows the prompt is the only channel, not that a model would play the same.
+- **Memory is not exercised.** The runner is built with no durable `ILlmMemoryStore` (only the in-memory strategic-note
+  store), so production memory extraction, consolidation and recall do not run in this batch and nothing here validates
+  long-term memory.
+- **What differs by design.** `INFORMATION ACCESS` reports the session tokens left, which the larger treatment prompts
+  consume faster, so that line differs between the arms; it is a consequence of the treatment, not a leak.
+
+An arm that is stopped, failed or skipped leaves its pair incomplete; the spatial check is only judged on a pair whose
+arms both reached the end of their seasons.
+
 ## Fake and not-yet-real
 
-- `spatial_context` is **not integrated** in production. The fake switch only steers which legal march the
-  script picks (toward / away from the prize) and every result says `production_integrated=false`. The
-  arms' system prompts are byte-identical; a final-state difference is scripting.
+- Spatial context goes through the production prompt path, but the replies are scripted and identical in both arms, so
+  nothing here says how a model uses the map. A final-state difference between arms would need a real model.
 - The scripted "model" and its token counts are deterministic functions of the text.
 - Only the headless `SpectatorSession` host is exercised; the Unity `AgentTurnHost` path is not.
 - Run ids contain a timestamp and a random suffix, so file names differ between runs; settings hashes,

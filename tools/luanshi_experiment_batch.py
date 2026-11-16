@@ -6,12 +6,9 @@ can be verified from its files alone, without trusting the program that wrote th
 
   check-manifest <manifest>            schema, credential scan, explicit ceilings, pinned commit exists
   run <manifest> --out <dir>           check, run the offline C# batch (fake provider only), then audit
-  audit <batch-dir>                    re-derive every total from the per-request records and the pairs'
-                                       settings from the saved settings files
+  audit <batch-dir>                    re-derive every total, the pairs' settings and a spatial pair's prompts from the files
 
-No network call is made and no credential is read. Exit code: 0 ok, 1 audit/mismatch, 2 invalid input.
-Needs Python 3.8+ and, for `run`, the .NET SDK. Run it from anywhere inside the repository.
-
+No network call is made and no credential is read. Needs Python 3.8+ and, for `run`, the .NET SDK.
 Exit codes: 0 records consistent and matched batch complete; 1 audit mismatch; 2 invalid input;
 3 records consistent but the matched batch is INCOMPLETE (a skipped, stopped, failed or errored arm).
 """
@@ -22,6 +19,8 @@ import os
 import re
 import subprocess
 import sys
+
+from luanshi_batch_spatial_audit import audit_spatial_pair
 
 SCHEMA = "luanshi-experiment-batch/1"
 SECRET_KEY = re.compile(r"^(api_?key|apikey|secret|password|passwd|authorization|bearer|credentials?|access_?token|auth_?token)$", re.I)
@@ -307,6 +306,8 @@ def audit_batch(batch_dir):
                 notes.append("%s: system prompts aligned by seat and request number: %d aligned, %d differ, %d control-only, %d treatment-only -> %s"
                              % (pair_id, aligned, differing_n, only_l, only_r, "identical" if identical else "NOT identical"))
                 recorded = [p for p in result.get("pairs", []) if p.get("pair_id") == pair_id]
+                if manifest["experiment"]["variable"] == "spatial_context":
+                    audit_spatial_pair(batch_dir, seed, recorded, problems, notes)
                 if recorded and recorded[0].get("system_prompts_identical") != identical:
                     problems.append("%s: batch-result says system_prompts_identical=%s but the saved prompts give %s"
                                     % (pair_id, recorded[0].get("system_prompts_identical"), identical))

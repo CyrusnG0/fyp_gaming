@@ -33,7 +33,9 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("run_id")] public string RunId { get; set; }
         [JsonPropertyName("seasons_played")] public int SeasonsPlayed { get; set; }
         [JsonPropertyName("turn_endings")] public List<string> TurnEndings { get; set; } = new List<string>();
+        /// <summary>The production LlmConfig.SpatialContext level this arm dispatched with: off | standard | rich.</summary>
         [JsonPropertyName("spatial_context")] public string SpatialContext { get; set; }
+        [JsonPropertyName("spatial_evidence")] public SpatialEvidence Spatial { get; set; }
         /// <summary>Which wall-clock limit ended the match, or null.</summary>
         [JsonPropertyName("wall_limit")] public string WallLimit { get; set; }
         [JsonPropertyName("elapsed_ms")] public long ElapsedMs { get; set; }
@@ -59,9 +61,7 @@ namespace LuanShi.ExperimentBatch
             {
                 MatchId = spec.MatchId, PairId = spec.PairId, Arm = spec.Arm, Seed = spec.Seed, SettingsHash = spec.SettingsHash,
                 Status = "error",
-                SpatialContext = spec.Resolved.Features.SpatialContext
-                    ? "requested; " + SpatialSwitch.AdapterId + " only, production_integrated=false"
-                    : "off",
+                SpatialContext = BatchWorld.Config(spec.Resolved).SpatialContext.LevelKey(),
             };
             Directory.CreateDirectory(matchDir);
             var clock = Stopwatch.StartNew();
@@ -104,12 +104,12 @@ namespace LuanShi.ExperimentBatch
         private static void Play(MatchSpec spec, string matchDir, string batchId, MatchOutcome outcome, double batchRemaining)
         {
             BatchManifest m = spec.Resolved;
-            GameEngine engine = BatchWorld.Create(m, batchId + "-" + spec.MatchId, spec.Seed);
-            var spatial = new SpatialSwitch(m.Features.SpatialContext);
-            Dictionary<string, List<string>> scripts = BatchScripts.Build(engine, spec, spatial);
+            GameEngine engine = BatchWorld.Create(m, batchId + "-" + spec.PairId, spec.Seed);   // the arm name must not reach the prompt (the observation carries game_id)
+            Dictionary<string, List<string>> scripts = BatchScripts.Build(engine, spec);
+            string startDigest = BatchWorld.WorldDigest(engine);
             SpectatorSession session = null;
             var transport = new ScriptedSeatTransport(m.Provider.Model, () => session == null ? null : session.ActiveSeatId,
-                scripts, m.Provider.Faults);
+                scripts, m.Provider.Faults) { WitnessHook = seat => BatchPrivacy.Witness(engine, seat) };
             var recorder = new LlmRunRecorder(matchDir);
             LlmConfig config = BatchWorld.Config(m);
             var runner = new LlmTurnRunner(transport, config, recorder, null, new MemoryLlmStrategicNoteStore());
@@ -157,6 +157,8 @@ namespace LuanShi.ExperimentBatch
             Register(outcome, matchDir, "run_jsonl", recorder.FilePath);
             Register(outcome, matchDir, "exchanges", recorder.ExchangeFilePathFor(runner.RunId));
             Register(outcome, matchDir, "summary", summaryPath);
+            outcome.Spatial = BatchSpatial.Collect(outcome.SpatialContext, outcome.Captures, recorder.ExchangeFilePathFor(runner.RunId), recorder.FilePath,
+                startDigest, BatchWorld.WorldDigest(engine));
             outcome.Audit = MatchAuditor.Audit(matchDir, outcome, m);
         }
 

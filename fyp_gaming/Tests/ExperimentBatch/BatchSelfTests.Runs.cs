@@ -37,13 +37,13 @@ namespace LuanShi.ExperimentBatch
                     "status counts: " + string.Join(",", r.StatusCounts.Select(kv => kv.Key + "=" + kv.Value)));
                 log.Check(r.Pairs.Count == 2 && r.Pairs.All(p => p.SettingsCheck.Ok && p.BothAuditsOk),
                     "both pairs pass the settings check and their audits");
-                log.Check(r.Pairs.All(p => p.SystemPromptsIdentical == true && p.SystemPromptComparison.Contains("aligned")),
-                    "the arms send identical system prompts (spatial context is only a fake switch)");
-                log.Check(r.Pairs.All(p => p.FinalStateDiffers == true),
-                    "the scripted switch changes the march, so the arms' final states differ");
+                log.Check(r.Pairs.All(p => p.SystemPromptsIdentical == false && p.SystemPromptComparison.Contains("NOT identical")),
+                    "the arms' system prompts differ: the treatment carries the production spatial addendum");
+                log.Check(r.Pairs.All(p => p.FinalStateDiffers == false && p.FinalWorldIdentical == true),
+                    "the scripted replies ignore the spatial setting, so both arms end in the same world");
                 MatchOutcome treatment = Match(r, "seed4242-treatment");
-                log.Check(treatment.SpatialContext.Contains("production_integrated=false") && Match(r, "seed4242-control").SpatialContext == "off",
-                    "every result states that spatial context is a fake switch, not integrated");
+                log.Check(treatment.SpatialContext == "standard" && Match(r, "seed4242-control").SpatialContext == "off",
+                    "each result states the production spatial level it dispatched with");
 
                 bool filesOk = true;
                 foreach (MatchOutcome o in r.Matches)

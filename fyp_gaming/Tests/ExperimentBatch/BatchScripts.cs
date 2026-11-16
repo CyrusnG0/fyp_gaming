@@ -8,7 +8,8 @@ namespace LuanShi.ExperimentBatch
     /// <summary>
     /// The scripted "model" for one match: a reply list per seat, computed from the opening state with the
     /// production movement planner. It is plumbing, not behaviour: the same script always plays the same
-    /// way, and the spatial switch only flips which legal march it picks (toward or away from the prize).
+    /// way, and it NEVER reads the spatial setting, so both arms of a spatial pair send the same orders and
+    /// any difference between their requests comes from the production prompt alone.
     /// </summary>
     public static class BatchScripts
     {
@@ -16,7 +17,7 @@ namespace LuanShi.ExperimentBatch
 
         public static string NoteFor(string seat) => NotePrefix + seat + "-keep-the-line";
 
-        public static Dictionary<string, List<string>> Build(GameEngine engine, MatchSpec spec, SpatialSwitch spatial)
+        public static Dictionary<string, List<string>> Build(GameEngine engine, MatchSpec spec)
         {
             FeatureFlags f = spec.Resolved.Features;
             var scripts = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -26,7 +27,7 @@ namespace LuanShi.ExperimentBatch
                 var replies = new List<string>();
                 for (int season = 1; season <= spec.Resolved.Seasons; season++)
                 {
-                    if (season == 1) FirstSeason(engine, spec, spatial, seat, replies);
+                    if (season == 1) FirstSeason(engine, spec, seat, replies);
                     else
                     {
                         if (f.Deliberation) replies.Add("{\"tool\":\"search_history\",\"limit\":5}");
@@ -38,7 +39,7 @@ namespace LuanShi.ExperimentBatch
             return scripts;
         }
 
-        private static void FirstSeason(GameEngine engine, MatchSpec spec, SpatialSwitch spatial, string seat, List<string> replies)
+        private static void FirstSeason(GameEngine engine, MatchSpec spec, string seat, List<string> replies)
         {
             FeatureFlags f = spec.Resolved.Features;
             if (f.Deliberation)
@@ -47,16 +48,16 @@ namespace LuanShi.ExperimentBatch
                 replies.Add("{\"note\":\"" + NoteFor(seat) + "\"}");
             }
             if (f.Research) replies.Add("{\"type\":\"research\",\"args\":{\"line\":\"agri\"}}");
-            string march = MarchReply(engine, spec, spatial, seat);
+            string march = MarchReply(engine, spec, seat);
             if (march != null) replies.Add(march);
             replies.Add("{\"type\":\"end_turn\",\"summary\":\"season one done\"}");
         }
 
         /// <summary>
-        /// One legal march for the seat's first army. Control picks the reachable cell farthest from the
-        /// neutral city, treatment (switch on) the nearest, so the two arms visibly diverge.
+        /// One legal march for the seat's first army: the reachable cell nearest the neutral city. The same
+        /// choice in every arm, whatever the spatial setting.
         /// </summary>
-        private static string MarchReply(GameEngine engine, MatchSpec spec, SpatialSwitch spatial, string seat)
+        private static string MarchReply(GameEngine engine, MatchSpec spec, string seat)
         {
             MovementView view = spec.Resolved.Features.VisibleMarchRoutes
                 ? MovementPlanner.BuildDiversified(engine, seat)
@@ -72,7 +73,7 @@ namespace LuanShi.ExperimentBatch
                 {
                     if (option.Kind != "move") continue;
                     int distance = prize == null ? 0 : Math.Abs(option.X - prize.X) + Math.Abs(option.Z - prize.Z);
-                    bool better = best == null || (spatial.On ? distance < bestDistance : distance > bestDistance);
+                    bool better = best == null || distance < bestDistance;
                     if (better) { best = option; bestDistance = distance; }
                 }
                 if (best == null) continue;

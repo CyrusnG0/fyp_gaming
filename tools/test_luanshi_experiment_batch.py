@@ -16,6 +16,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import luanshi_experiment_batch as tool  # noqa: E402
+import luanshi_pin_manifest as pin  # noqa: E402
 
 EXAMPLE = os.path.join(tool.REPO, "fyp_gaming", "Tests", "ExperimentBatch", "examples", "example-manifest.json")
 
@@ -45,7 +46,7 @@ class ManifestChecks(unittest.TestCase):
     def test_example_is_valid(self):
         manifest, problems = tool.check_manifest(EXAMPLE)
         self.assertEqual(problems, [])
-        self.assertEqual(manifest["pinned_commit"], "e93f7f2")
+        self.assertRegex(manifest["pinned_commit"], "^[0-9a-f]{7,40}$")   # exists in this repository (checked above); which commit it names is a release decision
 
     def test_credentials_are_refused_without_echo(self):
         path = self.write(lambda m: m["provider"].update({"api_key": "sk-ABCDEFGHIJKLMNOPQRSTUV"}))
@@ -248,7 +249,7 @@ class AuditChecks(unittest.TestCase):
         self.edit_json(result, lambda d: d.update({"matches_with_unknown_usage": 0, "matched_batch_complete": False}))
         problems, _, _ = tool.audit_batch(batch)
         self.assertTrue(any("matched_batch_complete" in p for p in problems), problems)
-        self.edit_json(result, lambda d: (d.update({"matched_batch_complete": True}), d["pairs"][0].update({"system_prompts_identical": False})))
+        self.edit_json(result, lambda d: (d.update({"matched_batch_complete": True}), d["pairs"][0].update({"system_prompts_identical": True})))
         problems, notes, _ = tool.audit_batch(batch)
         self.assertTrue(any("system_prompts_identical" in p for p in problems), problems)
         self.assertTrue(any("aligned by seat and request number" in n and "14 aligned" in n for n in notes), notes)
@@ -259,6 +260,37 @@ class AuditChecks(unittest.TestCase):
         self.assertEqual(tool.compare_prompts(same, {("seat-0", 1): "Y", ("seat-0", 2): "X"})[:3], (False, 2, 2))
         identical, aligned, differing, only_left, only_right = tool.compare_prompts(same, {("seat-0", 1): "X"})
         self.assertEqual((identical, aligned, only_left, only_right), (False, 1, 1, 0))
+
+    def test_spatial_pair_is_audited_from_the_saved_files(self):
+        batch = self.run_batch()
+        problems, notes, incomplete = tool.audit_batch(batch)
+        self.assertEqual((problems, incomplete), ([], []))
+        self.assertTrue(any("spatial pair ok from saved files" in n and "14 treatment request(s)" in n and "move_option_cap" in n for n in notes), notes)
+        with open(os.path.join(batch, "batch-result.json"), encoding="utf-8") as handle:
+            pair = json.load(handle)["pairs"][0]
+        self.assertEqual(pair["spatial_problems"], [])
+        self.assertTrue(pair["final_world_identical"])
+        self.assertFalse(pair["system_prompts_identical"], "the treatment system prompt carries the production spatial addendum")
+
+        match = os.path.join(batch, "seed4242-treatment")
+        self.edit_json(os.path.join(match, "match.json"), lambda d: d["spatial_evidence"]["privacy"]["leaks"].append("seat-0 request 1 shows 'city-shu', hidden at dispatch and never shown to this seat"))
+        problems, _, _ = tool.audit_batch(batch)
+        self.assertTrue(any("spatial pair check" in p and "leak hidden ids" in p for p in problems), problems)
+
+    def test_spatial_audit_catches_a_prompt_that_lost_its_spatial_material(self):
+        batch = self.run_batch()
+        path = os.path.join(batch, "seed4242-treatment", "prompts.ndjson")
+        with open(path, encoding="utf-8") as handle:
+            lines = [json.loads(line) for line in handle if line.strip()]
+        lines[0]["system"] = lines[0]["system"].replace("SPATIAL CONTEXT AND SIGHT BOUNDARIES", "SIGHT")
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("".join(json.dumps(line) + "\n" for line in lines))
+        problems, _, _ = tool.audit_batch(batch)
+        self.assertTrue(any("spatial pair check" in p and "lacks the spatial addendum" in p for p in problems), problems)
+
+        self.edit_json(os.path.join(batch, "batch-result.json"), lambda d: d["pairs"][0].update({"spatial_problems": []}))
+        problems, _, _ = tool.audit_batch(batch)
+        self.assertTrue(any("disagrees with the saved prompts" in p for p in problems), problems)
 
     def test_skipped_arm_without_settings_is_an_incomplete_pair_not_a_crash(self):
         batch = self.run_batch(lambda m: m["batch_ceilings"].update({"max_total_requests": 90}))   # treatment cannot start
@@ -282,6 +314,34 @@ class AuditChecks(unittest.TestCase):
         self.assertEqual(problems, [], problems)
         self.assertTrue(any("mid-turn" in n for n in notes), notes)
         self.assertTrue(any("stopped" in i for i in incomplete), incomplete)
+
+
+class PinManifest(unittest.TestCase):
+    def test_pin_writes_a_copy_and_leaves_the_source_alone(self):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        out = os.path.join(directory, "pinned.json")
+        with open(EXAMPLE, "rb") as handle:
+            before = handle.read()
+        self.assertEqual(quiet(pin.main, [EXAMPLE, "--out", out]), 0)
+        head = subprocess.run(["git", "-C", tool.REPO, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        with open(out, encoding="utf-8") as handle:
+            pinned = json.load(handle)
+        with open(EXAMPLE, encoding="utf-8") as handle:
+            original = json.load(handle)
+        self.assertEqual(pinned["pinned_commit"], head)
+        self.assertEqual({k: v for k, v in pinned.items() if k != "pinned_commit"}, {k: v for k, v in original.items() if k != "pinned_commit"})
+        with open(EXAMPLE, "rb") as handle:
+            self.assertEqual(handle.read(), before)
+        self.assertEqual(tool.check_manifest(out)[1], [], "the pinned copy is a valid manifest")
+        self.assertEqual(quiet(pin.main, [EXAMPLE, "--out", out]), 2, "an existing output is never overwritten")
+
+    def test_pin_refuses_an_unknown_commit_and_an_unreadable_manifest(self):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        self.assertEqual(quiet(pin.main, [EXAMPLE, "--out", os.path.join(directory, "a.json"), "--commit", "0000000"]), 2)
+        self.assertEqual(quiet(pin.main, [os.path.join(directory, "missing.json"), "--out", os.path.join(directory, "b.json")]), 2)
+        self.assertFalse(os.path.exists(os.path.join(directory, "a.json")) or os.path.exists(os.path.join(directory, "b.json")))
 
 
 if __name__ == "__main__":

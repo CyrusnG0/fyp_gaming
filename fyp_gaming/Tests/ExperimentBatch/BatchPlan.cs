@@ -66,6 +66,9 @@ namespace LuanShi.ExperimentBatch
             if (fl == null) e.Add("features are required");
             else
             {
+                if (m.Experiment != null && m.Experiment.Variable == "spatial_context" && !fl.VisibleMarchRoutes)
+                    e.Add("a spatial_context pair needs features.visible_march_routes=true in both arms (spatial context would otherwise enforce it in one arm only)");
+                if (m.Spatial == null || (m.Spatial.Level != "standard" && m.Spatial.Level != "rich")) e.Add("spatial.level must be 'standard' or 'rich'");
                 if (fl.RichProfile && !fl.Deliberation) e.Add("features.rich_profile requires features.deliberation");
                 if (fl.ManualLookup && fl.Deliberation) e.Add("features.manual_lookup is the legacy path and conflicts with deliberation");
             }
@@ -83,6 +86,14 @@ namespace LuanShi.ExperimentBatch
                 e.Add("batch_ceilings.unknown_usage_policy must be 'stop_batch' or 'continue_on_unknown'");
             if (e.Count == 0)
                 foreach (string code in BatchWorld.Config(m).ValidateExperiment()) e.Add("the production runner would refuse this configuration: " + code);
+            if (e.Count == 0 && m.Experiment != null && FeatureProperty(m.Experiment.Variable) != null)
+                foreach (bool value in new[] { m.Experiment.Control, m.Experiment.Treatment })
+                {
+                    BatchManifest arm = Clone(m);
+                    FeatureProperty(m.Experiment.Variable).SetValue(arm.Features, value);
+                    foreach (string code in BatchWorld.Config(arm).ValidateExperiment())
+                        e.Add("the production runner would refuse the " + (value == m.Experiment.Control ? "control" : "treatment") + " arm: " + code);
+                }
             if (m.Seeds == null || m.Seeds.Count == 0) e.Add("seeds must list at least one seed");
             else if (new HashSet<int>(m.Seeds).Count != m.Seeds.Count) e.Add("seeds must be distinct");
             CheckExperiment(m, e);

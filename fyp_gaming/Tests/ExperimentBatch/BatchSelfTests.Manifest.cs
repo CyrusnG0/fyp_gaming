@@ -13,7 +13,7 @@ namespace LuanShi.ExperimentBatch
             log.Check(m != null && parseErrors.Count == 0, "the example manifest parses strictly");
             List<string> errors = BatchPlan.Validate(m);
             log.Check(errors.Count == 0, "the example manifest validates", string.Join("; ", errors));
-            log.Check(m.PinnedCommit == "e93f7f2" && m.Scenario == "compact-contact-v1" && m.BalanceProfile == "food-easy"
+            log.Check(System.Text.RegularExpressions.Regex.IsMatch(m.PinnedCommit ?? "", "^[0-9a-f]{7,40}$") && m.Scenario == "compact-contact-v1" && m.BalanceProfile == "food-easy"
                       && m.FirstMover == "seat-0" && m.Provider.Kind == "fake" && m.Features.Research && m.Features.RichProfile
                       && m.Ceilings.MaxTotalRequests == 80 && m.BatchCeilings.MaxTotalInputTokens == 5000000
                       && m.Seeds.SequenceEqual(new[] { 4242 }),
