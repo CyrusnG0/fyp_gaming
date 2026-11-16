@@ -18,7 +18,8 @@ internal static partial class Harness
         RehearseVisibleRouteMarch();
         RehearseFieldAttack();
         RehearseCityAssaultCapture();
-        RehearseIllegalAndFoggedRejections();
+        RehearseFoggedMarchRejection();
+        RehearseUnderStrengthAssaultRejection();
     }
 
     private static void CmrCheck(bool ok, string name) => Check(ok, "[CMR] " + name);
@@ -285,14 +286,25 @@ internal static partial class Harness
             + ", garrison " + garrisonBefore + "->" + chengdu.Garrison + ")");
     }
 
-    private static void RehearseIllegalAndFoggedRejections()
+    private static void RehearseFoggedMarchRejection()
     {
-        // Fresh state: attempt (a) fogged march to (20,8) (outside sight), (b) under-strength attack_city on Chengdu (500 gar needs 1500, army has 400).
+        // Natural opening CompactContact (no staged positions): Wei (seat-0) has armies at (8,8) and (6,9)
+        // and cities at (6,8) and (5,10). Destination (20,8) (Shu's Chengdu) is truly unseen under fog of war.
         GameEngine engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31014);
-        ArmyState weiMain = engine.State.FindArmy("army-wei-2");
-        weiMain.X = 19; weiMain.Z = 8;
-        weiMain.Troops = 400; // < 3 * 500 = 1500
-        CityState chengdu = engine.State.FindCity("city-shu");
+        Observation obsBefore = engine.Observe("seat-0");
+        var richOpts = new SpatialContextOptions { Level = SpatialDetailLevel.Rich };
+        MovementView moveBefore = MovementPlanner.BuildDiversified(
+            engine, "seat-0", MovementPlanner.DefaultMaxOptionsPerArmy, null, richOpts);
+
+        CmrCheck(!engine.InSight("seat-0", 20, 8),
+            "rehearsal 4a precondition: engine.InSight(seat-0, 20, 8) is false");
+        CmrCheck(!obsBefore.Cities.Any(c => c.X == 20 && c.Z == 8)
+                 && !obsBefore.Armies.Any(a => a.X == 20 && a.Z == 8),
+            "rehearsal 4a precondition: seat-0 observation lists no city or army at (20,8)");
+        CmrCheck(moveBefore.SpatialContext.Frontier.VisibleMaxX < 20
+                 && !moveBefore.Armies.Any(a => a.Options.Any(o => o.X == 20 && o.Z == 8)),
+            "rehearsal 4a precondition: (20,8) is beyond seat-0 visible frontier (VisibleMaxX="
+            + moveBefore.SpatialContext.Frontier.VisibleMaxX + ") and absent from movement options");
 
         var fake = new FakeLlmTransport();
         var config = CmrConfig(SpatialDetailLevel.Standard, attack: true);
@@ -301,9 +313,46 @@ internal static partial class Harness
         var session = new SpectatorSession(engine, runner, 1, 31014);
 
         string foggedMarch = "{\"type\":\"march\",\"target_id\":\"army-wei-1\",\"param_a\":20,\"param_b\":8,\"summary\":\"REHEARSAL fogged march\"}";
-        string weakAssault = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-2\",\"param_a\":20,\"param_b\":8,\"summary\":\"REHEARSAL understrength assault\"}";
         string endReply = "{\"type\":\"end_turn\",\"summary\":\"REHEARSAL end\"}";
         fake.EnqueueSuccess(foggedMarch);
+        fake.EnqueueSuccess(endReply);
+        fake.EnqueueSuccess(endReply); // seat-1
+
+        session.Start();
+        for (int i = 0; i < 64 && session.State == SpectatorState.Running; i++) session.Tick();
+
+        Observation obsAfter = engine.Observe("seat-0");
+        string feedbackPrompt = fake.Requests[1].User;
+        CmrCheck(session.State == SpectatorState.Completed && session.TotalRejected == 1 && session.TotalAccepted == 0,
+            "rehearsal 4a (fogged march): rejected safely and turn completes (rejected=" + session.TotalRejected + ")");
+        CmrCheck(engine.State.FindArmy("army-wei-1").X == 8 && engine.State.FindArmy("army-wei-1").Z == 8,
+            "rehearsal 4a: army-wei-1 remains at (8,8)");
+        CmrCheck(feedbackPrompt.Contains(FeedbackPolicy.DestinationNotReachable)
+                 && !feedbackPrompt.Contains("city-shu")
+                 && !feedbackPrompt.Contains("Chengdu")
+                 && !feedbackPrompt.Contains("army-shu-"),
+            "rehearsal 4a: safe feedback returned without leaking hidden Shu city/army at (20,8)");
+        CmrCheck(!obsAfter.Cities.Any(c => c.X == 20 && c.Z == 8),
+            "rehearsal 4a: post-rejection seat-0 observation still does not see (20,8)");
+    }
+
+    private static void RehearseUnderStrengthAssaultRejection()
+    {
+        // Staged state: army-wei-2 at (19,8) with 400 troops (< 3 * 500 = 1500 needed for Chengdu at (20,8)).
+        GameEngine engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31015);
+        ArmyState weiMain = engine.State.FindArmy("army-wei-2");
+        weiMain.X = 19; weiMain.Z = 8;
+        weiMain.Troops = 400;
+        CityState chengdu = engine.State.FindCity("city-shu");
+
+        var fake = new FakeLlmTransport();
+        var config = CmrConfig(SpatialDetailLevel.Standard, attack: true);
+        config.MaxInvalidPerTurn = 4;
+        var runner = new LlmTurnRunner(fake, config, null);
+        var session = new SpectatorSession(engine, runner, 1, 31015);
+
+        string weakAssault = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-2\",\"param_a\":20,\"param_b\":8,\"summary\":\"REHEARSAL understrength assault\"}";
+        string endReply = "{\"type\":\"end_turn\",\"summary\":\"REHEARSAL end\"}";
         fake.EnqueueSuccess(weakAssault);
         fake.EnqueueSuccess(endReply);
         fake.EnqueueSuccess(endReply); // seat-1
@@ -311,13 +360,11 @@ internal static partial class Harness
         session.Start();
         for (int i = 0; i < 64 && session.State == SpectatorState.Running; i++) session.Tick();
 
-        CmrCheck(session.State == SpectatorState.Completed && session.TotalRejected == 2 && session.TotalAccepted == 0,
-            "rehearsal 4 (illegal/fogged): both invalid orders rejected safely and turn still completes (rejected=" + session.TotalRejected + ")");
-        CmrCheck(engine.State.FindArmy("army-wei-1").X == 8 && engine.State.FindArmy("army-wei-1").Z == 8
-                 && chengdu.OwnerSeatId == "seat-1" && weiMain.Troops == 400,
-            "rehearsal 4: canonical state unchanged after fogged march and under-strength assault");
-        CmrCheck(fake.Requests[1].User.Contains(FeedbackPolicy.DestinationNotReachable)
-                 && fake.Requests[2].User.Contains(FeedbackPolicy.AssaultRatioTooLow),
-            "rehearsal 4: safe feedback categories reached subsequent prompts");
+        CmrCheck(session.State == SpectatorState.Completed && session.TotalRejected == 1 && session.TotalAccepted == 0,
+            "rehearsal 4b (under-strength assault): rejected safely and turn completes (rejected=" + session.TotalRejected + ")");
+        CmrCheck(chengdu.OwnerSeatId == "seat-1" && weiMain.Troops == 400,
+            "rehearsal 4b: canonical state unchanged (Chengdu owner=seat-1, army-wei-2 troops=400)");
+        CmrCheck(fake.Requests[1].User.Contains("attack_city army-wei-2 -> rejected: " + FeedbackPolicy.AssaultRatioTooLow),
+            "rehearsal 4b: useful AssaultRatioTooLow feedback reached subsequent prompt");
     }
 }
