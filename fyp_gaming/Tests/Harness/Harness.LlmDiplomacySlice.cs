@@ -585,10 +585,39 @@ internal static partial class Harness
             });
         string bounded = PromptBuilder.DiplomacyMessagesSection(many.Observe("seat-a"));
         DipCheck(CountOf(bounded, " message=\"") == PromptBuilder.MaxPromptDiplomacyMessages
-           && bounded.Contains("earlier message") && !bounded.Contains("message=\"msg0\"")
+           && bounded.Contains("messages/offers omitted") && !bounded.Contains("message=\"msg0\"")
            && bounded.Contains("message=\"msg" + (PromptBuilder.MaxPromptDiplomacyMessages + 1) + "\""),
             "only the newest " + PromptBuilder.MaxPromptDiplomacyMessages
             + " messages are shown and the drop is counted");
+
+        var reverseLexical = DiplomacyScenario();
+        string[] sendOrder = { "zulu", "yankee", "xray", "whiskey", "victor", "bravo", "alpha" };
+        foreach (string text in sendOrder)
+            reverseLexical.Submit(new ActionCommand
+            {
+                Type = ActionType.SendMessage, ActorSeatId = "seat-b", TargetId = "seat-a", Text = text,
+            });
+        string sequenceOrdered = PromptBuilder.DiplomacyMessagesSection(reverseLexical.Observe("seat-a"));
+        DipCheck(sequenceOrdered.Contains("message=\"alpha\"")
+            && !sequenceOrdered.Contains("message=\"zulu\"")
+            && sequenceOrdered.Contains("2 messages/offers omitted"),
+            "same-season messages follow event sequence recency even when it conflicts with lexical order");
+
+        var offerObservation = DiplomacyScenario().Observe("seat-a");
+        for (int i = 0; i < 7; i++)
+            offerObservation.Proposals.Add(new ProposalView
+            {
+                ProposalId = "offer-" + i, FromSeatId = "seat-b", ToSeatId = "seat-a",
+                Type = "nap", DurationSeasons = 3, ProposedSeason = i + 1,
+                Text = "n" + i + new string('x', 198),
+            });
+        string offerSection = PromptBuilder.DiplomacyMessagesSection(offerObservation);
+        int offersShown = CountOf(offerSection, "offer=offer-");
+        DipCheck(offerSection.Length <= PromptBuilder.MaxDiplomacySectionChars
+            && offerSection.EndsWith(PromptBuilder.DiplomacyMessagesEndMarker + "\n", StringComparison.Ordinal)
+            && offerSection.Contains("offer-6") && !offerSection.Contains("offer-0")
+            && offerSection.Contains((7 - offersShown) + " messages/offers omitted"),
+            "seven maximum-length offers stay bounded, retain the closing marker, select newest deterministically and report exact drops");
     }
 
     private static int CountOf(string text, string needle)
