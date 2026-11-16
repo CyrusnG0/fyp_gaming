@@ -260,8 +260,9 @@ internal static partial class Harness
             "[LS-019] the demo policy mirrors the existing live limits instead of raising them");
         Check(demo.Limits.MaxWallMillisPerTurn == live.MaxTurnSeconds * 1000,
             "[LS-019] the demo turn window matches the live turn-time limit");
-        Check(demo.Limits.MaxInquiryPerTurn == 0 && demo.Limits.MaxInquiryPerSession == 0,
-            "[LS-019] the demo has no inquiry allowance until the integration enables it");
+        Check(demo.Limits.MaxInquiryPerTurn == 0
+              && demo.Limits.MaxInquiryPerSession == DeliberationBudgetLimits.Unenforced,
+            "[LS-019] the demo keeps inquiries disabled and imposes no session inquiry cap");
         Check(demo.Limits.MaxOutputTokensPerTurn == DeliberationBudgetLimits.Unenforced
               && demo.UnenforcedDimensions().Contains("output_tokens.turn"),
             "[LS-019] the demo does not claim an enforced token budget");

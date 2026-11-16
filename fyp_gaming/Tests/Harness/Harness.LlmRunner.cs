@@ -336,7 +336,7 @@ internal static partial class Harness
     /// SubmitAs with that captured token, and EndSeatTurn when the runner finishes. Commands reach
     /// SubmitAs without an actor/controller so the engine's host binding is what is under test.
     /// </summary>
-    private sealed class LlmHarnessHost : ITurnHost
+    private sealed class LlmHarnessHost : ITurnHost, IDeliberationHost
     {
         private readonly GameEngine _engine;
         private readonly string _seat;
@@ -378,6 +378,9 @@ internal static partial class Harness
             EndTurnCalls++;
             _engine.EndSeatTurn(Token);
         }
+
+        /// <summary>Authoritative match identity, as the real spectator host supplies.</summary>
+        public string MatchId => _engine.State.GameId;
     }
 
     private sealed class LlmPermissiveHost : ITurnHost

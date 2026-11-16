@@ -19,6 +19,8 @@ namespace LuanShi.Engine
         public string FactionName { get; internal set; }
         public string PersonaId { get; internal set; }
         public int Requests { get; internal set; }
+        public int Inquiries { get; internal set; }
+        public int Notes { get; internal set; }
         public int Actions { get; internal set; }
         public int Accepted { get; internal set; }
         public int Rejected { get; internal set; }
@@ -29,6 +31,8 @@ namespace LuanShi.Engine
         public string EndedBy { get; internal set; }
         public EndReason EndReason { get; internal set; }
         public string EndReasonText { get; internal set; }
+        /// <summary>Last bounded deliberation stop code, or null when the ledger never refused.</summary>
+        public string DeliberationStopCode { get; internal set; }
     }
 
     /// <summary>

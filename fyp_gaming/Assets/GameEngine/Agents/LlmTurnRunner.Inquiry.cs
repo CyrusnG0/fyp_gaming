@@ -3,18 +3,19 @@ using System;
 namespace LuanShi.Engine
 {
     /// <summary>
-    /// Smallest end-to-end inquiry loop for the demo (LS-022 scope correction).
+    /// Bounded inquiry loop.
     ///
-    /// Opt-in only via <see cref="LlmConfig.EnableManualLookup"/>. A reply classified as an
-    /// investigation request is parsed by the existing strict
-    /// <see cref="InvestigationRequestParser"/> and, only for manual_lookup, executed by a fresh
+    /// Opt-in via <see cref="LlmConfig.EnableManualLookup"/> (legacy manual_lookup only) or
+    /// <see cref="LlmConfig.EnableDeliberation"/> (all four read-only routes). A reply classified as
+    /// an investigation request is parsed by the strict <see cref="InvestigationRequestParser"/> and,
+    /// only after the deliberation ledger admits it, executed by a fresh
     /// <see cref="InvestigationService"/>/<see cref="InvestigationDispatcher"/> built from the
-    /// host-bound match/seat and the request's detached seat-filtered observation. Its bounded
-    /// result is held privately and injected into the next prompt once.
+    /// host-bound match/seat and the request's detached seat-filtered observation. Its bounded result
+    /// is held privately and injected into the next prompt once.
     ///
-    /// inspect_entity/search_history/recall_memory are rejected before dispatch. No budget is
-    /// added here: the inquiry reply already consumed its existing request slot, and the next
-    /// decision is dispatched through the normal StartRequest limit checks.
+    /// An inquiry consumes an inquiry admission and no command point or game action. A per-turn cap
+    /// refusal is a bounded answer, not a model error: it adds no invalid-response count and lets the
+    /// model act or end its turn on the next reply.
     /// </summary>
     public sealed partial class LlmTurnRunner
     {
@@ -42,6 +43,8 @@ namespace LuanShi.Engine
         private void HandleInquiry(InFlight flight, LlmResponse response)
         {
             InvestigationRequestOptions requestOptions = InvestigationRequestOptions.Defaults();
+            if (DeliberationActive)
+                requestOptions.ServiceOptions.MaxResponseChars = InquiryResultCap();
             InvestigationRequestParseResult parsed =
                 InvestigationRequestParser.Parse(response.Text, requestOptions);
             if (!parsed.Ok)
@@ -51,7 +54,7 @@ namespace LuanShi.Engine
             }
 
             InvestigationRequest request = parsed.Request;
-            if (request.Tool != InvestigationRequestTool.ManualLookup)
+            if (request.Tool != InvestigationRequestTool.ManualLookup && !DeliberationActive)
             {
                 // Do not execute any other tool. The rejection is bounded, uses only the fixed
                 // tool vocabulary and never echoes model-supplied topic/query/id/authority fields.
@@ -79,6 +82,32 @@ namespace LuanShi.Engine
                 return;
             }
 
+            // Admission precedes tool execution. A spent per-turn allowance returns a bounded
+            // answer instead of dispatching work or incrementing the invalid-response count.
+            DeliberationAdmission inquiryAdmission = null;
+            if (_ledger != null)
+            {
+                inquiryAdmission = _ledger.TryAdmitInquiry();
+                if (!inquiryAdmission.Allowed)
+                {
+                    RefuseInquiry(flight, response, request.ToolName, "inquiry_limit_reached");
+                    return;
+                }
+                DeliberationBindingResult dispatch =
+                    _ledger.MarkDispatched(inquiryAdmission.ReservationId);
+                if (!dispatch.Ok)
+                {
+                    _ledger.Cancel(inquiryAdmission.ReservationId, DeliberationCancelReason.Aborted);
+                    _deliberationStopCode = dispatch.Code;
+                    FinishLimit("deliberation dispatch refused: " + dispatch.Code,
+                        EndReason.DeliberationBudget);
+                    WriteRecord(flight, response, true, null, null, dispatch.Code,
+                        request.ToolName, null);
+                    return;
+                }
+                _inquiriesThisTurn++;
+            }
+
             AddActivity("inquiry", "Inquiry requested: " + request.ToolName + ".");
             string resultJson;
             bool truncated;
@@ -93,15 +122,19 @@ namespace LuanShi.Engine
             }
             catch (Exception)
             {
+                SettleInquiryReservation(inquiryAdmission, true);
                 // Never surface exception text, file paths or provider details.
                 FailInquiry(flight, response, "inquiry_failed",
                     "The inquiry could not be completed.", request.ToolName);
                 return;
             }
+            SettleInquiryReservation(inquiryAdmission, false);
 
-            int cap = requestOptions.ServiceOptions.MaxResponseChars;
-            if (string.IsNullOrEmpty(resultJson)) resultJson = BoundedInquiryFailure("inquiry_failed");
-            if (resultJson.Length > cap) resultJson = BoundedInquiryFailure("response_too_large");
+            int cap = InquiryResultCap();
+            if (string.IsNullOrEmpty(resultJson))
+                resultJson = BoundedInquiryFailure("inquiry_failed", request.ToolName);
+            if (resultJson.Length > cap)
+                resultJson = BoundedInquiryFailure("response_too_large", request.ToolName);
             _pendingInquiryResult = resultJson;
             LastResult = "inquiry answered: " + request.ToolName;
             AddActivity("inquiry", "Inquiry answered: " + request.ToolName
@@ -113,6 +146,39 @@ namespace LuanShi.Engine
             WriteRecord(flight, response, true, null, null, null,
                 request.ToolName, resultJson.Length);
             StartRequest();
+        }
+
+        /// <summary>
+        /// The prompt-facing result cap. A value below the service minimum is raised to it rather
+        /// than silently producing an unrepresentable response envelope.
+        /// </summary>
+        private int InquiryResultCap()
+        {
+            if (!DeliberationActive) return InvestigationOptions.Defaults().MaxResponseChars;
+            int cap = _config.MaxInquiryResultChars;
+            return cap < InvestigationOptions.MinimumResponseChars
+                ? InvestigationOptions.MinimumResponseChars
+                : cap;
+        }
+
+        private void RefuseInquiry(InFlight flight, LlmResponse response, string toolName,
+            string code)
+        {
+            string refused = BoundedInquiryFailure(code, toolName);
+            _pendingInquiryResult = refused;
+            LastResult = "inquiry refused: " + code;
+            AddActivity("inquiry", "Inquiry refused: " + toolName
+                + " (per-turn allowance spent).");
+            AddHistory("inquiry " + toolName + " -> refused: " + code);
+            Status = "inquiry refused; requesting next decision";
+            WriteRecord(flight, response, true, null, null, code, toolName, refused.Length);
+            StartRequest();
+        }
+
+        private void SettleInquiryReservation(DeliberationAdmission admission, bool failed)
+        {
+            if (_ledger == null || admission == null) return;
+            _ledger.Settle(admission.ReservationId, new DeliberationSettlement { Failed = failed });
         }
 
         private void FailInquiry(InFlight flight, LlmResponse response, string code,
@@ -136,7 +202,14 @@ namespace LuanShi.Engine
         }
 
         private static string BoundedInquiryFailure(string code)
-            => "{\"tool\":\"manual_lookup\",\"response_version\":\"ls018-v1\",\"ok\":false,"
-             + "\"error_code\":" + MiniJson.Str(code) + "}";
+            => BoundedInquiryFailure(code, InvestigationRequestContract.ManualLookup);
+
+        private static string BoundedInquiryFailure(string code, string toolName)
+        {
+            string tool = string.IsNullOrEmpty(toolName)
+                ? InvestigationRequestContract.ManualLookup : toolName;
+            return "{\"tool\":" + MiniJson.Str(tool) + ",\"response_version\":\"ls018-v1\","
+                 + "\"ok\":false,\"error_code\":" + MiniJson.Str(code) + "}";
+        }
     }
 }
