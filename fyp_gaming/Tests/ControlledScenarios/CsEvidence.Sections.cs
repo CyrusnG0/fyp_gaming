@@ -110,6 +110,7 @@ namespace LuanShi.ControlledScenarios
                     {
                         { "attack", context.Flags?.Attack ?? false },
                         { "research", context.Flags?.Research ?? false },
+                        { "diplomacy", context.Flags?.Diplomacy ?? false },
                         { "manual_lookup", context.Flags?.ManualLookup ?? false },
                         { "deliberation", context.Flags?.Deliberation ?? false },
                     } },
@@ -143,6 +144,8 @@ namespace LuanShi.ControlledScenarios
             if (all.Contains("ATTACK")) sections.Add("ATTACK");
             if (all.Contains("INQUIRY")) sections.Add("INQUIRY");
             if (all.Contains("DELIBERATION")) sections.Add("DELIBERATION");
+            if (all.Contains(PromptBuilder.DiplomacyMessagesBeginMarker))
+                sections.Add("DIPLOMACY MESSAGES AND OFFERS");
             if (all.Contains(PromptBuilder.StrategicNoteBeginMarker)) sections.Add("STRATEGIC NOTE");
             int chars = (cap.System?.Length ?? 0) + (cap.User?.Length ?? 0);
             return new Dictionary<string, object>

@@ -282,6 +282,7 @@ namespace LuanShi.ControlledScenarios
                 Model = string.IsNullOrWhiteSpace(model) ? "fake-model" : model,
                 EnableAttack = spec.EnableAttack,
                 EnableResearch = spec.EnableResearch,
+                EnableDiplomacy = spec.EnableDiplomacy,
                 EnableManualLookup = spec.EnableManualLookup,
                 EnableDeliberation = spec.EnableDeliberation,
                 MaxRequestsPerTurn = 6,
@@ -309,6 +310,7 @@ namespace LuanShi.ControlledScenarios
             config.Model = string.IsNullOrWhiteSpace(model) ? "from-env" : model;
             config.EnableAttack = spec.EnableAttack;
             config.EnableResearch = spec.EnableResearch;
+            config.EnableDiplomacy = spec.EnableDiplomacy;
             config.EnableManualLookup = spec.EnableManualLookup;
             config.EnableDeliberation = spec.EnableDeliberation;
             config.MaxRequestsPerTurn = 6;
@@ -332,6 +334,7 @@ namespace LuanShi.ControlledScenarios
                 { "model", config.Model },
                 { "attack", config.EnableAttack },
                 { "research", config.EnableResearch },
+                { "diplomacy", config.EnableDiplomacy },
                 { "manual_lookup", config.EnableManualLookup },
                 { "deliberation", config.EnableDeliberation },
                 { "max_requests_per_turn", config.MaxRequestsPerTurn },
@@ -365,6 +368,7 @@ namespace LuanShi.ControlledScenarios
                 { "base_url_display", baseUrlDisplay },
                 { "attack", config.EnableAttack },
                 { "research", config.EnableResearch },
+                { "diplomacy", config.EnableDiplomacy },
                 { "manual_lookup", config.EnableManualLookup },
                 { "deliberation", config.EnableDeliberation },
                 { "max_requests_per_turn", config.MaxRequestsPerTurn },

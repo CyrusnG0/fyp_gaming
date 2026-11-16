@@ -34,7 +34,7 @@ namespace LuanShi.ControlledScenarios
             var log = new TestLog();
             var tests = new List<KeyValuePair<string, Action<TestLog>>>
             {
-                Entry("[CS-01] SevenScenariosEvidence", SevenScenariosEvidence),
+                Entry("[CS-01] EightScenariosEvidence", SevenScenariosEvidence),
                 Entry("[CS-02] ReproduceFromRecordedSetup", ReproduceFromRecordedSetup),
                 Entry("[CS-03] FogSeatIsolation", FogSeatIsolation),
                 Entry("[CS-04] MalformedAndEmptyResponse", MalformedAndEmptyResponse),
@@ -51,6 +51,7 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-27] LiveTransportConfigAndBoundedRun", LiveTransportConfigAndBoundedRun),
                 Entry("[CS-31] LiveGateRedactionAndBaseUrl", ReviewLiveSafety),
                 Entry("[CS-34] StrongThreatLegalActions", StrongThreatLegalActions),
+                Entry("[CS-40] DiplomacyVoluntaryResponse", DiplomacyVoluntaryResponse),
                 Entry("[CS-35] WallCutAttribution", WallCutAttribution),
                 Entry("[CS-36] CredentialGapRegression", Review2CredentialGaps),
                 Entry("[CS-39] Review3Fixes", Review3Fixes),

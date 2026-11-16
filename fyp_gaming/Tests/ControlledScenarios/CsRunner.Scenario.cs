@@ -126,6 +126,7 @@ namespace LuanShi.ControlledScenarios
                     { "flags", new Dictionary<string, object>
                         {
                             { "attack", spec.EnableAttack }, { "research", spec.EnableResearch },
+                            { "diplomacy", spec.EnableDiplomacy },
                             { "manual_lookup", spec.EnableManualLookup },
                             { "deliberation", spec.EnableDeliberation },
                         } },
@@ -231,6 +232,7 @@ namespace LuanShi.ControlledScenarios
                     Flags = new CsFeatureBlock
                     {
                         Attack = spec.EnableAttack, Research = spec.EnableResearch,
+                        Diplomacy = spec.EnableDiplomacy,
                         ManualLookup = spec.EnableManualLookup, Deliberation = spec.EnableDeliberation,
                     },
                     Captures = captures, RunLines = runLines, Exchanges = recorder.ExchangeLines(),

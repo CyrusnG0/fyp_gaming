@@ -91,7 +91,7 @@ def make_dispatch(index, prompt, reply, turn_token):
                      "usage_source": "fake_deterministic"},
         "settings": {"settings_hash": hex64("c"),
                      "config_redacted": "provider=fake; api_key=<missing>",
-                     "flags": {"attack": False, "research": False,
+                     "flags": {"attack": False, "research": False, "diplomacy": False,
                                "manual_lookup": False, "deliberation": False},
                      "ceilings": {"max_request_seconds": 30, "max_scenario_seconds": 60}},
         "prompt": prompt, "reply": reply,
@@ -143,7 +143,8 @@ def build_run(root, *, usage="known", dispatch_count=1, tokens=None,
 
     script_path = os.path.join(scenario_dir, "script.json")
     write_json(script_path, [{"text": "end_turn"}])
-    settings = {"attack": False, "research": False, "manual_lookup": False, "deliberation": False}
+    settings = {"attack": False, "research": False, "diplomacy": False,
+                "manual_lookup": False, "deliberation": False}
     write_json(os.path.join(scenario_dir, "settings.json"),
                {"settings": settings, "settings_hash": schema.canonical_hash(settings)})
     write_json(os.path.join(scenario_dir, "scenario.json"),

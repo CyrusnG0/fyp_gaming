@@ -15,6 +15,7 @@ namespace LuanShi.ControlledScenarios
             "cs-visible-contact-v1", "cs-advantageous-attack-v1", "cs-strong-threat-retreat-v1",
             "cs-research-purchase-v1", "cs-inquiry-manual-v1", "cs-memory-note-followup-v1",
             "cs-strong-threat-fight-or-retreat-v1",
+            "cs-diplomacy-voluntary-response-v1",
         };
 
         public static IReadOnlyList<string> Keys { get; } = Array.AsReadOnly(AllIds);
@@ -31,6 +32,7 @@ namespace LuanShi.ControlledScenarios
                 case "cs-research-purchase-v1": spec = ResearchPurchase(seed); return true;
                 case "cs-inquiry-manual-v1": spec = InquiryManual(seed); return true;
                 case "cs-memory-note-followup-v1": spec = MemoryNoteFollowup(seed); return true;
+                case "cs-diplomacy-voluntary-response-v1": spec = DiplomacyVoluntaryResponse(seed); return true;
                 default: spec = null; return false;
             }
         }
@@ -126,6 +128,44 @@ namespace LuanShi.ControlledScenarios
                     CsScenarioFactory.Step(CsScenarioFactory.EndTurn("memory reviewed")),
                 },
                 opponentScript: null);
+        }
+
+        /// <summary>
+        /// Situation 8: a public message and party-only offer are staged through the real engine
+        /// before play. Both seats are LLM-controlled; the receiving seat may accept, reject, ignore
+        /// or act another way. The fake accept is only a plumbing fixture, never model evidence.
+        /// </summary>
+        private static CsScenarioSpec DiplomacyVoluntaryResponse(int? seed)
+        {
+            CsScenarioSpec spec = CsScenarioFactory.Common(
+                "cs-diplomacy-voluntary-response-v1", "Diplomacy offer with voluntary response",
+                seed ?? 0, 1, attack: false, research: false, manualLookup: false,
+                deliberation: false, researchPoints: 0,
+                ownArmy: new CsArmySetup
+                {
+                    Id = CsScenarioFactory.OwnArmyId, Name = "Wei Guard", OwnerSeatId = "seat-0",
+                    X = 8, Z = 8, Troops = 2000,
+                },
+                enemyArmy: new CsArmySetup
+                {
+                    Id = CsScenarioFactory.EnemyArmyId, Name = "Shu Guard", OwnerSeatId = "seat-1",
+                    X = 10, Z = 8, Troops = 2000,
+                },
+                studyScript: new List<CsScriptStep>
+                {
+                    CsScenarioFactory.Step(CsScenarioFactory.EndTurn("fixture: offer remains unanswered")),
+                },
+                opponentScript: null);
+            spec.EnableDiplomacy = true;
+            spec.StageIncomingDiplomacy = true;
+            spec.StudySeat = "seat-1";
+            spec.OpponentSeat = "seat-0";
+            spec.Scripts["seat-1"] = new List<CsScriptStep>
+            {
+                CsScenarioFactory.Step("{\"type\":\"respond_treaty\",\"target_id\":\"seat-0\",\"args\":{\"response\":\"accept\"}}"),
+                CsScenarioFactory.Step(CsScenarioFactory.EndTurn("fixture: response plumbing only")),
+            };
+            return spec;
         }
     }
 }

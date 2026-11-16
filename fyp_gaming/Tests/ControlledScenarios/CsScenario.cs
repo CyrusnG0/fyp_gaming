@@ -70,6 +70,8 @@ namespace LuanShi.ControlledScenarios
         public int Seasons = 1;
         public bool EnableAttack;
         public bool EnableResearch;
+        public bool EnableDiplomacy;
+        public bool StageIncomingDiplomacy;
         public bool EnableManualLookup;
         public bool EnableDeliberation;
         public int ResearchPoints;
@@ -143,6 +145,8 @@ namespace LuanShi.ControlledScenarios
                 ResearchPoints = Setup?.ResearchPoints ?? 0,
                 EnableAttack = Staged?.Features?.Attack ?? false,
                 EnableResearch = Staged?.Features?.Research ?? false,
+                EnableDiplomacy = Staged?.Features?.Diplomacy ?? false,
+                StageIncomingDiplomacy = Setup?.StageIncomingDiplomacy ?? false,
                 EnableManualLookup = Staged?.Features?.ManualLookup ?? false,
                 EnableDeliberation = Staged?.Features?.Deliberation ?? false,
                 MaxRequests = Staged?.Ceilings?.MaxRequests ?? 0,
@@ -163,12 +167,14 @@ namespace LuanShi.ControlledScenarios
                 {
                     Factions = spec.Factions, Cities = spec.Cities, Armies = spec.Armies,
                     Towers = spec.Towers, ResearchPoints = spec.ResearchPoints,
+                    StageIncomingDiplomacy = spec.StageIncomingDiplomacy,
                 },
                 Staged = new CsScenarioStagedBlock
                 {
                     Features = new CsFeatureBlock
                     {
                         Attack = spec.EnableAttack, Research = spec.EnableResearch,
+                        Diplomacy = spec.EnableDiplomacy,
                         ManualLookup = spec.EnableManualLookup, Deliberation = spec.EnableDeliberation,
                     },
                     Scripts = spec.Scripts,
@@ -191,12 +197,14 @@ namespace LuanShi.ControlledScenarios
         [JsonPropertyName("armies")] public List<CsArmySetup> Armies { get; set; }
         [JsonPropertyName("towers")] public List<CsTowerSetup> Towers { get; set; }
         [JsonPropertyName("research_points")] public int ResearchPoints { get; set; }
+        [JsonPropertyName("stage_incoming_diplomacy")] public bool StageIncomingDiplomacy { get; set; }
     }
 
     public sealed class CsFeatureBlock
     {
         [JsonPropertyName("attack")] public bool Attack { get; set; }
         [JsonPropertyName("research")] public bool Research { get; set; }
+        [JsonPropertyName("diplomacy")] public bool Diplomacy { get; set; }
         [JsonPropertyName("manual_lookup")] public bool ManualLookup { get; set; }
         [JsonPropertyName("deliberation")] public bool Deliberation { get; set; }
     }

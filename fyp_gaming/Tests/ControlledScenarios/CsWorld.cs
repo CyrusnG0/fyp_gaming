@@ -56,6 +56,24 @@ namespace LuanShi.ControlledScenarios
             foreach (FactionState faction in engine.State.Factions)
                 faction.ResearchPoints = spec.ResearchPoints;
             engine.BeginSeason();
+            if (spec.StageIncomingDiplomacy)
+            {
+                if (!spec.EnableDiplomacy)
+                    throw new InvalidOperationException("staged diplomacy requires enable_diplomacy");
+                engine.Submit(new ActionCommand
+                {
+                    Type = ActionType.SendMessage, ActorSeatId = "seat-0", TargetId = "seat-1",
+                    Text = "The river border is quiet. Would you consider a non-aggression pact?",
+                });
+                engine.Submit(new ActionCommand
+                {
+                    Type = ActionType.ProposeTreaty, ActorSeatId = "seat-0", TargetId = "seat-1",
+                    Args = new Dictionary<string, string>
+                    {
+                        { "treaty_type", "nap" }, { "duration", "3" },
+                    }, Text = "Three seasons, subject to your decision.",
+                });
+            }
             return engine;
         }
 

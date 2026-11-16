@@ -5,7 +5,7 @@
     "model": "fake-model"
   },
   "run_ceilings": {
-    "max_scenarios": 7,
+    "max_scenarios": 8,
     "max_run_requests": 200,
     "max_run_wall_seconds": 120,
     "max_scenario_requests": 40,
@@ -20,6 +20,7 @@
     { "scenario_id": "cs-research-purchase-v1", "seed": 4245 },
     { "scenario_id": "cs-inquiry-manual-v1", "seed": 4246 },
     { "scenario_id": "cs-memory-note-followup-v1", "seed": 4247 },
-    { "scenario_id": "cs-strong-threat-fight-or-retreat-v1", "seed": 4248 }
+    { "scenario_id": "cs-strong-threat-fight-or-retreat-v1", "seed": 4248 },
+    { "scenario_id": "cs-diplomacy-voluntary-response-v1", "seed": 4249 }
   ]
 }

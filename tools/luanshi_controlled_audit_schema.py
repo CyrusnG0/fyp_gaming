@@ -304,7 +304,7 @@ def validate_dispatch(dispatch, index, manifest, problems):
                                                   ("flags", "dict"), ("ceilings", "dict")), problems)
         flags = settings.get("flags")
         if isinstance(flags, dict):
-            for key in ("attack", "research", "manual_lookup", "deliberation"):
+            for key in ("attack", "research", "diplomacy", "manual_lookup", "deliberation"):
                 if not isinstance(flags.get(key), bool):
                     problems.append("%s.settings.flags.%s must be a boolean" % (path, key))
     prompt, reply = dispatch.get("prompt"), dispatch.get("reply")

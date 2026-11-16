@@ -18,8 +18,8 @@ namespace LuanShi.ControlledScenarios
             try
             {
                 CsRunResult run = CsRunner.Run(DefaultManifest(), outRoot, CsPaths.RepoRoot());
-                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 7,
-                    "[CS-01] all seven fake scenarios complete", run.Status + " (" + run.Detail + ")");
+                log.Check(run.Status == CsStatus.Completed && run.Scenarios.Count == 8,
+                    "[CS-01] all eight fake scenarios complete", run.Status + " (" + run.Detail + ")");
                 log.Check(File.Exists(Path.Combine(run.RunDirectory, "run-manifest.json"))
                         && File.Exists(Path.Combine(run.RunDirectory, "dispatches.ndjson")),
                     "[CS-01] the run manifest and aggregate dispatch file exist");
