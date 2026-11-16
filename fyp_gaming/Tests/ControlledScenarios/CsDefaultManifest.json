@@ -1,0 +1,24 @@
+{
+  "schema": "luanshi-controlled-scenarios/1",
+  "provider": {
+    "kind": "fake",
+    "model": "fake-model"
+  },
+  "run_ceilings": {
+    "max_scenarios": 6,
+    "max_run_requests": 200,
+    "max_run_wall_seconds": 120,
+    "max_scenario_requests": 40,
+    "max_scenario_wall_seconds": 30,
+    "request_timeout_ms": 25000,
+    "unknown_usage_policy": "report"
+  },
+  "scenarios": [
+    { "scenario_id": "cs-visible-contact-v1", "seed": 4242 },
+    { "scenario_id": "cs-advantageous-attack-v1", "seed": 4243 },
+    { "scenario_id": "cs-strong-threat-retreat-v1", "seed": 4244 },
+    { "scenario_id": "cs-research-purchase-v1", "seed": 4245 },
+    { "scenario_id": "cs-inquiry-manual-v1", "seed": 4246 },
+    { "scenario_id": "cs-memory-note-followup-v1", "seed": 4247 }
+  ]
+}
