@@ -107,11 +107,9 @@ namespace LuanShi.ExperimentBatch
             GameEngine engine = BatchWorld.Create(m, batchId + "-" + spec.PairId, spec.Seed);   // the arm name must not reach the prompt (the observation carries game_id)
             Dictionary<string, List<string>> scripts = BatchScripts.Build(engine, spec);
             string startDigest = BatchWorld.WorldDigest(engine);
-            var hiddenAtStart = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-            foreach (FactionState faction in engine.State.Factions) hiddenAtStart[faction.SeatId] = BatchSpatial.HiddenFrom(engine, faction.SeatId);
             SpectatorSession session = null;
             var transport = new ScriptedSeatTransport(m.Provider.Model, () => session == null ? null : session.ActiveSeatId,
-                scripts, m.Provider.Faults);
+                scripts, m.Provider.Faults) { WitnessHook = seat => BatchPrivacy.Witness(engine, seat) };
             var recorder = new LlmRunRecorder(matchDir);
             LlmConfig config = BatchWorld.Config(m);
             var runner = new LlmTurnRunner(transport, config, recorder, null, new MemoryLlmStrategicNoteStore());
@@ -145,15 +143,6 @@ namespace LuanShi.ExperimentBatch
             foreach (SpectatorTurnRecord t in session.TurnRecords)
                 outcome.TurnEndings.Add("s" + t.Season + " " + t.SeatId + ": " + t.EndReason + " " + t.EndReasonText);
             outcome.FinalState = BatchWorld.FinalState(engine);
-            // Ids hidden from a seat at BOTH ends of the match are never legitimate prompt content for it.
-            var hiddenThroughout = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-            foreach (KeyValuePair<string, HashSet<string>> kv in hiddenAtStart)
-            {
-                HashSet<string> atEnd = BatchSpatial.HiddenFrom(engine, kv.Key);
-                var both = new HashSet<string>(kv.Value, StringComparer.Ordinal);
-                both.IntersectWith(atEnd);
-                hiddenThroughout[kv.Key] = both;
-            }
             bool clean = true;
             foreach (SpectatorTurnRecord t in session.TurnRecords)
                 clean &= t.EndReason == EndReason.ModelEndedTurn || t.EndReason == EndReason.GameOver;
@@ -169,7 +158,7 @@ namespace LuanShi.ExperimentBatch
             Register(outcome, matchDir, "exchanges", recorder.ExchangeFilePathFor(runner.RunId));
             Register(outcome, matchDir, "summary", summaryPath);
             outcome.Spatial = BatchSpatial.Collect(outcome.SpatialContext, outcome.Captures, recorder.ExchangeFilePathFor(runner.RunId), recorder.FilePath,
-                hiddenThroughout, startDigest, BatchWorld.WorldDigest(engine));
+                startDigest, BatchWorld.WorldDigest(engine));
             outcome.Audit = MatchAuditor.Audit(matchDir, outcome, m);
         }
 

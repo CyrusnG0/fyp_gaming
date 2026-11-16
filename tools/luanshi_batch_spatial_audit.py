@@ -67,10 +67,13 @@ def audit_spatial_pair(batch_dir, seed, recorded_pairs, problems, notes):
     cut = [x["spatial_truncation"] for x in treatment["exchanges"] if x.get("spatial_truncation", {}).get("truncated")]
     c_evidence, t_evidence = control["match"].get("spatial_evidence") or {}, treatment["match"].get("spatial_evidence") or {}
     if c_evidence.get("world_start_digest") is None or c_evidence.get("world_start_digest") != t_evidence.get("world_start_digest"):
-        found.append("the arms did not start from the same canonical world")
+        found.append("the arms did not start from the same canonical state (see world_digest_scope for what the digest covers)")
     for arm_name, evidence in (("control", c_evidence), ("treatment", t_evidence)):
-        if evidence.get("hidden_id_leaks"):
-            found.append("%s prompts leak hidden ids: %s" % (arm_name, evidence["hidden_id_leaks"][:2]))
+        privacy = evidence.get("privacy") or {}
+        if privacy.get("requests_without_witness") or not privacy.get("requests"):
+            found.append("%s privacy scan is incomplete (requests without a per-dispatch witness)" % arm_name)
+        if privacy.get("leaks"):
+            found.append("%s prompts leak hidden ids: %s" % (arm_name, privacy["leaks"][:2]))
     for item in found:
         problems.append("%s: spatial pair check: %s" % (label, item))
     if recorded_pairs and (recorded_pairs[0].get("spatial_problems") == []) != (not found):

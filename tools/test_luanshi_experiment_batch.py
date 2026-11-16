@@ -273,7 +273,7 @@ class AuditChecks(unittest.TestCase):
         self.assertFalse(pair["system_prompts_identical"], "the treatment system prompt carries the production spatial addendum")
 
         match = os.path.join(batch, "seed4242-treatment")
-        self.edit_json(os.path.join(match, "match.json"), lambda d: d["spatial_evidence"]["hidden_id_leaks"].append("seat-0 request 1 shows hidden 'city-shu'"))
+        self.edit_json(os.path.join(match, "match.json"), lambda d: d["spatial_evidence"]["privacy"]["leaks"].append("seat-0 request 1 shows 'city-shu', hidden at dispatch and never shown to this seat"))
         problems, _, _ = tool.audit_batch(batch)
         self.assertTrue(any("spatial pair check" in p and "leak hidden ids" in p for p in problems), problems)
 

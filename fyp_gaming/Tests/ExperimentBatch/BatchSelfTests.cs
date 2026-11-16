@@ -53,6 +53,9 @@ namespace LuanShi.ExperimentBatch
             Entry("spatial: hidden-world equivalence and privacy across the pair", SpatialPairKeepsTheHiddenWorldAndPrivacy),
             Entry("spatial: a broken pair is caught", SpatialPairCheckCatchesABrokenPair),
             Entry("spatial: rich preset goes through production", SpatialRichLevelRunsThroughProduction),
+            Entry("world digest: covers the whole canonical state, scope stated", WorldDigestCoversTheCanonicalState),
+            Entry("privacy: judged per dispatch, hidden-visible-hidden and retained knowledge", PrivacyIsJudgedPerDispatch),
+            Entry("privacy: the witness follows the real fog as an army appears and leaves", PrivacyWitnessFollowsTheRealFog),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

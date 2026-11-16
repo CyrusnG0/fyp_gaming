@@ -112,22 +112,20 @@ namespace LuanShi.ExperimentBatch
                     "no prompt names its arm");
 
                 GameEngine probe = BatchWorld.Create(m, "probe", 4242);
-                HashSet<string> hidden0 = BatchSpatial.HiddenFrom(probe, "seat-0"), hidden1 = BatchSpatial.HiddenFrom(probe, "seat-1");
-                log.Check(hidden0.Contains("city-shu") && hidden0.Contains("Chengdu") && hidden1.Contains("city-wei") && hidden1.Contains("Luoyang"),
-                    "the opening fog hides each seat's rival capital (ids and names), derived from the engine's own observation");
-                log.Check(t.Spatial.HiddenIdsChecked > 0 && t.Spatial.HiddenIdLeaks.Count == 0 && c.Spatial.HiddenIdLeaks.Count == 0,
-                    "no hidden rival id or city name appears in any dispatched prompt of either arm (" + t.Spatial.HiddenIdsChecked + " ids checked)");
-                bool direct = true;
-                foreach (ExchangeCapture x in t.Captures)
-                    foreach (string id in x.Seat == "seat-0" ? hidden0 : hidden1)
-                        direct &= !x.User.Contains(id) && !x.System.Contains(id);
-                log.Check(direct, "a direct scan of every treatment prompt finds no id the seat's fog hides");
+                DispatchWitness w0 = BatchPrivacy.Witness(probe, "seat-0"), w1 = BatchPrivacy.Witness(probe, "seat-1");
+                log.Check(w0.Tokens["city-shu"] == DispatchWitness.Hidden && w0.Tokens["Chengdu"] == DispatchWitness.Hidden
+                          && w1.Tokens["city-wei"] == DispatchWitness.Hidden && w1.Tokens["Luoyang"] == DispatchWitness.Hidden,
+                    "the opening fog hides each seat's rival capital (ids and names), taken from the engine's own Observe(seat)");
+                PrivacyEvidence tp = t.Spatial.Privacy, cp = c.Spatial.Privacy;
+                log.Check(tp.HiddenTokenChecks > 0 && tp.Leaks.Count == 0 && cp.Leaks.Count == 0 && tp.RequestsWithoutWitness == 0 && cp.RequestsWithoutWitness == 0,
+                    "every dispatched request of both arms was scanned against its own observation and none shows a hidden, never-shown id or name ("
+                    + tp.HiddenTokenChecks + " hidden-token checks over " + tp.Requests + " dispatches)");
+                log.Check(tp.Requests == t.Requests && t.Captures.All(x => x.Witness != null), "the witness is taken at each dispatch, not once at the start or end");
 
-                var planted = new List<ExchangeCapture> { new ExchangeCapture { Seat = "seat-0", SeatRequest = 1, System = "s", User = "the enemy holds Chengdu" } };
-                SpatialEvidence probeEvidence = BatchSpatial.Collect("standard", planted, null, null,
-                    new Dictionary<string, HashSet<string>> { { "seat-0", hidden0 } }, "d", "d");
-                log.Check(probeEvidence.HiddenIdLeaks.Count == 1 && probeEvidence.HiddenIdLeaks[0].Contains("Chengdu"),
-                    "the leak scan is not vacuous: a prompt that names a hidden city is reported");
+                var planted = new List<ExchangeCapture> { new ExchangeCapture { Seat = "seat-0", SeatRequest = 1, System = "s", User = "the enemy holds Chengdu", Witness = w0 } };
+                PrivacyEvidence probeEvidence = BatchPrivacy.Scan(planted);
+                log.Check(probeEvidence.Leaks.Count == 1 && probeEvidence.Leaks[0].Contains("Chengdu"),
+                    "the leak scan is not vacuous: a prompt that names a never-shown hidden city is reported");
                 log.Check(!SeatPrompts(t, "seat-1").Contains("NOTE-seat-0") && !SeatPrompts(t, "seat-0").Contains("NOTE-seat-1"),
                     "private strategic notes still never cross seats in the treatment arm");
             }
@@ -162,9 +160,12 @@ namespace LuanShi.ExperimentBatch
                 log.Check(BatchSpatial.CheckPair(c, t).Any(x => x.Contains("same canonical world")), "arms that start from different worlds are caught");
                 t.Spatial.WorldStartDigest = digest;
 
-                t.Spatial.HiddenIdLeaks.Add("seat-0 request 1 shows hidden 'city-shu'");
+                t.Spatial.Privacy.Leaks.Add("seat-0 request 1 shows 'city-shu', hidden at dispatch and never shown to this seat");
                 log.Check(BatchSpatial.CheckPair(c, t).Any(x => x.StartsWith("treatment leak")), "a hidden-id leak makes the pair fail");
-                t.Spatial.HiddenIdLeaks.Clear();
+                t.Spatial.Privacy.Leaks.Clear();
+                t.Spatial.Privacy.RequestsWithoutWitness = 1;
+                log.Check(BatchSpatial.CheckPair(c, t).Any(x => x.Contains("privacy scan incomplete")), "a request without a witness makes the pair fail rather than pass vacuously");
+                t.Spatial.Privacy.RequestsWithoutWitness = 0;
                 log.Check(BatchSpatial.CheckPair(c, t).Count == 0, "the restored pair passes again");
             }
             finally { Cleanup(root); }

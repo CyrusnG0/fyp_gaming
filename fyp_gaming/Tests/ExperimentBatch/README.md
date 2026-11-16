@@ -114,11 +114,21 @@ prompt sections, `finish_reason=length`, empty replies, unknown cost and reasoni
 - **Truncation is recorded, not assumed.** Each treatment request carries the production `spatial_truncation` report; the
   evidence counts reports and truncated requests, names the reasons (for example `move_option_cap`), sums the items
   dropped and keeps the largest prompt size. In the example pair every treatment request truncates the move list.
-- **Privacy and the hidden world.** Ids and city names of the other seat's cities and armies hidden from a seat at both
-  ends of the match (derived from the engine's own observation) are scanned for in every dispatched prompt; any hit fails
-  the pair. A digest of the whole canonical world, hidden parts included, is compared at the start (must match) and the
-  end (`final_world_identical`). The scripted replies ignore the spatial setting, so the end worlds match by construction:
-  that shows the prompt is the only channel, not that a model would play the same.
+- **Privacy, per dispatch.** At every dispatch the batch records what that seat's own `Observe(seat)` showed of the other
+  seats' cities and armies (visible, scouted or hidden). A city id, city name or army id that was hidden at that dispatch
+  and had never been shown to the seat must not appear in that request's prompt; any hit fails the pair. One that was shown
+  earlier and is hidden again is retained knowledge: it is counted (`retained_known_mentions`), not called a leak, and
+  whether its wording is stale is not judged. This proves absence of those exact strings only. It trusts `Observe` as the
+  oracle, and does not cover numbers, treaty or event text, paraphrase or neutral cities (`BatchPrivacy.Scope`).
+- **World digest.** A deterministic digest walks every public field and property reachable from `GameState` (factions,
+  diplomacy, cities, armies, watch towers and the whole map: size, walkable, costs, neighbour tables) plus the balance
+  profile. It does not cover private fields (the RNG stream, the action counter, the next proposal id) or the event log
+  (`BatchWorldDigest.Scope`, copied into each result as `world_digest_scope`). It is compared at the start (must match) and
+  the end (`final_world_identical`). The scripted replies ignore the spatial setting, so the end states match by
+  construction: that shows the prompt is the only channel, not that a model would play the same.
+- **Memory is not exercised.** The runner is built with no durable `ILlmMemoryStore` (only the in-memory strategic-note
+  store), so production memory extraction, consolidation and recall do not run in this batch and nothing here validates
+  long-term memory.
 - **What differs by design.** `INFORMATION ACCESS` reports the session tokens left, which the larger treatment prompts
   consume faster, so that line differs between the arms; it is a consequence of the treatment, not a leak.
 

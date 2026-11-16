@@ -28,16 +28,15 @@ namespace LuanShi.ExperimentBatch
         /// <summary>Total items the production builder dropped, by kind, summed over requests.</summary>
         [JsonPropertyName("dropped")] public SortedDictionary<string, int> Dropped { get; set; } = new SortedDictionary<string, int>();
         [JsonPropertyName("max_total_chars")] public int MaxTotalChars { get; set; }
-        /// <summary>Other-seat ids and city names hidden from the seat at the start and at the end of the match.</summary>
-        [JsonPropertyName("hidden_ids_checked")] public int HiddenIdsChecked { get; set; }
-        [JsonPropertyName("hidden_id_leaks")] public List<string> HiddenIdLeaks { get; set; } = new List<string>();
-        /// <summary>Digest of the whole canonical world, hidden parts included (researcher-side only).</summary>
+        /// <summary>Per-dispatch privacy scan against each request's own seat-filtered observation. See BatchPrivacy.Scope for what it proves.</summary>
+        [JsonPropertyName("privacy")] public PrivacyEvidence Privacy { get; set; }
+        /// <summary>Digest of the canonical state, hidden parts included (researcher-side only); BatchWorldDigest.Scope says what it covers.</summary>
+        [JsonPropertyName("world_digest_scope")] public string WorldDigestScope { get; set; } = BatchWorldDigest.Scope;
         [JsonPropertyName("world_start_digest")] public string WorldStartDigest { get; set; }
         [JsonPropertyName("world_final_digest")] public string WorldFinalDigest { get; set; }
 
         /// <summary>"seat#nth request of that seat" -> observation hash, from the run records.</summary>
         [JsonIgnore] public Dictionary<string, string> ObservationHashes = new Dictionary<string, string>(StringComparer.Ordinal);
-        [JsonIgnore] public HashSet<string> HiddenIds = new HashSet<string>(StringComparer.Ordinal);
     }
 
     public static class BatchSpatial
@@ -46,41 +45,18 @@ namespace LuanShi.ExperimentBatch
             { "own_dropped", "visible_dropped", "stale_dropped", "objectives_dropped", "frontiers_dropped",
               "visible_rows_dropped", "move_options_dropped", "armies_dropped" };
 
-        /// <summary>Other seats' cities and armies the given seat cannot see right now: their ids and city names.</summary>
-        public static HashSet<string> HiddenFrom(GameEngine engine, string seat)
-        {
-            Observation obs = engine.Observe(seat);
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (CityView c in obs.Cities) seen.Add(c.Id);
-            foreach (ScoutedCityView c in obs.ScoutedCities) seen.Add(c.CityId);
-            foreach (ArmyView a in obs.Armies) seen.Add(a.Id);
-            var hidden = new HashSet<string>(StringComparer.Ordinal);
-            foreach (CityState c in engine.State.Cities)
-                if (!string.IsNullOrEmpty(c.OwnerSeatId) && c.OwnerSeatId != seat && !seen.Contains(c.Id)) { hidden.Add(c.Id); hidden.Add(c.Name); }
-            foreach (ArmyState a in engine.State.Armies)
-                if (a.OwnerSeatId != seat && !seen.Contains(a.Id)) hidden.Add(a.Id);
-            return hidden;
-        }
-
-        /// <summary>
-        /// Builds the evidence for one finished arm. <paramref name="hiddenBySeat"/> holds, per seat, the ids hidden from it
-        /// at both ends of the match; any of them in that seat's dispatched prompt is reported as a leak.
-        /// </summary>
+        /// <summary>Builds the evidence for one finished arm from the requests the fake provider received and the recorder's files.</summary>
         public static SpatialEvidence Collect(string level, List<ExchangeCapture> captures, string exchangesPath, string runPath,
-            Dictionary<string, HashSet<string>> hiddenBySeat, string startDigest, string finalDigest)
+            string startDigest, string finalDigest)
         {
-            var e = new SpatialEvidence { Level = level, Requests = captures.Count, WorldStartDigest = startDigest, WorldFinalDigest = finalDigest };
+            var e = new SpatialEvidence { Level = level, Requests = captures.Count, WorldStartDigest = startDigest, WorldFinalDigest = finalDigest,
+                                          Privacy = BatchPrivacy.Scan(captures) };
             string addendum = PromptBuilder.SpatialContextAddendum();
             foreach (ExchangeCapture c in captures)
             {
                 if ((c.System ?? "").Contains(addendum)) e.SystemWithAddendum++;
                 if ((c.User ?? "").Contains(PromptBuilder.SpatialHeader)) e.UserWithSection++;
-                if (hiddenBySeat != null && hiddenBySeat.TryGetValue(c.Seat, out HashSet<string> hidden))
-                    foreach (string id in hidden)
-                        if ((c.System ?? "").Contains(id) || (c.User ?? "").Contains(id))
-                            e.HiddenIdLeaks.Add(c.Seat + " request " + c.SeatRequest + " shows hidden '" + id + "'");
             }
-            if (hiddenBySeat != null) foreach (HashSet<string> h in hiddenBySeat.Values) e.HiddenIdsChecked += h.Count;
             foreach (JsonElement x in Lines(exchangesPath))
             {
                 if (MatchAuditor.Str(x, "exchange_event") != "request") continue;
@@ -164,8 +140,10 @@ namespace LuanShi.ExperimentBatch
             if (c.TruncationReports != 0) p.Add("control recorded " + c.TruncationReports + " spatial truncation report(s) with spatial context off");
             if (t.TruncationReports != t.Requests) p.Add("treatment recorded " + t.TruncationReports + " spatial truncation report(s) for " + t.Requests + " requests");
             if (c.WorldStartDigest == null || c.WorldStartDigest != t.WorldStartDigest) p.Add("the arms did not start from the same canonical world");
-            foreach (string leak in c.HiddenIdLeaks) p.Add("control leak: " + leak);
-            foreach (string leak in t.HiddenIdLeaks) p.Add("treatment leak: " + leak);
+            if (c.Privacy.RequestsWithoutWitness > 0 || t.Privacy.RequestsWithoutWitness > 0)
+                p.Add("privacy scan incomplete: " + (c.Privacy.RequestsWithoutWitness + t.Privacy.RequestsWithoutWitness) + " request(s) have no per-dispatch observation witness");
+            foreach (string leak in c.Privacy.Leaks) p.Add("control leak: " + leak);
+            foreach (string leak in t.Privacy.Leaks) p.Add("treatment leak: " + leak);
             return p;
         }
 
@@ -173,7 +151,7 @@ namespace LuanShi.ExperimentBatch
             => "level " + s.Level + "; " + s.SystemWithAddendum + "/" + s.Requests + " system prompts carry the production addendum, "
                + s.UserWithSection + "/" + s.Requests + " user prompts the spatial section; prompt version " + string.Join(",", s.PromptVersions)
                + "; schema " + string.Join(",", s.SchemaHashes) + "; truncation reports " + s.TruncationReports + ", truncated " + s.TruncatedRequests
-               + (s.TruncationReasons.Count > 0 ? " (" + string.Join(",", s.TruncationReasons) + ")" : "") + "; hidden ids checked " + s.HiddenIdsChecked
-               + ", leaks " + s.HiddenIdLeaks.Count;
+               + (s.TruncationReasons.Count > 0 ? " (" + string.Join(",", s.TruncationReasons) + ")" : "") + "; privacy: " + s.Privacy.HiddenTokenChecks
+               + " hidden-token checks over " + s.Privacy.Requests + " dispatches, leaks " + s.Privacy.Leaks.Count + ", retained-known mentions " + s.Privacy.RetainedKnownMentions;
     }
 }
