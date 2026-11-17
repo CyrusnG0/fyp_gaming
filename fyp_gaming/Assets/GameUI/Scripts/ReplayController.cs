@@ -33,7 +33,7 @@ namespace LuanShi
             statusMsg = "Offline match replay — zero model calls; controls are docked on the right";
 
             string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : ReplayLoader.VerifiedDemoRunId;
-            if (!ReplayLoader.TryResolveRunFiles(runKey, out string sPath, out string jPath, out string ePath, out string err))
+            if (!ReplayLoader.TryResolveRunFiles(runKey, null, out string sPath, out string jPath, out string ePath, out string bPath, out string err))
             {
                 _replayInitError = "Run files not found: " + err;
                 Debug.LogWarning("[Replay] " + _replayInitError);
@@ -42,7 +42,7 @@ namespace LuanShi
 
             try
             {
-                _replayBundle = ReplayLoader.Load(sPath, jPath, ePath);
+                _replayBundle = ReplayLoader.Load(sPath, jPath, ePath, runKey, bPath);
                 if (_replayBundle.Summary != null)
                 {
                     randomSeed = _replayBundle.Summary.Seed;
@@ -153,8 +153,11 @@ namespace LuanShi
             string viewed = ViewedFactionNameFromObservation();
             int season = _replaySession.CurrentSeason;
             int total = _replaySession.TotalSeasons;
-            string state = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
-            return "OFFLINE REPLAY  |  Season " + season + "/" + total + "  |  " + state + " (viewing " + viewed + ")";
+            string state = _replaySession.IsCompleted
+                ? (_replaySession.IsIncompleteRun ? $"Paused at S{season} (incomplete)" : "Completed")
+                : (_replaySession.IsPlaying ? "Playing" : "Paused");
+            string totalStr = total > 0 ? total.ToString() : "?";
+            return "OFFLINE REPLAY  |  Season " + season + "/" + totalStr + "  |  " + state + " (viewing " + viewed + ")";
         }
 
         string ReplayDetailLine()

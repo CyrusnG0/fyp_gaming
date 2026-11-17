@@ -71,9 +71,22 @@ namespace LuanShi
             int totalReq = _replaySession.TotalRequests;
             string sSeasons = totalSeasons > 0 ? totalSeasons.ToString() : "unknown";
             string sReqs = totalReq > 0 ? totalReq.ToString() : "unknown";
-            string stateText = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
+            string stateText = _replaySession.IsCompleted
+                ? (_replaySession.IsIncompleteRun ? "Paused (incomplete)" : "Completed")
+                : (_replaySession.IsPlaying ? "Playing" : "Paused");
             GUI.Label(new Rect(x, y, width, 18f), $"Season {curSeason} of {sSeasons}  |  Req {reqIdx} of {sReqs} ({stateText})", uiBody);
             y += 20f;
+
+            if (_replaySession.HasDivergence && !string.IsNullOrEmpty(_replaySession.DivergenceSummary))
+            {
+                GUI.Label(new Rect(x, y, width, 15f), EllipsizeToWidth(uiReason, "DIVERGENCE: " + _replaySession.DivergenceSummary, width), uiReason);
+                y += 16f;
+            }
+            else if (_replaySession.IsCompleted && _replaySession.IsIncompleteRun && !string.IsNullOrEmpty(_replaySession.StopReason))
+            {
+                GUI.Label(new Rect(x, y, width, 15f), EllipsizeToWidth(uiHint, "Stopped: " + _replaySession.StopReason, width), uiHint);
+                y += 16f;
+            }
 
             // Progress Pips
             DrawReplayPips(x, y, width, curSeason, totalSeasons);
@@ -132,15 +145,18 @@ namespace LuanShi
                 ReplayRequestRecord rec = _replaySession.CurrentRequestRecord;
                 string seatId = rec != null ? rec.SeatId : (_replaySession.CurrentSeatId ?? "seat-0");
                 string persona = _replaySession.CurrentPersonaId;
-                GUI.Label(new Rect(x, y, width, 16f), $"Current Turn: {seatId} ({persona})", uiPanelTitle);
+                string exLink = rec != null && !string.IsNullOrEmpty(rec.ExchangeId)
+                    ? $" | ex={rec.ExchangeId}"
+                    : (rec != null ? $" | T{rec.TurnToken} R{rec.RequestIndex}" : "");
+                GUI.Label(new Rect(x, y, width, 16f), EllipsizeToWidth(uiPanelTitle, $"Current Turn: {seatId} ({persona}){exLink}", width), uiPanelTitle);
                 y += 18f;
 
                 string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
                 y += 16f;
 
-                string sExp = (rec != null && !string.IsNullOrEmpty(rec.RecordedExplanation)) ? rec.RecordedExplanation : "unknown";
-                GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Recorded model explanation: " + sExp, width), uiSmall);
+                string sExp = (rec != null && !string.IsNullOrEmpty(rec.RecordedExplanation)) ? rec.RecordedExplanation : "none";
+                GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Recorded model explanation (not private thought): " + sExp, width), uiSmall);
                 y += 16f;
 
                 string sLatency = (rec != null && rec.LatencyMs > 0) ? $"{rec.LatencyMs}ms" : "unknown";
@@ -236,7 +252,8 @@ namespace LuanShi
             string weiP = FormatScoreField(wei, "population", wei?.Population ?? 0);
             string weiGar = FormatScoreField(wei, "garrison", wei?.Garrison ?? 0);
 
-            GUI.Label(new Rect(x, y, colW, 16f), "Wei (Capital)", uiPanelTitle);
+            string weiName = wei != null && !string.IsNullOrEmpty(wei.Faction) ? $"{wei.Faction} ({wei.SeatId})" : "Seat 0";
+            GUI.Label(new Rect(x, y, colW, 16f), weiName, uiPanelTitle);
             GUI.Label(new Rect(x, y + 16f, colW, 14f), $"Gold {weiG}  Food {weiF}", uiSmall);
             GUI.Label(new Rect(x, y + 30f, colW, 14f), $"Pop {weiP}  Gar {weiGar}", uiSmall);
 
@@ -246,7 +263,8 @@ namespace LuanShi
             string shuGar = FormatScoreField(shu, "garrison", shu?.Garrison ?? 0);
 
             float col2X = x + colW + 8f;
-            GUI.Label(new Rect(col2X, y, colW, 16f), "Shu (Chengdu)", uiPanelTitle);
+            string shuName = shu != null && !string.IsNullOrEmpty(shu.Faction) ? $"{shu.Faction} ({shu.SeatId})" : "Seat 1";
+            GUI.Label(new Rect(col2X, y, colW, 16f), shuName, uiPanelTitle);
             GUI.Label(new Rect(col2X, y + 16f, colW, 14f), $"Gold {shuG}  Food {shuF}", uiSmall);
             GUI.Label(new Rect(col2X, y + 30f, colW, 14f), $"Pop {shuP}  Gar {shuGar}", uiSmall);
 
@@ -323,7 +341,8 @@ namespace LuanShi
                 DrawSolidColor(r, i % 2 == 0 ? new Color(0.12f, 0.12f, 0.12f, 0.6f) : new Color(0.08f, 0.08f, 0.08f, 0.6f));
 
                 string mark = evt.ResultOk ? "✓" : "✗";
-                string header = $"#{evt.Sequence} S{evt.Season} R{evt.RequestIndex} | {evt.Faction} ({evt.SeatId}) | {mark} {evt.ResultText}";
+                string link = !string.IsNullOrEmpty(evt.ExchangeId) ? $" | {evt.ExchangeId}" : "";
+                string header = $"#{evt.Sequence} S{evt.Season} T{evt.TurnToken} R{evt.RequestIndex}{link} | {evt.Faction} | {mark} {evt.ResultText}";
                 GUI.Label(new Rect(4f, rowY + 1f, width - 28f, 14f), EllipsizeToWidth(uiSmall, header, width - 28f), uiSmall);
 
                 string actLine = $"Action: {evt.ActionSummary}";

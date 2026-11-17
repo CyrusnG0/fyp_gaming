@@ -22,6 +22,10 @@ namespace LuanShi.Engine
         private int _currentRequestIndex, _currentSeason, _currentTurnToken;
         private string _currentSeatId;
         private bool _turnOpen, _isCompleted;
+        private bool _allowAttack, _allowResearch, _allowDiplomacy, _visibleMarchRoutes;
+        private bool _hasDivergence, _isIncompleteRun;
+        private string _divergenceSummary, _stopReason;
+        public bool PauseOnDivergence = true;
 
         private int _observationHashesMatched, _observationHashMismatches;
         private readonly List<string> _observationHashDiscrepancies = new List<string>();
@@ -43,6 +47,10 @@ namespace LuanShi.Engine
         public float Speed => _speed;
         public bool IsPlaying => _state == ReplayState.Playing;
         public bool IsCompleted => _isCompleted;
+        public bool HasDivergence => _hasDivergence;
+        public string DivergenceSummary => _divergenceSummary;
+        public bool IsIncompleteRun => _isIncompleteRun;
+        public string StopReason => _stopReason;
         public int TotalSeasons => _totalSeasons;
         public int TotalRequests => _totalRequests;
         public int CurrentRequestIndex => _currentRequestIndex;
@@ -93,8 +101,9 @@ namespace LuanShi.Engine
         public ReplaySession(ReplayBundle bundle, MapData hostMap = null)
         {
             _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
-            if (_bundle.Summary == null || !string.Equals(_bundle.Summary.RunId, ReplayLoader.VerifiedDemoRunId, StringComparison.Ordinal))
-                throw new InvalidOperationException($"ReplaySession requires verified demo run '{ReplayLoader.VerifiedDemoRunId}'; got '{_bundle.Summary?.RunId}'.");
+            bool isLegacyDemo = _bundle.Summary != null && string.Equals(_bundle.Summary.RunId, ReplayLoader.VerifiedDemoRunId, StringComparison.Ordinal);
+            if (!isLegacyDemo && _bundle.Bootstrap == null)
+                throw new InvalidOperationException($"ReplaySession requires a replay bootstrap for run '{_bundle.Summary?.RunId ?? "unknown"}'.");
             _hostMap = hostMap;
             Reset();
         }
@@ -103,6 +112,7 @@ namespace LuanShi.Engine
         {
             _state = ReplayState.NotStarted; _stepTimer = 0f; _currentRequestIndex = 0;
             _currentTurnToken = 0; _currentSeatId = null; _turnOpen = false; _isCompleted = false;
+            _hasDivergence = false; _divergenceSummary = null; _isIncompleteRun = false; _stopReason = null;
 
             _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
             _totalRequests = _bundle.Requests.Count;
@@ -110,7 +120,8 @@ namespace LuanShi.Engine
             for (int i = 0; i < _bundle.Requests.Count; i++)
             {
                 var req = _bundle.Requests[i];
-                if (IsEndTurnRecord(req)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
+                if (!string.IsNullOrEmpty(req.InquiryTool)) continue;
+                if (IsEndTurnRecord(req, _bundle.Bootstrap?.Features)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
                 else { if (req.ResultOk) _expectedAcceptedActions++; else _expectedRejectedActions++; }
             }
 
@@ -118,6 +129,23 @@ namespace LuanShi.Engine
             _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
             _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
             _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null; _seasonSummaries = null;
+
+            if (_bundle.Bootstrap != null)
+            {
+                var f = _bundle.Bootstrap.Features;
+                _allowAttack = f != null && f.Attack;
+                _allowResearch = f != null && f.Research;
+                _allowDiplomacy = f != null && f.Diplomacy;
+                _visibleMarchRoutes = f != null && f.VisibleMarchRoutes;
+                _engine = ReplayBootstrapLoader.CreateEngine(_bundle.Bootstrap);
+                _currentSeason = _engine.State.Season;
+                return;
+            }
+
+            _allowAttack = false;
+            _allowResearch = false;
+            _allowDiplomacy = _bundle.Requests.Count > 0 && PromptBuilder.IsDiplomacyPromptVersion(_bundle.Requests[0].PromptVersion);
+            _visibleMarchRoutes = false;
 
             int seed = _bundle.Summary != null && _bundle.Summary.Seed != 0 ? _bundle.Summary.Seed : 12345;
             string profileKey = _bundle.Summary?.BalanceProfileKey ?? "easy-research";
@@ -188,7 +216,7 @@ namespace LuanShi.Engine
             Observation obs = _engine.Observe(req.SeatId);
             // A recorded diplomacy run has its player-written text projected out of the dispatched
             // observation JSON, so the same projection is applied here before hashing and parsing.
-            bool diplomacy = PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
+            bool diplomacy = _allowDiplomacy || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
             if (diplomacy) obs = PromptBuilder.ProjectDiplomacyObservation(obs);
             string obsJson = PromptBuilder.BoundedObservationJson(obs);
             string obsHash = Hash(obsJson);
@@ -196,18 +224,23 @@ namespace LuanShi.Engine
             else
             {
                 _observationHashMismatches++;
-                if (_observationHashDiscrepancies.Count < 20)
-                {
-                    string expShort = string.IsNullOrEmpty(req.ObservationHash) ? "none" : (req.ObservationHash.Length >= 8 ? req.ObservationHash.Substring(0, 8) : req.ObservationHash);
-                    _observationHashDiscrepancies.Add($"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...");
-                }
+                string expShort = string.IsNullOrEmpty(req.ObservationHash) ? "none" : (req.ObservationHash.Length >= 8 ? req.ObservationHash.Substring(0, 8) : req.ObservationHash);
+                string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...";
+                if (_observationHashDiscrepancies.Count < 20) _observationHashDiscrepancies.Add(msg);
+                RecordDivergence(msg);
             }
 
-            ParseResult parsed = LlmActionParser.Parse(req.RawModelText, false, false, diplomacy);
-            bool isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
+            bool isInquiry = !string.IsNullOrEmpty(req.InquiryTool);
+            ParseResult parsed = isInquiry ? default : LlmActionParser.Parse(req.RawModelText, _allowAttack, _allowResearch, diplomacy);
+            bool isEndTurn = !isInquiry && parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
             bool replayedOk = false;
+            string replayedError = null;
 
-            if (isEndTurn)
+            if (isInquiry)
+            {
+                replayedOk = true;
+            }
+            else if (isEndTurn)
             {
                 bool endResOk = false;
                 if (_turnOpen && _currentTurnToken != 0)
@@ -225,13 +258,14 @@ namespace LuanShi.Engine
                 else
                 {
                     _actionOutcomeMismatches++;
-                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): voluntary end_turn outcome mismatch (req.ParseOk={req.ParseOk}, req.ResultOk={req.ResultOk}, endResOk={endResOk})");
+                    string msg = $"Req {req.TotalRequests} (Season {req.Season}): voluntary end_turn outcome mismatch (req.ParseOk={req.ParseOk}, req.ResultOk={req.ResultOk}, endResOk={endResOk})";
+                    _actionDiscrepancies.Add(msg);
+                    RecordDivergence(msg);
                 }
             }
             else
             {
                 bool replayedParseOk = parsed.Ok && parsed.Action != null;
-                string replayedError = null;
                 if (!replayedParseOk)
                 {
                     replayedOk = false;
@@ -241,7 +275,9 @@ namespace LuanShi.Engine
                 {
                     ActionCommand cmd = LlmActionParser.ToCommand(parsed.Action);
                     cmd.ControllerType = ControllerType.Llm;
-                    ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
+                    ValidationResult res = _visibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_engine, req.SeatId, cmd)
+                        ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
+                        : _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
                     replayedOk = res.Ok;
                     if (!res.Ok) replayedError = res.Error ?? "validation_failure";
                 }
@@ -258,28 +294,36 @@ namespace LuanShi.Engine
                     else
                     {
                         _rejectionReasonMismatches++; _actionOutcomeMismatches++;
-                        _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): rejection category/reason mismatch (recParse={req.ParseOk}, actParse={replayedParseOk}, recErr='{req.ResultError}', actErr='{replayedError}')");
+                        string msg = $"Req {req.TotalRequests} (Season {req.Season}): rejection category/reason mismatch (recParse={req.ParseOk}, actParse={replayedParseOk}, recErr='{req.ResultError}', actErr='{replayedError}')";
+                        _actionDiscrepancies.Add(msg);
+                        RecordDivergence(msg);
                     }
                 }
                 else if (req.ParseOk && req.ResultOk && !replayedOk)
                 {
                     _unexpectedRejections++; _actionOutcomeMismatches++;
-                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected rejection ({replayedError})");
+                    string msg = $"Req {req.TotalRequests} (Season {req.Season}): unexpected rejection ({replayedError})";
+                    _actionDiscrepancies.Add(msg);
+                    RecordDivergence(msg);
                 }
                 else if ((!req.ParseOk || !req.ResultOk) && replayedOk)
                 {
                     _unexpectedAcceptances++; _actionOutcomeMismatches++;
-                    _actionDiscrepancies.Add($"Req {req.TotalRequests} (Season {req.Season}): unexpected acceptance");
+                    string msg = $"Req {req.TotalRequests} (Season {req.Season}): unexpected acceptance";
+                    _actionDiscrepancies.Add(msg);
+                    RecordDivergence(msg);
                 }
             }
 
-            string actType = isEndTurn ? "end_turn" : (parsed.Ok && parsed.Action != null ? parsed.Action.Type : "unknown");
-            string actSummary = isEndTurn
-                ? "Voluntary end of turn"
-                : (parsed.Ok && parsed.Action != null
-                    ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
-                    : (!string.IsNullOrEmpty(req.RawModelText) ? req.RawModelText : "unknown"));
-            string resText = isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected");
+            string actType = isInquiry ? req.InquiryTool : (isEndTurn ? "end_turn" : (parsed.Ok && parsed.Action != null ? parsed.Action.Type : "invalid"));
+            string actSummary = isInquiry
+                ? $"Inquiry: {req.InquiryTool}"
+                : (isEndTurn
+                    ? "Voluntary end of turn"
+                    : (parsed.Ok && parsed.Action != null
+                        ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
+                        : (!string.IsNullOrEmpty(req.ResultError) ? $"invalid ({req.ResultError})" : "invalid")));
+            string resText = isInquiry ? "inquiry" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected"));
             string facName = "unknown";
             if (_engine?.State?.Factions != null)
             {
@@ -294,12 +338,16 @@ namespace LuanShi.Engine
                 SeatId = req.SeatId,
                 Faction = facName,
                 Season = req.Season,
+                TurnToken = req.TurnToken,
                 RequestIndex = req.RequestIndex,
+                ExchangeId = req.ExchangeId,
                 ActionType = actType,
                 ActionSummary = actSummary,
                 CommandJson = req.CommandJson,
-                ResultOk = isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk,
+                ResultOk = isInquiry || (isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk),
                 ResultText = resText,
+                ResultError = replayedError ?? req.ResultError,
+                InquiryTool = req.InquiryTool,
                 Explanation = req.RecordedExplanation,
                 ObservationHash = req.ObservationHash
             };
@@ -310,6 +358,7 @@ namespace LuanShi.Engine
             if (_currentRequestIndex >= _bundle.Requests.Count)
             {
                 FinishReplay();
+                if (_hasDivergence && PauseOnDivergence && _state == ReplayState.Playing) Pause();
                 return true;
             }
 
@@ -333,7 +382,14 @@ namespace LuanShi.Engine
                 _turnOpen = true;
             }
 
+            if (_hasDivergence && PauseOnDivergence && _state == ReplayState.Playing) Pause();
             return true;
+        }
+
+        private void RecordDivergence(string msg)
+        {
+            _hasDivergence = true;
+            if (string.IsNullOrEmpty(_divergenceSummary)) _divergenceSummary = msg;
         }
 
         public void StepSeason()
@@ -366,22 +422,49 @@ namespace LuanShi.Engine
         private void FinishReplay()
         {
             if (_turnOpen && _currentTurnToken != 0) { _engine.EndSeatTurn(_currentTurnToken); _turnOpen = false; }
-            _engine.EndSeason();
-            RecordScoreboard(_currentSeason);
+            bool finalSeasonCompleted = IsFinalSeasonCompleted(_currentSeason);
+            if (finalSeasonCompleted)
+            {
+                _engine.EndSeason();
+                RecordScoreboard(_currentSeason);
+            }
+            else
+            {
+                _isIncompleteRun = true;
+                _stopReason = _bundle.Summary?.StopReason;
+            }
             _isCompleted = true;
             _state = ReplayState.Completed;
             GenerateComparisonReport();
         }
 
+        private bool IsFinalSeasonCompleted(int season)
+        {
+            if (_bundle.Summary == null) return true;
+            if (_bundle.Summary.Scoreboards != null)
+            {
+                foreach (var sb in _bundle.Summary.Scoreboards)
+                {
+                    if (sb.Season == season && sb.Scores != null && sb.Scores.Count > 0)
+                        return true;
+                }
+            }
+            string st = _bundle.Summary.State ?? "";
+            bool stoppedEarly = string.Equals(st, "Paused", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(st, "Stopped", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(st, "Failed", StringComparison.OrdinalIgnoreCase);
+            return !stoppedEarly && _bundle.Summary.SeasonsPlayed >= season;
+        }
+
         private void RecordScoreboard(int season) => _replayedScores.Add(new ReplaySeasonScoreboard { Season = season, Scores = CurrentScores() });
 
-        private static bool IsEndTurnRecord(ReplayRequestRecord req)
+        private static bool IsEndTurnRecord(ReplayRequestRecord req, ReplayBootstrapFeatures features)
         {
-            if (req == null) return false;
-            // Same feature flags as the replay step's own parse, derived from the record's identity, so
-            // a diplomacy reply is classified exactly as it will be re-parsed.
-            ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,
-                PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion));
+            if (req == null || !string.IsNullOrEmpty(req.InquiryTool)) return false;
+            bool atk = features != null && features.Attack;
+            bool res = features != null && features.Research;
+            bool dip = (features != null && features.Diplomacy) || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
+            ParseResult p = LlmActionParser.Parse(req.RawModelText, atk, res, dip);
             return p.Ok && p.Action != null && p.Action.EndTurn;
         }
 

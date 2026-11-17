@@ -129,12 +129,16 @@ namespace LuanShi.Engine
         public string SeatId;
         public string Faction;
         public int Season;
+        public int TurnToken;
         public int RequestIndex;
+        public string ExchangeId;
         public string ActionType;
         public string ActionSummary;
         public string CommandJson;
         public bool ResultOk;
         public string ResultText;
+        public string ResultError;
+        public string InquiryTool;
         public string Explanation;
         public string ObservationHash;
     }
@@ -143,9 +147,11 @@ namespace LuanShi.Engine
     {
         public ReplaySummaryData Summary;
         public IReadOnlyList<ReplayRequestRecord> Requests;
+        public ReplayBootstrapData Bootstrap;
         public string SummaryPath;
         public string JsonlPath;
         public string ExchangesPath;
+        public string BootstrapPath;
     }
 
     public sealed class ReplayPositionCheck
@@ -220,6 +226,10 @@ namespace LuanShi.Engine
 
         public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
+        public bool IsIncompleteRun;
+        public string StopReason;
+        public int FinalRecordedSeason;
+        public string FinalRecordedSeatId;
         public bool RawExactMatch;
         public bool ExactVerificationPassed => RawExactMatch;
 
