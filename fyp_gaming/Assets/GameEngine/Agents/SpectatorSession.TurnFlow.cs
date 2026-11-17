@@ -186,6 +186,7 @@ namespace LuanShi.Engine
                 EndedBy = endedBy,
                 EndReason = _runner.EndReason,
                 EndReasonText = _runner.EndReasonText,
+                PromptSizeJson = _runner.LastPromptSizeJson,
             };
         }
 

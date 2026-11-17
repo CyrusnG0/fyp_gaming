@@ -270,6 +270,8 @@ namespace LuanShi.Engine
                 Field(sb, "ended_by", record.EndedBy, config, true);
                 Field(sb, "end_reason", record.EndReason.ToString(), config, true);
                 Field(sb, "end_reason_text", record.EndReasonText, config, true);
+                if (!string.IsNullOrEmpty(record.PromptSizeJson))
+                    sb.Append(",\"prompt_size\":").Append(record.PromptSizeJson);
                 sb.Append('}');
             }
             sb.Append(']');

@@ -5,135 +5,12 @@ using System.Text;
 
 namespace LuanShi.Engine
 {
-    /// <summary>One earlier inquiry result a seat may revisit, with when it was obtained.</summary>
-    internal sealed class RichInquiryEntry
-    {
-        public int Season;
-        public string Tool;
-        public string Json;
-
-        public string Line()
-            => "[season " + Season.ToString(CultureInfo.InvariantCulture) + ", " + Tool
-               + ", observed then and possibly out of date] " + Json;
-    }
-
-    /// <summary>
-    /// What one rich prompt actually contains. Counts are measured on the assembled prompt, never
-    /// copied from a limit, so a section that was trimmed to fit reports the trimmed figure.
-    /// </summary>
-    internal sealed class RichContextReport
-    {
-        internal sealed class Section
-        {
-            public string Name;
-            public int Included;
-            public int Available;      // -1 = the total is not known to the host
-            public string Note;
-        }
-
-        public readonly List<Section> Sections = new List<Section>();
-        public readonly List<string> PriorResults = new List<string>();
-        public int TrimLevel;
-        public bool Fits;
-        public int PromptChars;
-        public int MaxPromptChars;
-        public SpatialTruncationReport SpatialTruncation;
-
-        public void Add(string name, int included, int available, string note)
-            => Sections.Add(new Section { Name = name, Included = included, Available = available, Note = note });
-
-        public string ToPromptText()
-        {
-            var sb = new StringBuilder(900);
-            sb.Append("CONTEXT COMPLETENESS (measured on this prompt; anything not listed was not supplied):\n");
-            foreach (Section s in Sections)
-            {
-                sb.Append("- ").Append(s.Name).Append(": ").Append(s.Included.ToString(CultureInfo.InvariantCulture));
-                if (s.Available >= 0)
-                {
-                    sb.Append(" of ").Append(s.Available.ToString(CultureInfo.InvariantCulture));
-                    if (s.Included < s.Available) sb.Append(" (INCOMPLETE)");
-                }
-                else sb.Append(" (total not known to the host)");
-                if (!string.IsNullOrEmpty(s.Note)) sb.Append(". ").Append(s.Note);
-                sb.Append('\n');
-            }
-            if (TrimLevel > 0)
-                sb.Append("- Prompt-size trim level ").Append(TrimLevel.ToString(CultureInfo.InvariantCulture))
-                  .Append(": sections above were reduced to stay under the prompt ceiling.\n");
-            return sb.ToString();
-        }
-
-        public string ToJson()
-        {
-            var sb = new StringBuilder(512);
-            sb.Append("{\"trim_level\":").Append(TrimLevel.ToString(CultureInfo.InvariantCulture));
-            sb.Append(",\"fits\":").Append(Fits ? "true" : "false");
-            sb.Append(",\"prompt_chars\":").Append(PromptChars.ToString(CultureInfo.InvariantCulture));
-            sb.Append(",\"max_prompt_chars\":").Append(MaxPromptChars.ToString(CultureInfo.InvariantCulture));
-            sb.Append(",\"sections\":[");
-            for (int i = 0; i < Sections.Count; i++)
-            {
-                Section s = Sections[i];
-                if (i > 0) sb.Append(',');
-                sb.Append("{\"name\":").Append(MiniJson.Str(s.Name));
-                sb.Append(",\"included\":").Append(s.Included.ToString(CultureInfo.InvariantCulture));
-                sb.Append(",\"available\":").Append(s.Available < 0 ? "null"
-                    : s.Available.ToString(CultureInfo.InvariantCulture));
-                sb.Append(",\"truncated\":").Append(s.Available >= 0 && s.Included < s.Available ? "true" : "false");
-                sb.Append('}');
-            }
-            sb.Append(']');
-            if (SpatialTruncation != null)
-                sb.Append(",\"spatial_truncation\":").Append(SpatialTruncation.ToJson());
-            sb.Append('}');
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>Everything one rich prompt is assembled from. All of it is already seat-filtered.</summary>
-    internal sealed class RichContextInputs
-    {
-        public Observation Observation;
-        public IReadOnlyList<ActionOption> Options;
-        public MovementView Movement;
-        public IReadOnlyList<string> History;
-        public int HistoryDropped;
-        public IReadOnlyList<LlmMemory> Memories;
-        public IReadOnlyList<RichInquiryEntry> PriorResults;   // oldest first, excluding the latest result
-        public int PriorDropped;
-        public string LatestInquiryResult;
-        public string Note;
-        public LlmPersona Persona;
-        public bool AttackEnabled;
-        public AttackView Attacks;
-        public string Version;
-        public int SystemChars;
-        public int RequestsLeft;
-        public int ActionsLeft;
-        public PromptBuilder.RichAllowances Allowances;
-        public SpatialContextOptions SpatialOptions;
-    }
-
-    internal sealed class RichContextResult
-    {
-        public string User;
-        public string ObservationJson;
-        public RichContextReport Report;
-        public SpatialTruncationReport SpatialTruncation => Report?.SpatialTruncation;
-    }
-
-    /// <summary>
-    /// Assembles the rich, seat-filtered user prompt. If it exceeds the configured prompt ceiling it
-    /// steps down a fixed ladder (prior inquiry results, then history/memory back to the historical
-    /// sizes, then events) and the completeness report states the figures actually included.
-    /// </summary>
     internal static class RichContextAssembler
     {
         public static RichContextResult Assemble(RichContextInputs input, LlmConfig config)
         {
             RichContextResult last = null;
-            for (int level = 0; level <= 3; level++)
+            for (int level = 0; level <= 5; level++)
             {
                 last = Build(input, config, level);
                 if (last.Report.Fits) return last;
@@ -152,29 +29,51 @@ namespace LuanShi.Engine
                 memoryChars = Math.Min(memoryChars, LlmMemoryRetriever.DefaultMaxChars);
             }
             if (level >= 3) events = Math.Min(events, PromptBuilder.MaxPromptObservationEvents);
+            if (level >= 4)
+            {
+                // Last-resort trim: lowest-priority context only. LatestInquiryResult, candidate
+                // orders and the allowance/budget text are deliberately never reduced here.
+                events = Math.Min(events, 10);
+                historyCap = Math.Min(historyCap, 6);
+                memoryChars = Math.Max(0, memoryChars / 2);
+            }
 
             Observation obs = input.Observation;
             int effectiveMaxChars = input.SpatialOptions != null && input.SpatialOptions.IsEnabled
                 && input.SpatialOptions.ProviderCharLimit > 0
                 ? Math.Min(config.EffectiveMaxPromptChars, input.SpatialOptions.ProviderCharLimit)
                 : config.EffectiveMaxPromptChars;
-            var report = new RichContextReport { TrimLevel = level, MaxPromptChars = effectiveMaxChars };
+            int reservedChars = Math.Max(0, input.ReservedChars);
+            int fitLimit = Math.Max(0, effectiveMaxChars - reservedChars);
+            var report = new RichContextReport { TrimLevel = level, MaxPromptChars = fitLimit };
+            report.InquiryOriginalChars = input.LatestInquiryResult == null
+                ? 0 : input.LatestInquiryResult.Length;
+            report.InquiryKeptChars = report.InquiryOriginalChars;
 
             int totalEvents = obs.Events.Count;
+            string eventNote = totalEvents > events ? "older events: use search_history" : null;
+            if (level >= 4 && eventNote != null)
+                eventNote += "; further reduced for the prompt-size ceiling";
             report.Add("observation events (newest kept)", Math.Min(totalEvents, events), totalEvents,
-                totalEvents > events ? "older events: use search_history" : null);
+                eventNote);
 
             int hFirst = Math.Max(0, input.History.Count - historyCap);
             var history = new List<string>();
             for (int i = hFirst; i < input.History.Count; i++) history.Add(input.History[i]);
             int historyTotal = input.History.Count + input.HistoryDropped;
-            report.Add("own action feedback lines (newest kept)", history.Count, historyTotal,
-                "feedback lines carry the order and its accept/reject result only, not resulting numbers");
+            string historyNote =
+                "feedback lines carry the order and its accept/reject result only, not resulting numbers";
+            if (level >= 4 && history.Count < historyTotal)
+                historyNote += "; oldest feedback lines omitted to keep this prompt under the ceiling";
+            report.Add("own action feedback lines (newest kept)", history.Count, historyTotal, historyNote);
 
             IReadOnlyList<LlmMemory> memories = LlmMemoryRetriever.Select(input.Memories, obs,
                 input.Options, memoryChars);
+            string memoryNote = input.Memories.Count > memories.Count ? "the rest: use recall_memory" : null;
+            if (level >= 4 && memoryNote != null)
+                memoryNote += "; memory budget halved for the prompt-size ceiling";
             report.Add("long-term memories (ranked, character-limited)", memories.Count, input.Memories.Count,
-                input.Memories.Count > memories.Count ? "the rest: use recall_memory" : null);
+                memoryNote);
 
             int shown = SelectPrior(input, config, level, report);
             report.Add("prior inquiry results (newest kept)", shown, input.PriorResults.Count + input.PriorDropped,
@@ -185,6 +84,17 @@ namespace LuanShi.Engine
                 string.IsNullOrEmpty(input.Note) ? 0 : 1,
                 string.IsNullOrEmpty(input.Note) ? "none saved yet" : "one note (" + input.Note.Length
                     .ToString(CultureInfo.InvariantCulture) + " chars), the latest only");
+
+            int inquiryOriginalChars = input.LatestInquiryResult == null
+                ? 0 : input.LatestInquiryResult.Length;
+            int inquiryKeptChars = inquiryOriginalChars;
+            string boundedInquiry = input.LatestInquiryResult;
+            int inquirySectionIndex = -1;
+            if (level >= 5 && inquiryOriginalChars > 0)
+            {
+                inquirySectionIndex = report.Sections.Count;
+                report.Add("latest inquiry result", inquiryKeptChars, inquiryOriginalChars, null);
+            }
 
             bool spatialOn = input.Movement != null && input.Movement.SpatialContext != null
                 && input.SpatialOptions != null && input.SpatialOptions.IsEnabled;
@@ -202,17 +112,27 @@ namespace LuanShi.Engine
                 "only what your own seat-filtered observation shows is supplied");
 
             string attackNotice = input.AttackEnabled ? ActionCatalogue.AttackNotice(input.Attacks) : null;
-            string section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
-            string body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
-                input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
-                input.Persona, attackNotice, events);
-            string user = PromptBuilder.InsertBeforeCandidates(body, section);
-            if (spatialOn && level == 3 && input.SystemChars + user.Length > effectiveMaxChars)
+            string section = null;
+            string body = null;
+            string user = null;
+            void Rebuild(string inquiryText)
             {
-                for (int pass = 0; pass < 2 && input.SystemChars + user.Length > effectiveMaxChars; pass++)
+                section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
+                body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
+                    input.ActionsLeft, input.Version, movementText, memories, inquiryText,
+                    input.Persona, attackNotice, events);
+                user = PromptBuilder.InsertBeforeCandidates(body, section);
+            }
+            Rebuild(boundedInquiry);
+            if (spatialOn && level >= 3 && input.SystemChars + user.Length > fitLimit)
+            {
+                for (int pass = 0; pass < 2 && input.SystemChars + user.Length > fitLimit; pass++)
                 {
-                    int excess = input.SystemChars + user.Length - effectiveMaxChars;
-                    int sectionBudget = Math.Max(0, (movementText == null ? 0 : movementText.Length) - excess);
+                    int excess = input.SystemChars + user.Length - fitLimit;
+                    // Budget 0 means "no budget" to the renderer (it would return the FULL section);
+                    // reserve one char so the smallest section is selected instead.
+                    int sectionBudget = Math.Max(1,
+                        (movementText == null ? 0 : movementText.Length) - excess);
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
                         input.SpatialOptions, sectionBudget, out spatialReport);
                     if (moveSectionIndex < report.Sections.Count)
@@ -220,11 +140,71 @@ namespace LuanShi.Engine
                         report.Sections.RemoveAt(moveSectionIndex);
                         AddMovement(input.Movement, report, spatialReport, insertAt: moveSectionIndex);
                     }
-                    section = PromptBuilder.RichSectionText(input.Allowances, report, input.Note);
-                    body = PromptBuilder.BuildRichBase(obs, input.Options, history, input.RequestsLeft,
-                        input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
-                        input.Persona, attackNotice, events);
-                    user = PromptBuilder.InsertBeforeCandidates(body, section);
+                    Rebuild(boundedInquiry);
+                }
+            }
+            if (level >= 5)
+            {
+                // The movement section is at its floor before the inquiry budget is measured, so
+                // the inquiry gets every character not spent on mandatory text.
+                if (spatialOn)
+                {
+                    movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
+                        input.SpatialOptions, 1, out spatialReport);
+                    if (moveSectionIndex < report.Sections.Count)
+                    {
+                        report.Sections.RemoveAt(moveSectionIndex);
+                        AddMovement(input.Movement, report, spatialReport, insertAt: moveSectionIndex);
+                    }
+                    Rebuild(boundedInquiry);
+                }
+                if (inquiryOriginalChars > 0)
+                {
+                    int minKept = Math.Min(inquiryOriginalChars, 200);
+                    int floorRequest = Math.Min(inquiryOriginalChars, minKept + 8);
+                    // Try the full result first: the level-4 reductions and the movement floor
+                    // may already be enough.
+                    boundedInquiry = input.LatestInquiryResult;
+                    inquiryKeptChars = inquiryOriginalChars;
+                    UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
+                        inquiryOriginalChars, false);
+                    Rebuild(boundedInquiry);
+                    for (int pass = 0; pass < 16 && input.SystemChars + user.Length > fitLimit; pass++)
+                    {
+                        int over = input.SystemChars + user.Length - fitLimit;
+                        int next = inquiryKeptChars - Math.Max(1, over);
+                        if (next < floorRequest) next = floorRequest;
+                        if (next >= inquiryKeptChars) break;
+                        inquiryKeptChars = next;
+                        string bound = BoundInquiry(input.LatestInquiryResult, inquiryKeptChars,
+                            inquiryOriginalChars, out int actualKept);
+                        boundedInquiry = bound;
+                        inquiryKeptChars = actualKept;
+                        UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
+                            inquiryOriginalChars, inquiryKeptChars < inquiryOriginalChars);
+                        Rebuild(boundedInquiry);
+                    }
+                }
+                report.InquiryOriginalChars = inquiryOriginalChars;
+                report.InquiryKeptChars = inquiryKeptChars;
+                if (input.SystemChars + user.Length > fitLimit)
+                {
+                    int mandatoryTotal = input.SystemChars + user.Length;
+                    if (inquirySectionIndex >= 0)
+                    {
+                        RichContextReport.Section saved = report.Sections[inquirySectionIndex];
+                        report.Sections.RemoveAt(inquirySectionIndex);
+                        Rebuild(null);
+                        mandatoryTotal = input.SystemChars + user.Length;
+                        report.Sections.Insert(inquirySectionIndex, saved);
+                        Rebuild(boundedInquiry);
+                    }
+                    if (reservedChars > 0 && mandatoryTotal <= effectiveMaxChars)
+                        report.UnfitReason = "diplomacy_reservation";
+                    else if (mandatoryTotal > fitLimit)
+                        report.UnfitReason = "mandatory_context_exceeds_limit";
+                    else
+                        report.UnfitReason = "inquiry_result_floor_unfit";
                 }
             }
             if (spatialReport != null)
@@ -237,13 +217,113 @@ namespace LuanShi.Engine
             }
             report.PromptChars = input.SystemChars + user.Length;
             report.Fits = report.PromptChars <= report.MaxPromptChars;
+            string observationJson = PromptBuilder.BoundedObservationJson(obs, events);
+            int historyChars = 0;
+            foreach (string line in history) historyChars += (line == null ? 0 : line.Length) + 2;
+            int memorySectionChars = 0;
+            foreach (LlmMemory memory in memories)
+                if (memory != null)
+                    memorySectionChars += 6 + (memory.Type == null ? 0 : memory.Type.Length)
+                        + (memory.Content == null ? 0 : memory.Content.Length);
             return new RichContextResult
             {
                 User = user,
-                ObservationJson = PromptBuilder.BoundedObservationJson(obs, events),
+                ObservationJson = observationJson,
                 Report = report,
+                SizeReport = PromptSizeReport.RichAssembler(report, input, observationJson.Length,
+                    historyChars, memorySectionChars, movementText == null ? 0 : movementText.Length,
+                    ActionCatalogue.ToPromptText(input.Options).Length,
+                    section == null ? 0 : section.Length,
+                    input.LatestInquiryResult == null ? 0 : input.LatestInquiryResult.Length),
             };
         }
+
+        private static void UpdateInquirySection(RichContextReport report, int index, int kept,
+            int original, bool truncated)
+        {
+            if (index < 0 || index >= report.Sections.Count) return;
+            RichContextReport.Section section = report.Sections[index];
+            section.Included = kept;
+            section.Available = original;
+            section.Note = truncated
+                ? "truncated to fit the prompt limit; repeat a narrower inquiry for the rest"
+                : null;
+        }
+
+        /// <summary>
+        /// Bounds an inquiry result to <paramref name="requestedKept"/> content characters and
+        /// prefixes a clear marker. The marker, the cut content and the report line are all part of
+        /// the prompt the caller measures. Cuts are safe for surrogate pairs and (for JSON-ish text)
+        /// never end inside a backslash or \uXXXX escape.
+        /// </summary>
+        private static string BoundInquiry(string text, int requestedKept, int original, out int kept)
+        {
+            kept = SafeCut(text, requestedKept);
+            if (kept >= text.Length)
+            {
+                kept = text.Length;
+                return text;
+            }
+            string marker = "[INCOMPLETE: inquiry result cut from "
+                + original.ToString(CultureInfo.InvariantCulture) + " to "
+                + kept.ToString(CultureInfo.InvariantCulture)
+                + " chars to fit the prompt limit; repeat a narrower inquiry for the rest]";
+            return marker + "\n" + text.Substring(0, kept);
+        }
+
+        private static int SafeCut(string text, int requested)
+        {
+            int cut = Math.Min(Math.Max(0, requested), text.Length);
+            if (cut > 0 && cut < text.Length && char.IsHighSurrogate(text[cut - 1])
+                && char.IsLowSurrogate(text[cut]))
+                cut--;
+            if (!LooksJsonish(text)) return cut;
+            while (cut > 0)
+            {
+                // An odd run of backslashes means the cut lands after an escaped character.
+                int backslashes = 0;
+                for (int i = cut - 1; i >= 0 && text[i] == '\\'; i--) backslashes++;
+                if ((backslashes & 1) == 1)
+                {
+                    cut--;
+                    continue;
+                }
+                // An incomplete \uXXXX sequence at the end is dropped entirely.
+                int slash = -1;
+                for (int i = cut - 1; i >= 0 && i >= cut - 5; i--)
+                    if (text[i] == '\\') { slash = i; break; }
+                if (slash >= 0 && slash + 1 < text.Length && text[slash + 1] == 'u')
+                {
+                    int hex = 0;
+                    for (int i = slash + 2; i < cut; i++)
+                        if (IsHex(text[i])) hex++; else break;
+                    if (hex < 4)
+                    {
+                        cut = slash;
+                        continue;
+                    }
+                }
+                break;
+            }
+            if (cut > 0 && cut < text.Length && char.IsHighSurrogate(text[cut - 1])
+                && char.IsLowSurrogate(text[cut]))
+                cut--;
+            return Math.Max(0, cut);
+        }
+
+        private static bool LooksJsonish(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            foreach (char c in text)
+            {
+                if (char.IsWhiteSpace(c)) continue;
+                return c == '{' || c == '[' || c == '"';
+            }
+            return false;
+        }
+
+        private static bool IsHex(char c)
+            => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 
         private static int SelectPrior(RichContextInputs input, LlmConfig config, int level,
             RichContextReport report)

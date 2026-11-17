@@ -110,7 +110,10 @@ namespace LuanShi.Engine
         /// <summary>One turn_end exchange line per turn: which ceiling or condition stopped it.</summary>
         private void RecordTurnEnd()
         {
-            if (!ExperimentActive || _turnEndRecorded) return;
+            // Experiment turns always record turn_end. A non-experiment turn records one only when a
+            // prompt-size failure produced counts-only diagnostics, so feature-off runs without such
+            // a failure keep their historical record set.
+            if (_turnEndRecorded || (!ExperimentActive && LastPromptSizeJson == null)) return;
             _turnEndRecorded = true;
             ILlmExchangeRecorder sink = ExchangeRecorder;
             if (sink == null) return;
@@ -139,6 +142,8 @@ namespace LuanShi.Engine
                     Str("captured_utc", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)),
                     "\"ledger\":" + (snap == null ? "null" : snap.ToJson()),
                 };
+                if (LastPromptSizeJson != null)
+                    parts.Add("\"prompt_size\":" + LastPromptSizeJson);
                 sink.RecordExchange(_runId, "{" + string.Join(",", parts) + "}");
             }
             catch (Exception) { /* evidence only */ }

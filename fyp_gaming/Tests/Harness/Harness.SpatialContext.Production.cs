@@ -15,6 +15,7 @@ internal static partial class Harness
         SpatialProductionWithPersonasAttackAndDeliberation();
         SpatialProductionCombinedRichDeliberationAndResearch();
         SpatialReviewFixes();
+        RunPromptSizeBoundaryProbe();
     }
 
     private static GameEngine BuildCompactTwinWorld(bool variant, int seed = 515)

@@ -87,6 +87,7 @@ namespace LuanShi.Engine
             NotesSavedThisTurn = 0;
             InquiriesThisTurn = 0;
             LastContextReportJson = null;
+            ResetPromptSizeState();
             _stopDetail = null;
             _pendingDeliberationEvent = null;
             _turnEndRecorded = false;
@@ -279,7 +280,8 @@ namespace LuanShi.Engine
 
         private RichContextResult AssembleRichContext(Observation observation,
             List<ActionOption> options, MovementView movement, AttackView attacks, LlmPersona persona,
-            string inquiryResult, string version, int systemChars, int requestsLeft, int actionsLeft)
+            string inquiryResult, string version, int systemChars, int requestsLeft, int actionsLeft,
+            int reservedChars)
         {
             IReadOnlyList<RichInquiryEntry> prior = PriorInquiryEntries(inquiryResult, out int priorDropped);
             var input = new RichContextInputs
@@ -303,6 +305,7 @@ namespace LuanShi.Engine
                 ActionsLeft = actionsLeft,
                 Allowances = BuildAllowances(),
                 SpatialOptions = _config?.SpatialContext,
+                ReservedChars = reservedChars,
             };
             return RichContextAssembler.Assemble(input, _config);
         }
@@ -335,16 +338,21 @@ namespace LuanShi.Engine
 
         private bool TryBuildRichPrompt(Observation observation, List<ActionOption> options,
             MovementView movement, AttackView attacks, LlmPersona persona, string inquiryResult,
-            string version, int systemChars, int requestsLeft, int actionsLeft, out string user,
-            out string observationJson)
+            string version, int systemChars, int requestsLeft, int actionsLeft, int reservedChars,
+            out string user, out string observationJson)
         {
             RichContextResult assembled = AssembleRichContext(observation, options, movement, attacks,
-                persona, inquiryResult, version, systemChars, requestsLeft, actionsLeft);
+                persona, inquiryResult, version, systemChars, requestsLeft, actionsLeft, reservedChars);
             user = assembled.User;
             observationJson = assembled.ObservationJson;
             LastSpatialTruncation = assembled.SpatialTruncation;
             LastContextReportJson = assembled.Report.ToJson();
+            _lastRichSizeReport = assembled.SizeReport;
             if (assembled.Report.Fits) return true;
+            LastPromptSizeJson = assembled.SizeReport != null
+                ? assembled.SizeReport.ToJson()
+                : PromptSizeReport.FinalOnly(systemChars, user.Length, assembled.Report.MaxPromptChars,
+                    reservedChars, "mandatory_context_exceeds_limit").ToJson();
             _stopDetail = "prompt_chars";
             FinishFailed("prompt too large", EndReason.PromptTooLarge);
             return false;

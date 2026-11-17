@@ -29,6 +29,8 @@ namespace LuanShi.Engine
         public string EndedBy { get; internal set; }
         public EndReason EndReason { get; internal set; }
         public string EndReasonText { get; internal set; }
+        /// <summary>Counts-only prompt-size failure report, or null when no size failure occurred.</summary>
+        public string PromptSizeJson { get; internal set; }
     }
 
     /// <summary>

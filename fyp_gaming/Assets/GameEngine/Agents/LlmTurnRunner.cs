@@ -361,6 +361,7 @@ namespace LuanShi.Engine
                 // is exactly the JSON this prompt carries, including its configured event cap.
                 if (!TryBuildRichPrompt(observation, options, movement, attacks, persona, inquiryResult,
                         promptVersion, system.Length, requestsLeft, actionsLeft,
+                        diplomacySection == null ? 0 : diplomacySection.Length,
                         out user, out string richObservation))
                     return;
                 observationJson = richObservation;
@@ -392,7 +393,11 @@ namespace LuanShi.Engine
             if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
             if (diplomacy) user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
             if (system.Length + user.Length > promptLimit)
-            { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
+            {
+                RecordPromptSizeFinalCheck(system.Length, user.Length, promptLimit, diplomacySection);
+                FinishFailed("prompt too large", EndReason.PromptTooLarge);
+                return;
+            }
 
             int index = RequestsThisTurn + 1;
             var req = new LlmRequest(system, user, _config.MaxOutputTokens, _config.RequestTimeoutMs);
