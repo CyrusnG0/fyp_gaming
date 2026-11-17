@@ -359,6 +359,10 @@ namespace LuanShi.Engine
                         TotalTokens = GetInt(obj, "total_tokens"), ProviderRequestId = GetString(obj, "provider_request_id")
                     };
 
+                    ExtractRecordedEventCapFromContextReport(obj, out int? crInc, out int? crAvail);
+                    rec.RecordedObservationEventsIncluded = crInc;
+                    rec.RecordedObservationEventsAvailable = crAvail;
+
                     string key = (rec.RequestIndex > 0 && !string.IsNullOrEmpty(rec.RunId) && !string.IsNullOrEmpty(rec.SeatId) && rec.Season > 0)
                         ? $"{rec.RunId}:{rec.SeatId}:{rec.Season}:{rec.RequestIndex}"
                         : null;
@@ -366,6 +370,13 @@ namespace LuanShi.Engine
                     {
                         rec.ExchangeId = ex.ExchangeId; rec.UserPrompt = ex.UserPrompt;
                         rec.PromptExcerpt = ExtractPromptExcerpt(ex.UserPrompt);
+                        if (!rec.RecordedObservationEventsIncluded.HasValue)
+                        {
+                            ExtractRecordedEventCapFromPrompt(ex.UserPrompt, out int? pInc, out int? pAvail);
+                            rec.RecordedObservationEventsIncluded = pInc;
+                            if (!rec.RecordedObservationEventsAvailable.HasValue)
+                                rec.RecordedObservationEventsAvailable = pAvail;
+                        }
                         rec.ResponseContentText = !string.IsNullOrEmpty(ex.ContentText) ? ex.ContentText : rec.RawModelText;
                         string expl = (!string.IsNullOrEmpty(ex.Explanation) && ex.Explanation != "unknown")
                             ? ex.Explanation
@@ -403,6 +414,36 @@ namespace LuanShi.Engine
             if (!string.IsNullOrEmpty(summary)) return summary;
             string reason = GetString(obj, "reason", null);
             return !string.IsNullOrEmpty(reason) ? reason : null;
+        }
+
+        private static void ExtractRecordedEventCapFromContextReport(JsonObject obj, out int? included, out int? available)
+        {
+            included = null;
+            available = null;
+            if (obj == null || !obj.TryGet("context_report", out JsonNode crNode) || !(crNode is JsonObject crObj)) return;
+            if (!crObj.TryGet("sections", out JsonNode secNode) || !(secNode is JsonArray secArr)) return;
+            foreach (JsonNode item in secArr.Items)
+            {
+                if (!(item is JsonObject secObj)) continue;
+                if (!string.Equals(GetString(secObj, "name"), "observation events (newest kept)", StringComparison.Ordinal))
+                    continue;
+                int? inc = GetNullableInt(secObj, "included");
+                int? avail = GetNullableInt(secObj, "available");
+                if (inc.HasValue && inc.Value >= 0) included = inc.Value;
+                if (avail.HasValue && avail.Value >= 0) available = avail.Value;
+                return;
+            }
+        }
+
+        private static void ExtractRecordedEventCapFromPrompt(string userPrompt, out int? included, out int? available)
+        {
+            included = null;
+            available = null;
+            if (string.IsNullOrEmpty(userPrompt)) return;
+            Match m = Regex.Match(userPrompt, @"-\s*observation events \(newest kept\):\s*(\d+)\s+of\s+(\d+)", RegexOptions.CultureInvariant);
+            if (!m.Success) return;
+            if (int.TryParse(m.Groups[1].Value, out int inc) && inc >= 0) included = inc;
+            if (int.TryParse(m.Groups[2].Value, out int avail) && avail >= 0) available = avail;
         }
 
         private static string GetString(JsonObject obj, string key, string fallback = "") => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonString s ? s.Value : fallback;

@@ -105,6 +105,10 @@ namespace LuanShi.Engine
         public string InquiryTool;
         /// <summary>Recorded bounded inquiry result size; present when the runner wrote an inquiry result.</summary>
         public int? InquiryResultChars;
+        /// <summary>Recorded observation events included in the prompt (from context_report or completeness section).</summary>
+        public int? RecordedObservationEventsIncluded;
+        /// <summary>Recorded observation events available before truncation (from context_report or completeness section).</summary>
+        public int? RecordedObservationEventsAvailable;
         public string StateAfter;
         public string ErrorKind;
         public string ErrorDetail;

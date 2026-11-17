@@ -218,16 +218,29 @@ namespace LuanShi.Engine
             // observation JSON, so the same projection is applied here before hashing and parsing.
             bool diplomacy = _allowDiplomacy || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
             if (diplomacy) obs = PromptBuilder.ProjectDiplomacyObservation(obs);
-            string obsJson = PromptBuilder.BoundedObservationJson(obs);
-            string obsHash = Hash(obsJson);
-            if (string.Equals(obsHash, req.ObservationHash, StringComparison.Ordinal)) _observationHashesMatched++;
-            else
+
+            bool isRich = PromptBuilder.IsRichPromptVersion(req.PromptVersion);
+            if (isRich && !req.RecordedObservationEventsIncluded.HasValue)
             {
                 _observationHashMismatches++;
-                string expShort = string.IsNullOrEmpty(req.ObservationHash) ? "none" : (req.ObservationHash.Length >= 8 ? req.ObservationHash.Substring(0, 8) : req.ObservationHash);
-                string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...";
+                string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): missing recorded observation event truncation decision (context_report) for rich prompt '{req.PromptVersion}'.";
                 if (_observationHashDiscrepancies.Count < 20) _observationHashDiscrepancies.Add(msg);
                 RecordDivergence(msg);
+            }
+            else
+            {
+                int eventCap = req.RecordedObservationEventsIncluded ?? PromptBuilder.MaxPromptObservationEvents;
+                string obsJson = PromptBuilder.BoundedObservationJson(obs, eventCap);
+                string obsHash = Hash(obsJson);
+                if (string.Equals(obsHash, req.ObservationHash, StringComparison.Ordinal)) _observationHashesMatched++;
+                else
+                {
+                    _observationHashMismatches++;
+                    string expShort = string.IsNullOrEmpty(req.ObservationHash) ? "none" : (req.ObservationHash.Length >= 8 ? req.ObservationHash.Substring(0, 8) : req.ObservationHash);
+                    string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...";
+                    if (_observationHashDiscrepancies.Count < 20) _observationHashDiscrepancies.Add(msg);
+                    RecordDivergence(msg);
+                }
             }
 
             bool isInquiry = !string.IsNullOrEmpty(req.InquiryTool);
