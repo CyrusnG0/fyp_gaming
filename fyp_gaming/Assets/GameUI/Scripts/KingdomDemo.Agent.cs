@@ -140,6 +140,7 @@ namespace LuanShi
                     agentUnavailableReason = null;
                 }
                 agentRunner = new LlmTurnRunner(agentTransport, agentConfig, agentRecorder, agentMemoryStore);
+                if (engine != null) CaptureReplayBootstrap();
                 agentRecorderShort = "runs/" + Path.GetFileName(agentRecorder.FilePath);
             }
             catch (Exception)

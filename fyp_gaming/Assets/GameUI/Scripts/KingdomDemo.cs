@@ -197,6 +197,21 @@ namespace LuanShi
             }
         }
 
+        /// <summary>
+        /// Persist private canonical setup before opening a seat or ticking the spectator runner.
+        /// Bootstrap write failure is fatal for this start, so no provider request can escape
+        /// without the replay inputs. The snapshot is never attached to an observation or prompt.
+        /// </summary>
+        void CaptureReplayBootstrap()
+        {
+            if (agentRunner == null) return;
+            if (agentRecorder == null) throw new System.Exception("replay bootstrap unavailable: local run recorder missing");
+            string revision = System.Environment.GetEnvironmentVariable("LUANSHI_BUILD_REVISION");
+            string path = agentRecorder.WriteReplayBootstrap(engine, randomSeed, agentConfig, revision,
+                spectatorMode ? "spectator" : "single_llm", spectatorMode ? spectatorSeasons : 0);
+            Debug.Log("[KingdomDemo] local replay bootstrap written: runs/" + System.IO.Path.GetFileName(path));
+        }
+
         void InitGame()
         {
             var node00 = TBTK.GridManager.GetNode(0, 0);

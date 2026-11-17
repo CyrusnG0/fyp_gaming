@@ -33,6 +33,14 @@ namespace LuanShi.Engine
 
         public string DirectoryPath { get; }
         public string RunId { get { lock (_gate) return _runId; } }
+        public string ReplayBootstrapPath
+        {
+            get
+            {
+                lock (_gate)
+                    return _runId == null ? null : Path.Combine(DirectoryPath, SafeName(_runId) + "-bootstrap.json");
+            }
+        }
         public string LastWriteError { get; private set; }
 
         public LlmRunRecorder(string directory)
@@ -93,6 +101,38 @@ namespace LuanShi.Engine
             {
                 // Best effort: recording must never abort a turn or echo document contents.
                 LastWriteError = "run record could not be written";
+            }
+        }
+
+        /// <summary>
+        /// Write the canonical match-start snapshot before any request is dispatched. Unlike request
+        /// telemetry, this is required evidence: callers must stop the match if it cannot be saved.
+        /// It contains hidden canonical state and must remain in the local ignored runs directory.
+        /// </summary>
+        public string WriteReplayBootstrap(GameEngine engine, int seed, LlmConfig config,
+            string buildRevision, string hostMode, int plannedSeasons)
+        {
+            string runId;
+            lock (_gate) runId = _runId;
+            if (string.IsNullOrWhiteSpace(runId))
+                throw new InvalidOperationException("replay bootstrap unavailable: run id not bound");
+            string json = ReplayBootstrap.BuildJson(engine, seed, runId, config,
+                buildRevision, hostMode, plannedSeasons);
+            string path = Path.Combine(DirectoryPath, SafeName(runId) + "-bootstrap.json");
+            try
+            {
+                lock (_gate)
+                {
+                    Directory.CreateDirectory(DirectoryPath);
+                    File.WriteAllText(path, json, Utf8NoBom);
+                    LastWriteError = null;
+                }
+                return path;
+            }
+            catch (Exception)
+            {
+                LastWriteError = "replay bootstrap could not be written";
+                throw new IOException(LastWriteError);
             }
         }
 
@@ -244,6 +284,8 @@ namespace LuanShi.Engine
                 parts.Add(Str("observation_json", Redact(flight.ObservationJson)));
                 parts.Add("\"balance_profile\":" + (flight.Observation?.Balance ?? BalanceProfile.Standard).ToJson());
                 parts.Add(Str("scenario_id", flight.Observation?.ScenarioId));
+                if (_recorder is LlmRunRecorder fileRecorder && fileRecorder.ReplayBootstrapPath != null)
+                    parts.Add(Str("replay_bootstrap_path", "runs/" + Path.GetFileName(fileRecorder.ReplayBootstrapPath)));
                 parts.Add(Num("request_index", flight.RequestIndex));
                 parts.Add(Num("latency_ms", response == null ? 0 : response.LatencyMs));
                 parts.Add(nullableInt("input_tokens", response?.InputTokens));

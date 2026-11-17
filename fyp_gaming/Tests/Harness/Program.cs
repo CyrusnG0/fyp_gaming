@@ -130,6 +130,7 @@ internal static partial class Harness
         RunVisibleMarchRunner();
         RunCompactScenario();
         RunCombatMovementRehearsal();
+        RunReplayBootstrap();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;

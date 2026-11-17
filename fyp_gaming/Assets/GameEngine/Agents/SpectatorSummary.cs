@@ -71,13 +71,17 @@ namespace LuanShi.Engine
             sb.Append(",\"run_ids\":[").Append(Str(runId, config)).Append(']');
             sb.Append(",\"seed\":").Append(session.Seed.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"balance_profile\":").Append(session.Balance.ToJson());
+            sb.Append(",\"scenario_id\":").Append(MiniJson.Str(session.ScenarioId));
             sb.Append(",\"manual_lookup_enabled\":").Append(config != null && config.EnableManualLookup ? "true" : "false");
             sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
+            sb.Append(",\"attack_enabled\":").Append(config != null && config.EnableAttack ? "true" : "false");
             sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
             sb.Append(",\"diplomacy_enabled\":")
               .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
               .Append(config != null && config.EffectiveVisibleMarchRoutes ? "true" : "false");
+            sb.Append(",\"replay_bootstrap_path\":")
+              .Append(MiniJson.Str("runs/" + SafeName(runId) + "-bootstrap.json"));
             Field(sb, "spatial_context_level",
                 config != null && config.SpatialContext != null ? config.SpatialContext.LevelKey() : "off",
                 config, true);
