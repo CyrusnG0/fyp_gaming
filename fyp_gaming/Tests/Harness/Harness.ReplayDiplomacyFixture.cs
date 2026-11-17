@@ -19,7 +19,7 @@ internal static partial class Harness
         Section("[DIP-3] constructed-fixture replay: diplomacy identity vs base identity");
 
         ReplayBundle diplomacy = DipReplayBundle(PromptBuilder.DiplomacyPromptVersion);
-        var session = new ReplaySession(diplomacy);
+        var session = new ReplaySession(diplomacy) { PauseOnDivergence = false };
         session.RunToCompletion();
 
         EventRecord message = session.Engine.Log.Records.FirstOrDefault(r => r.EventType == "message_sent");
@@ -44,7 +44,7 @@ internal static partial class Harness
             "no recorded observation hash means no claimed observation match");
 
         ReplayBundle baseline = DipReplayBundle(PromptBuilder.PromptVersion);
-        var baseSession = new ReplaySession(baseline);
+        var baseSession = new ReplaySession(baseline) { PauseOnDivergence = false };
         baseSession.RunToCompletion();
         DipReplayCheck(baseSession.AcceptedActionsReplayed == 0
            && baseSession.UnexpectedRejections == 1

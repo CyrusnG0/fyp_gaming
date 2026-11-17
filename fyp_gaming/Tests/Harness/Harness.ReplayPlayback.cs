@@ -195,10 +195,51 @@ internal static partial class Harness
             }
             ReplayBundle divBundle = ReplayLoader.LoadByRunId(completeRunId, dirTamper);
             var divSession = new ReplaySession(divBundle);
+            var weiArmyBefore = divSession.Engine.State.FindArmy("army-wei-1");
+            int weiXBefore = weiArmyBefore.X, weiZBefore = weiArmyBefore.Z, weiTroopsBefore = weiArmyBefore.Troops;
+            int logCountBefore = divSession.Engine.Log.Records.Count;
             divSession.Play();
             divSession.Tick(1.0f);
+            var weiArmyAfter = divSession.Engine.State.FindArmy("army-wei-1");
             Check(divSession.HasDivergence && divSession.State == ReplayState.Paused,
                 "[REPLAY-PLAYBACK] observation hash divergence pauses playback and sets HasDivergence");
+            Check(divSession.CurrentRequestIndex == 0 && !divSession.IsCompleted
+                && divSession.AcceptedActionsReplayed == 0 && divSession.EventFeed.Count == 0
+                && weiArmyAfter.X == weiXBefore && weiArmyAfter.Z == weiZBefore
+                && divSession.Engine.Log.Records.Count == logCountBefore,
+                "[REPLAY-PLAYBACK] observation hash mismatch stops fail-closed before submitting march, advancing index, or mutating canonical state");
+
+            // 4a-mid: Mid-match mismatch (request 2: attack_army) via RunToCompletion also stops fail-closed before submitting
+            string dirTamperMid = Path.Combine(root, "tamper_mid");
+            Directory.CreateDirectory(dirTamperMid);
+            foreach (string f in Directory.GetFiles(dirComplete))
+                File.Copy(f, Path.Combine(dirTamperMid, Path.GetFileName(f)));
+            string midJsonlPath = Path.Combine(dirTamperMid, $"{completeRunId}.jsonl");
+            string[] midLines = File.ReadAllLines(midJsonlPath);
+            int midHIdx = midLines[2].IndexOf("\"observation_hash\":\"", StringComparison.Ordinal);
+            if (midHIdx >= 0)
+            {
+                int vStart = midHIdx + "\"observation_hash\":\"".Length;
+                midLines[2] = midLines[2].Substring(0, vStart) + "00000000" + midLines[2].Substring(vStart + 8);
+                File.WriteAllLines(midJsonlPath, midLines);
+            }
+            ReplayBundle midDivBundle = ReplayLoader.LoadByRunId(completeRunId, dirTamperMid);
+            var midDivSession = new ReplaySession(midDivBundle);
+            midDivSession.RunToCompletion();
+            int weiHpBeforeAttack = midDivSession.Engine.State.FindArmy("army-wei-1").Troops;
+            Check(midDivSession.HasDivergence && midDivSession.State == ReplayState.Paused
+                && midDivSession.CurrentRequestIndex == 2 && !midDivSession.IsCompleted
+                && midDivSession.AcceptedActionsReplayed == 1 && midDivSession.EventFeed.Count == 2
+                && weiHpBeforeAttack == weiTroopsBefore,
+                "[REPLAY-PLAYBACK] mid-match observation mismatch stops RunToCompletion fail-closed before submitting attack_army");
+
+            // 4a-diag: Explicit diagnostic mode (PauseOnDivergence = false) continues past mismatch
+            var diagSession = new ReplaySession(divBundle) { PauseOnDivergence = false };
+            diagSession.RunToCompletion();
+            Check(diagSession.HasDivergence && diagSession.ObservationHashMismatches == 1
+                && diagSession.IsCompleted && diagSession.AcceptedActionsReplayed == 3
+                && diagSession.EventFeed.Count == completeBundle.Requests.Count,
+                "[REPLAY-PLAYBACK] diagnostic mode (PauseOnDivergence=false) continues past mismatch and replays remaining actions");
 
             // 4b. Rich context regression: two different event caps (trim=0 >30 events vs trim=3 capped at 30) + missing truncation fails clearly
             string dirRich = Path.Combine(root, "rich_caps");
@@ -277,31 +318,44 @@ internal static partial class Harness
             File.WriteAllText(mcEx, File.ReadAllText(mcEx).Replace("observation events (newest kept)", "observation events omitted"));
             ReplayBundle mcBundle = ReplayLoader.LoadByRunId(richRunId, dirMissingCap);
             var mcSession = new ReplaySession(mcBundle) { PauseOnDivergence = true };
+            var mcCityBefore = mcSession.Engine.State.FindCity("city-wei");
+            int mcPopBefore = mcCityBefore.Population, mcFoodBefore = mcCityBefore.Food, mcGoldBefore = mcCityBefore.Gold;
+            int mcLogBefore = mcSession.Engine.Log.Records.Count;
             mcSession.Play();
             mcSession.Tick(1.0f);
+            var mcCityAfter = mcSession.Engine.State.FindCity("city-wei");
             Check(mcSession.HasDivergence && mcSession.State == ReplayState.Paused && mcSession.ObservationHashMismatches == 1
+                && mcSession.CurrentRequestIndex == 0 && !mcSession.IsCompleted
+                && mcSession.AcceptedActionsReplayed == 0 && mcSession.EventFeed.Count == 0
+                && mcCityAfter.Population == mcPopBefore && mcCityAfter.Food == mcFoodBefore && mcCityAfter.Gold == mcGoldBefore
+                && mcSession.Engine.Log.Records.Count == mcLogBefore
                 && mcSession.DivergenceSummary != null && mcSession.DivergenceSummary.Contains("missing recorded observation event truncation decision"),
-                "[REPLAY-PLAYBACK] missing truncation decision on rich prompt fails clearly without guessing");
+                "[REPLAY-PLAYBACK] missing truncation decision on rich prompt fails clearly without guessing or submitting reclaim");
 
             // 5. Real saved run (run-20261117050620701-0270f853) if present in diplomacy-scenario-prep/runs
             string realRunId = "run-20261117050620701-0270f853";
             if (ReplayLoader.TryResolveRunFiles(realRunId, null, out string rs, out string rj, out string re, out string rb, out _))
             {
                 ReplayBundle realBundle = ReplayLoader.Load(rs, rj, re, realRunId, rb);
+                Check(realBundle.Requests.Count == 63, $"[REAL-RUN] loaded 63 requests (got {realBundle.Requests.Count})");
+
+                // Fail-closed check under .NET CoreCLR: float truncation vs Unity Mono causes an early obs mismatch and pauses before submitting
                 var realSession = new ReplaySession(realBundle) { PauseOnDivergence = true };
                 realSession.RunToCompletion();
-                var rpt = realSession.FinalReport;
-                Console.WriteLine($"  [REAL-RUN] obs={rpt.ObservationHashesMatched}/{rpt.TotalRequests} mismatch={rpt.ObservationHashMismatches} acc={rpt.AcceptedActionsReplayed}/{rpt.ExpectedAcceptedActions} actMismatch={rpt.ActionOutcomeMismatches} incomplete={rpt.IsIncompleteRun} stop='{rpt.StopReason}' allSeasonsExact={rpt.AllSeasonsScoreboardExactMatch} pausedDiv={realSession.HasDivergence}");
-                if (rpt.RawScoreboardMismatches != null)
-                    foreach (var m in rpt.RawScoreboardMismatches) Console.WriteLine("    scoreboard diff: " + m);
-                if (rpt.ObservationHashDiscrepancies != null)
-                    foreach (var d in rpt.ObservationHashDiscrepancies) Console.WriteLine("    obs diff: " + d);
-                Check(realBundle.Requests.Count == 63, $"[REAL-RUN] loaded 63 requests (got {realBundle.Requests.Count})");
-                Check(realSession.IsIncompleteRun, "[REAL-RUN] flagged as incomplete/paused run");
+                Check(realSession.HasDivergence && realSession.State == ReplayState.Paused && !realSession.IsCompleted
+                    && realSession.ObservationHashMismatches == 1 && realSession.CurrentRequestIndex < realBundle.Requests.Count,
+                    $"[REAL-RUN] fail-closed pauses at first CoreCLR float-truncation mismatch (reqIdx={realSession.CurrentRequestIndex}, state={realSession.State})");
+
+                // Diagnostic mode (PauseOnDivergence=false) continues through all 63 requests on CoreCLR
+                var diagReal = new ReplaySession(realBundle) { PauseOnDivergence = false };
+                diagReal.RunToCompletion();
+                var rpt = diagReal.FinalReport;
+                Console.WriteLine($"  [REAL-RUN diag] obs={rpt.ObservationHashesMatched}/{rpt.TotalRequests} mismatch={rpt.ObservationHashMismatches} acc={rpt.AcceptedActionsReplayed}/{rpt.ExpectedAcceptedActions} actMismatch={rpt.ActionOutcomeMismatches} incomplete={rpt.IsIncompleteRun} stop='{rpt.StopReason}' allSeasonsExact={rpt.AllSeasonsScoreboardExactMatch} pausedDiv={diagReal.HasDivergence}");
+                Check(diagReal.IsIncompleteRun, "[REAL-RUN] flagged as incomplete/paused run");
                 Check(rpt.ActionOutcomeMismatches == 0, $"[REAL-RUN] 0 action outcome mismatches (got {rpt.ActionOutcomeMismatches})");
 
                 ReplayFeedEvent inqEvt = null;
-                foreach (var fe in realSession.EventFeed)
+                foreach (var fe in diagReal.EventFeed)
                 {
                     if (!string.IsNullOrEmpty(fe.InquiryTool)) { inqEvt = fe; break; }
                 }

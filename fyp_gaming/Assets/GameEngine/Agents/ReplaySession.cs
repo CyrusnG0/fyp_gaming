@@ -219,6 +219,7 @@ namespace LuanShi.Engine
             bool diplomacy = _allowDiplomacy || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
             if (diplomacy) obs = PromptBuilder.ProjectDiplomacyObservation(obs);
 
+            bool observationDiverged = false;
             bool isRich = PromptBuilder.IsRichPromptVersion(req.PromptVersion);
             if (isRich && !req.RecordedObservationEventsIncluded.HasValue)
             {
@@ -226,6 +227,7 @@ namespace LuanShi.Engine
                 string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): missing recorded observation event truncation decision (context_report) for rich prompt '{req.PromptVersion}'.";
                 if (_observationHashDiscrepancies.Count < 20) _observationHashDiscrepancies.Add(msg);
                 RecordDivergence(msg);
+                observationDiverged = true;
             }
             else
             {
@@ -240,7 +242,14 @@ namespace LuanShi.Engine
                     string msg = $"Req {req.TotalRequests} (S{req.Season} T{req.TurnToken} R{req.RequestIndex} {req.SeatId}): hash mismatch actual={obsHash.Substring(0, 8)}... exp={expShort}...";
                     if (_observationHashDiscrepancies.Count < 20) _observationHashDiscrepancies.Add(msg);
                     RecordDivergence(msg);
+                    observationDiverged = true;
                 }
+            }
+
+            if (observationDiverged && PauseOnDivergence)
+            {
+                _state = ReplayState.Paused;
+                return false;
             }
 
             bool isInquiry = !string.IsNullOrEmpty(req.InquiryTool);
@@ -371,7 +380,7 @@ namespace LuanShi.Engine
             if (_currentRequestIndex >= _bundle.Requests.Count)
             {
                 FinishReplay();
-                if (_hasDivergence && PauseOnDivergence && _state == ReplayState.Playing) Pause();
+                if (_hasDivergence && PauseOnDivergence) _state = ReplayState.Paused;
                 return true;
             }
 
@@ -395,7 +404,7 @@ namespace LuanShi.Engine
                 _turnOpen = true;
             }
 
-            if (_hasDivergence && PauseOnDivergence && _state == ReplayState.Playing) Pause();
+            if (_hasDivergence && PauseOnDivergence) _state = ReplayState.Paused;
             return true;
         }
 
@@ -409,12 +418,18 @@ namespace LuanShi.Engine
         {
             if (_isCompleted) return;
             int targetSeason = _currentSeason;
-            while (!_isCompleted && _currentSeason == targetSeason) StepRequest();
+            while (!_isCompleted && _currentSeason == targetSeason && !(_hasDivergence && PauseOnDivergence))
+            {
+                if (!StepRequest()) break;
+            }
         }
 
         public void RunToCompletion()
         {
-            while (!_isCompleted) StepRequest();
+            while (!_isCompleted && !(_hasDivergence && PauseOnDivergence))
+            {
+                if (!StepRequest()) break;
+            }
         }
 
         public List<ReplaySeatScore> CurrentScores()
