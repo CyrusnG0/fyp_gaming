@@ -113,6 +113,8 @@ namespace LuanShi.Engine
         private int _currentSeason;
         private bool _turnOpen;
         private bool _boundaryPending;
+        // The runner/ledger has no supported way to refill a match-wide allowance in place.
+        private bool _sessionBudgetExhausted;
         private string _activeSeatId;
         private string _activeFactionName;
         private string _pauseReason;
@@ -225,6 +227,7 @@ namespace LuanShi.Engine
         /// <summary>Begins the first seat turn. Tick() also starts an unstarted session.</summary>
         public void Start()
         {
+            if (_sessionBudgetExhausted) return;
             if (State == SpectatorState.Running) return;
             if (State == SpectatorState.Completed) return;
             if (State == SpectatorState.Failed) return;
@@ -312,6 +315,7 @@ namespace LuanShi.Engine
         public void Resume()
         {
             if (State != SpectatorState.Paused) return;
+            if (_sessionBudgetExhausted) return;
             if (_playOrder.Count == 0) return;
             if (_startedUtc == null) _startedUtc = DateTime.UtcNow;
             State = SpectatorState.Running;

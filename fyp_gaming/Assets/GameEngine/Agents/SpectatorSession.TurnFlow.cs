@@ -92,6 +92,19 @@ namespace LuanShi.Engine
 
             if (_engine.State.WinnerSeatId != null) { Complete("game_over"); return; }
 
+            // Match-wide ceilings must stop the spectator before advancing to another seat.
+            // Deliberation uses typed reasons and codes whose wording differs from the legacy
+            // "session request limit" message; matching that message advanced empty turns.
+            if (IsSessionWideStop(_runner))
+            {
+                State = SpectatorState.Paused;
+                _sessionBudgetExhausted = true;
+                _pauseReason = _runner.EndReason == EndReason.SessionRequestLimit
+                    ? "session request limit reached" : (failure ?? _runner.EndReasonText);
+                _boundaryPending = true;
+                return;
+            }
+
             if (failed)
             {
                 if (IsProviderPause(failure))
@@ -113,15 +126,6 @@ namespace LuanShi.Engine
                         return;
                     }
                 }
-            }
-
-            if (runnerState == RunnerState.Finished && !string.IsNullOrEmpty(failure)
-                && failure.IndexOf("session request limit", StringComparison.Ordinal) >= 0)
-            {
-                State = SpectatorState.Paused;
-                _pauseReason = "session request limit reached";
-                _boundaryPending = true;
-                return;
             }
 
             if (runnerState == RunnerState.Cancelled)
@@ -234,6 +238,28 @@ namespace LuanShi.Engine
             return failure.IndexOf("provider auth", StringComparison.Ordinal) >= 0
                 || failure.IndexOf("provider ratelimited", StringComparison.Ordinal) >= 0
                 || failure.IndexOf("provider rate limited", StringComparison.Ordinal) >= 0;
+        }
+
+        private static bool IsSessionWideStop(LlmTurnRunner runner)
+        {
+            if (runner == null) return false;
+            if (runner.EndReason == EndReason.SessionRequestLimit
+                || runner.EndReason == EndReason.UsdBudgetLimit
+                || runner.EndReason == EndReason.UsdBudgetUnknown) return true;
+            // These stable ledger/experiment codes identify exhausted match-wide resources.
+            // A session inquiry limit alone does not prevent other legal game actions.
+            switch (runner.StopCeiling)
+            {
+                case "session_seconds":
+                case "session_wall_time_exhausted":
+                case "session_actions_exhausted":
+                case "session_input_tokens":
+                case "session_output_tokens":
+                case "session_usage_unknown":
+                case "session_input_tokens_exhausted":
+                case "session_output_tokens_exhausted": return true;
+                default: return false;
+            }
         }
     }
 }

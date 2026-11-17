@@ -14,6 +14,7 @@ internal static partial class Harness
         RunSpectatorSerialAndStop();
         RunSpectatorResume();
         RunSpectatorFailurePolicy();
+        RunSpectatorDeliberationSessionCap();
         RunSpectatorSummary();
         RunSpectatorSummaryPromptIdentity();
         RunSpectatorPromptIsolation();
