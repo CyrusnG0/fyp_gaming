@@ -75,7 +75,7 @@ namespace LuanShi.Engine
                     case EndReason.HostError: return "host_error";
                     case EndReason.GameOver: return "game_over";
                     case EndReason.Cancelled: return "cancelled";
-                    case EndReason.DispatchDenied: return "dispatch_denied";
+                    case EndReason.DispatchDenied: return _stopDetail ?? "dispatch_denied";
                     case EndReason.DeliberationLimit: return _stopDetail ?? "deliberation_limit";
                     default: return null;
                 }

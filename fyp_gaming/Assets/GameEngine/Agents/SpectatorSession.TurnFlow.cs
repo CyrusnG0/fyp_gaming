@@ -107,6 +107,15 @@ namespace LuanShi.Engine
 
             if (failed)
             {
+                // A request that never received dispatch permission must not silently forfeit
+                // a seat. The host can inspect the reason and explicitly resume if appropriate.
+                if (_runner.EndReason == EndReason.DispatchDenied)
+                {
+                    State = SpectatorState.Paused;
+                    _pauseReason = failure ?? "request dispatch denied";
+                    _boundaryPending = true;
+                    return;
+                }
                 if (IsProviderPause(failure))
                 {
                     State = SpectatorState.Paused;

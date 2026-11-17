@@ -196,6 +196,9 @@ namespace LuanShi.Engine
             DeliberationBindingResult dispatch = _deliberationLedger.MarkDispatched(admission.ReservationId);
             if (dispatch.Ok) return true;
             _deliberationLedger.Cancel(admission.ReservationId, DeliberationCancelReason.Aborted);
+            // Preserve the typed ledger code so a host can distinguish a match-wide deadline
+            // from a recoverable turn-level dispatch denial without parsing prose.
+            _stopDetail = dispatch.Code;
             FinishFailed("deliberation request dispatch denied: " + dispatch.Code, EndReason.DispatchDenied);
             return false;
         }

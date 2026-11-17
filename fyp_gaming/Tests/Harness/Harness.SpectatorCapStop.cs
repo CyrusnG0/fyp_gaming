@@ -2,6 +2,18 @@ using LuanShi.Engine;
 
 internal static partial class Harness
 {
+    private sealed class SpectatorDispatchClock : IDeliberationClock
+    {
+        private int _reads;
+        private long _now;
+        public int AdvanceOnRead = 4;
+        public long AdvanceMillis;
+        public long NowMillis
+        {
+            get { if (++_reads == AdvanceOnRead) _now += AdvanceMillis; return _now; }
+        }
+    }
+
     private static void RunSpectatorDeliberationSessionCap()
     {
         Section("Spectator: deliberation session cap pauses without empty turns");
@@ -52,5 +64,50 @@ internal static partial class Harness
               && runner.StopCeiling == "session_actions_exhausted"
               && session.TurnRecords.Count == 1 && session.SeasonsPlayed == 0,
             "whole-session action exhaustion pauses instead of advancing empty turns");
+
+        // Expire a turn reservation between admission and dispatch: no provider work is sent.
+        engine = SpectatorEngine();
+        fake = new FakeLlmTransport();
+        fake.EnqueueSuccess("{\"type\":\"end_turn\"}", 0, 5, 1);
+        var clock = new SpectatorDispatchClock { AdvanceMillis = 5 };
+        runner = new LlmTurnRunner(fake, new LlmConfig
+        {
+            EnableDeliberation = true, MaxRequestsPerTurn = 6, MaxActionsPerTurn = 5,
+            MaxTotalRequests = 20, MaxDeliberationTurnMillis = 5,
+        }, null, null, null, null, clock);
+        session = SpectatorNew(engine, runner, 2);
+        session.Start();
+        SpectatorDrain(session);
+        Check(session.State == SpectatorState.Paused && runner.EndReason == EndReason.DispatchDenied
+              && fake.CallCount == 0 && session.TurnRecords.Count == 1 && session.SeasonsPlayed == 0,
+            "a turn-level dispatch denial pauses without a provider call or advancing a seat");
+        session.Resume();
+        Check(session.State == SpectatorState.Running,
+            "a turn-level dispatch denial remains explicitly resumable");
+
+        // Expire the whole-session reservation at dispatch: even an explicit resume cannot
+        // advance empty turns because the match-wide allowance cannot be refilled in place.
+        engine = SpectatorEngine();
+        fake = new FakeLlmTransport();
+        fake.EnqueueSuccess("{\"type\":\"end_turn\"}", 0, 5, 1);
+        clock = new SpectatorDispatchClock { AdvanceOnRead = 5, AdvanceMillis = 1000 };
+        runner = new LlmTurnRunner(fake, new LlmConfig
+        {
+            EnableDeliberation = true, MaxRequestsPerTurn = 6, MaxActionsPerTurn = 5,
+            MaxTotalRequests = 20, MaxSessionSeconds = 1,
+        }, null, null, null, null, clock);
+        session = SpectatorNew(engine, runner, 2);
+        session.Start();
+        SpectatorDrain(session);
+        bool sessionDeadlinePaused = session.State == SpectatorState.Paused
+            && runner.EndReason == EndReason.DispatchDenied
+            && runner.StopCeiling == "session_wall_time_exhausted"
+            && fake.CallCount == 0 && session.TurnRecords.Count == 1;
+        session.Resume();
+        Check(sessionDeadlinePaused && session.State == SpectatorState.Paused
+              && session.TurnRecords.Count == 1 && session.SeasonsPlayed == 0,
+            "a match-wide deadline at dispatch pauses and cannot resume into empty turns"
+            + " state=" + session.State + " reason=" + runner.EndReason + " code=" + runner.StopCeiling
+            + " calls=" + fake.CallCount + " turns=" + session.TurnRecords.Count);
     }
 }
