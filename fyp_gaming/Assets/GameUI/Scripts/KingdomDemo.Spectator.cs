@@ -32,7 +32,7 @@ namespace LuanShi
         /// <summary>Builds the conductor after InitGame/InitializeAgent. Never starts a human seat turn.</summary>
         void InitializeSpectator()
         {
-            if (!spectatorMode) return;
+            if (replayMode || !spectatorMode) return;
 
             uiInputLocked = true;
             uiLockReason = SpectatorLockReason;

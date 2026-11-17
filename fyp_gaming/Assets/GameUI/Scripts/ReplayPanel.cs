@@ -18,6 +18,7 @@ namespace LuanShi
         private Vector2 _replayComparisonScroll;
         private Vector2 _replaySeasonsScroll;
         private string _replaySubTab = "feed";
+        private int _replayInspectedRequestIndex = -1;
 
         static Rect ReplayPanelArea()
             => new Rect(SidePanelX, SidePanelY, SidePanelWidth, Mathf.Min(580f, Screen.height - SidePanelY - 40f));
@@ -141,49 +142,66 @@ namespace LuanShi
             }
             else
             {
-                // Current request & Persona
-                ReplayRequestRecord rec = _replaySession.CurrentRequestRecord;
+                int reqCount = _replayBundle?.Requests?.Count ?? 0;
+                int activeIdx = (_replayInspectedRequestIndex >= 0 && _replayInspectedRequestIndex < reqCount)
+                    ? _replayInspectedRequestIndex
+                    : Mathf.Clamp(_replaySession.CurrentRequestIndex, 0, Math.Max(0, reqCount - 1));
+                ReplayRequestRecord rec = reqCount > 0 ? _replayBundle.Requests[activeIdx] : _replaySession.CurrentRequestRecord;
+                int firstInquiryIdx = FindFirstInquiryRequestIndex();
+
+                // Request navigator (<, >, Latest, Inquiry)
+                float navW = firstInquiryIdx >= 0 ? (width - 12f) / 4f : (width - 8f) / 3f;
+                if (GUI.Button(new Rect(x, y, navW, 18f), "< Prev", uiButton) && reqCount > 0)
+                    _replayInspectedRequestIndex = Mathf.Max(0, activeIdx - 1);
+                if (GUI.Button(new Rect(x + navW + 4f, y, navW, 18f), "Next >", uiButton) && reqCount > 0)
+                    _replayInspectedRequestIndex = Mathf.Min(reqCount - 1, activeIdx + 1);
+                if (GUI.Button(new Rect(x + (navW + 4f) * 2f, y, navW, 18f), "Follow", _replayInspectedRequestIndex < 0 ? uiTabActive : uiButton))
+                    _replayInspectedRequestIndex = -1;
+                if (firstInquiryIdx >= 0 && GUI.Button(new Rect(x + (navW + 4f) * 3f, y, navW, 18f), "Inquiry", _replayInspectedRequestIndex == firstInquiryIdx ? uiTabActive : uiButton))
+                    _replayInspectedRequestIndex = firstInquiryIdx;
+                y += 20f;
+
                 string seatId = rec != null ? rec.SeatId : (_replaySession.CurrentSeatId ?? "seat-0");
                 string persona = _replaySession.CurrentPersonaId;
-                string exLink = rec != null && !string.IsNullOrEmpty(rec.ExchangeId)
-                    ? $" | ex={rec.ExchangeId}"
-                    : (rec != null ? $" | T{rec.TurnToken} R{rec.RequestIndex}" : "");
-                GUI.Label(new Rect(x, y, width, 16f), EllipsizeToWidth(uiPanelTitle, $"Current Turn: {seatId} ({persona}){exLink}", width), uiPanelTitle);
-                y += 18f;
+                string reqLink = rec != null ? $"S{rec.Season} T{rec.TurnToken} R{rec.RequestIndex} ({activeIdx + 1}/{reqCount})" : "-";
+                string exLink = rec != null && !string.IsNullOrEmpty(rec.ExchangeId) ? $" | ex={rec.ExchangeId}" : "";
+                string inqTag = rec != null && !string.IsNullOrEmpty(rec.InquiryTool) ? $" | INQUIRY:{rec.InquiryTool}" : "";
+                GUI.Label(new Rect(x, y, width, 16f), EllipsizeToWidth(uiPanelTitle, $"{seatId} ({persona}) | {reqLink}{exLink}{inqTag}", width), uiPanelTitle);
+                y += 17f;
 
                 string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
-                y += 16f;
+                y += 15f;
 
                 string sExp = (rec != null && !string.IsNullOrEmpty(rec.RecordedExplanation)) ? rec.RecordedExplanation : "none";
-                GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Recorded model explanation (not private thought): " + sExp, width), uiSmall);
-                y += 16f;
+                GUI.Label(new Rect(x, y, width, 14f), "Recorded explanation (not private thought):", uiSmall);
+                y += 14f;
+                GUI.TextArea(new Rect(x, y, width, 28f), sExp, uiMonoTiny);
+                y += 30f;
 
                 string sLatency = (rec != null && rec.LatencyMs > 0) ? $"{rec.LatencyMs}ms" : "unknown";
                 string sInTok = (rec != null && rec.InputTokens > 0) ? rec.InputTokens.ToString() : "unknown";
                 string sOutTok = (rec != null && rec.OutputTokens > 0) ? rec.OutputTokens.ToString() : "unknown";
                 GUI.Label(new Rect(x, y, width, 14f), $"Tokens: in {sInTok} | out {sOutTok}  |  Latency: {sLatency}", uiSmall);
-                y += 16f;
-
-                // Saved Prompt Excerpt (scrollable box)
-                GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
                 y += 15f;
+
+                GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
+                y += 14f;
                 string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
-                Rect promptRect = new Rect(x, y, width, 55f);
+                Rect promptRect = new Rect(x, y, width, 40f);
                 _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, width - 20f, 180f));
                 GUI.TextArea(new Rect(0, 0, width - 20f, 180f), promptText, uiMono);
                 GUI.EndScrollView();
-                y += 60f;
+                y += 43f;
 
-                // Saved Model Response
                 GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
-                y += 15f;
+                y += 14f;
                 string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
-                Rect respRect = new Rect(x, y, width, 40f);
+                Rect respRect = new Rect(x, y, width, 34f);
                 _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
                 GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);
                 GUI.EndScrollView();
-                y += 45f;
+                y += 37f;
             }
 
             // Verification status
@@ -351,12 +369,38 @@ namespace LuanShi
                 if (evt.RequestIndex > 0)
                 {
                     string exp = !string.IsNullOrEmpty(evt.Explanation) ? evt.Explanation : "unknown";
-                    string expLine = $"Recorded model explanation: \"{exp}\"";
+                    string expLine = $"Recorded explanation: \"{exp}\"";
                     GUI.Label(new Rect(4f, rowY + 26f, width - 28f, 14f), EllipsizeToWidth(uiHint, expLine, width - 28f), uiHint);
+                    if (GUI.Button(r, GUIContent.none, GUIStyle.none))
+                    {
+                        int idx = FindRequestIndexForFeedEvent(evt);
+                        if (idx >= 0) { _replayInspectedRequestIndex = idx; _replaySubTab = "details"; }
+                    }
                 }
             }
 
             GUI.EndScrollView();
+        }
+
+        int FindFirstInquiryRequestIndex()
+        {
+            if (_replayBundle?.Requests == null) return -1;
+            for (int i = 0; i < _replayBundle.Requests.Count; i++)
+                if (!string.IsNullOrEmpty(_replayBundle.Requests[i].InquiryTool)) return i;
+            return -1;
+        }
+
+        int FindRequestIndexForFeedEvent(ReplayFeedEvent evt)
+        {
+            if (evt == null || _replayBundle?.Requests == null) return -1;
+            for (int i = 0; i < _replayBundle.Requests.Count; i++)
+            {
+                var r = _replayBundle.Requests[i];
+                if (r.Season == evt.Season && r.TurnToken == evt.TurnToken && r.RequestIndex == evt.RequestIndex
+                    && (string.IsNullOrEmpty(evt.ExchangeId) || string.Equals(r.ExchangeId, evt.ExchangeId, StringComparison.Ordinal)))
+                    return i;
+            }
+            return -1;
         }
 
         void DrawSolidColor(Rect rect, Color color)

@@ -332,6 +332,59 @@ internal static partial class Harness
                 && mcSession.DivergenceSummary != null && mcSession.DivergenceSummary.Contains("missing recorded observation event truncation decision"),
                 "[REPLAY-PLAYBACK] missing truncation decision on rich prompt fails clearly without guessing or submitting reclaim");
 
+            // 4c. Non-default city IDs (city-wei-1, city-wei-2, city-shu-1, city-shu-2, city-shu-3) + failed initialization
+            string dirCustomCities = Path.Combine(root, "custom_cities");
+            Directory.CreateDirectory(dirCustomCities);
+            var customEngine = BuildReplayTestEngine(54321, GameIdentity.NewMatchId());
+            customEngine.State.Cities.Clear();
+            customEngine.State.Cities.Add(new CityState { Id = "city-wei-1", Name = "Luoyang", X = 0, Z = 0, OwnerSeatId = "seat-0", Population = 9000, Food = 2500, Gold = 800, Garrison = 500, Morale = 60, Defense = 1, Training = 1 });
+            customEngine.State.Cities.Add(new CityState { Id = "city-wei-2", Name = "Xuchang", X = 0, Z = 2, OwnerSeatId = "seat-0", Population = 8000, Food = 2200, Gold = 700, Garrison = 500, Morale = 60, Defense = 1, Training = 1 });
+            customEngine.State.Cities.Add(new CityState { Id = "city-shu-1", Name = "Chengdu", X = 4, Z = 0, OwnerSeatId = "seat-1", Population = 9000, Food = 2500, Gold = 800, Garrison = 500, Morale = 60, Defense = 1, Training = 1 });
+            customEngine.State.Cities.Add(new CityState { Id = "city-shu-2", Name = "Hanzhong", X = 4, Z = 1, OwnerSeatId = "seat-1", Population = 8000, Food = 2200, Gold = 700, Garrison = 500, Morale = 60, Defense = 1, Training = 1 });
+            customEngine.State.Cities.Add(new CityState { Id = "city-shu-3", Name = "Jianye", X = 4, Z = 2, OwnerSeatId = "seat-1", Population = 7500, Food = 2000, Gold = 650, Garrison = 500, Morale = 60, Defense = 1, Training = 1 });
+            var customCfg = new LlmConfig { Provider = "fake", Model = "fake-replay-test", MaxActionsPerTurn = 4, RequestTimeoutMs = 5000, EnableAttack = true, EnableResearch = true, EnableDiplomacy = true };
+            var customRec = new LlmRunRecorder(dirCustomCities);
+            var customReplies = new[]
+            {
+                "{\"type\":\"reclaim\",\"target_id\":\"city-wei-2\",\"summary\":\"reclaim city-wei-2\"}",
+                "{\"type\":\"end_turn\",\"summary\":\"done wei\"}",
+                "{\"type\":\"reclaim\",\"target_id\":\"city-shu-3\",\"summary\":\"reclaim city-shu-3\"}",
+                "{\"type\":\"end_turn\",\"summary\":\"done shu\"}"
+            };
+            var customTransport = new ScriptedReplayTransport(customReplies);
+            var customRunner = new LlmTurnRunner(customTransport, customCfg, customRec, null);
+            var customSpec = new SpectatorSession(customEngine, customRunner, 1, 54321, customRec);
+            customRec.WriteReplayBootstrap(customEngine, 54321, customCfg, "test-rev", "spectator", 1);
+            while (customSpec.State != SpectatorState.Completed && customSpec.State != SpectatorState.Paused && customSpec.State != SpectatorState.Failed)
+            {
+                customSpec.Tick();
+                Thread.Sleep(1);
+            }
+            SpectatorSummary.Write(dirCustomCities, customSpec, customCfg, customTransport);
+            string customRunId = customRec.RunId;
+
+            ReplayBundle customBundle = ReplayLoader.LoadByRunId(customRunId, dirCustomCities);
+            // Pass a distinct hostMap to prove bootstrap-backed replay reconstructs its own cities/state
+            var dummyHostMap = new MapData { Width = 2, Height = 2, Walkable = new bool[4], Cost = new int[4], Neighbors = new int[4][] };
+            var customSession = new ReplaySession(customBundle, dummyHostMap) { PauseOnDivergence = true };
+            customSession.RunToCompletion();
+            Check(customSession.IsCompleted && !customSession.HasDivergence
+                && customSession.ObservationHashesMatched == customBundle.Requests.Count
+                && customSession.AcceptedActionsReplayed == 2
+                && customSession.Engine.State.FindCity("city-wei-2") != null
+                && customSession.Engine.State.FindCity("city-shu-3") != null
+                && customSession.Engine.State.FindCity("city-wei") == null,
+                "[REPLAY-PLAYBACK] non-default city IDs (city-wei-2, city-shu-3) replay cleanly from bootstrap");
+
+            // Failed initialization: corrupted bootstrap must throw cleanly without leaving a session
+            ReplayBundle corruptBundle = ReplayLoader.LoadByRunId(customRunId, dirCustomCities);
+            corruptBundle.Bootstrap = new ReplayBootstrapData { RunId = customRunId };
+            bool initThrew = false;
+            ReplaySession failedSession = null;
+            try { failedSession = new ReplaySession(corruptBundle); }
+            catch (Exception) { initThrew = true; }
+            Check(initThrew && failedSession == null, "[REPLAY-PLAYBACK] corrupted bootstrap fails initialization cleanly");
+
             // 5. Real saved run (run-20261117050620701-0270f853) if present in diplomacy-scenario-prep/runs
             string realRunId = "run-20261117050620701-0270f853";
             if (ReplayLoader.TryResolveRunFiles(realRunId, null, out string rs, out string rj, out string re, out string rb, out _))
