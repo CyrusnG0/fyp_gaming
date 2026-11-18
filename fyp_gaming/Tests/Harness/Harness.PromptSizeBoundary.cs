@@ -157,6 +157,7 @@ internal static partial class Harness
         PromptSizeBoundaryPilotSummary();
         PromptSizeBoundaryOriginalCommitParity();
         PromptSizeBoundaryRunnerDiagnostics();
+        PromptSizeBoundaryLongTurn();
 
         if (PromptSizeProbeWrite(outPath, outRows))
             Console.WriteLine("    probe sweep written: " + outPath);
