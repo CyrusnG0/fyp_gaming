@@ -385,6 +385,97 @@ internal static partial class Harness
             catch (Exception) { initThrew = true; }
             Check(initThrew && failedSession == null, "[REPLAY-PLAYBACK] corrupted bootstrap fails initialization cleanly");
 
+            // 4d. Inspecting a previous request from the other seat + empty length-limited reply formatting
+            string dirPersona = Path.Combine(root, "persona_evidence");
+            Directory.CreateDirectory(dirPersona);
+            var personaCfg = new LlmConfig { Provider = "fake", Model = "fake-replay-test", MaxActionsPerTurn = 4, RequestTimeoutMs = 5000, EnablePersonas = true };
+            RecordSyntheticMatch(dirPersona, 1, new[]
+            {
+                "{\"type\":\"reclaim\",\"target_id\":\"city-wei\",\"summary\":\"wei reclaim\"}",
+                "{\"type\":\"end_turn\",\"summary\":\"done wei\"}",
+                "{\"type\":\"reclaim\",\"target_id\":\"city-shu\",\"summary\":\"shu reclaim\"}",
+                "{\"type\":\"end_turn\",\"summary\":\"done shu\"}"
+            }, out string personaRunId, false, personaCfg);
+            ReplayBundle personaBundle = ReplayLoader.LoadByRunId(personaRunId, dirPersona);
+            var personaSession = new ReplaySession(personaBundle) { PauseOnDivergence = true };
+            personaSession.StepRequest(); // seat-0 reclaim
+            personaSession.StepRequest(); // seat-0 end_turn -> advances to seat-1
+            Check(personaSession.CurrentSeatId == "seat-1" && personaSession.CurrentPersonaId == LlmPersona.ShuPersonaId,
+                $"[REPLAY-PLAYBACK] playback advanced to seat-1 ({personaSession.CurrentPersonaId})");
+            ReplayRequestRecord prevWeiReq = personaBundle.Requests[0];
+            Check(prevWeiReq.SeatId == "seat-0" && personaSession.GetPersonaIdForRequest(prevWeiReq) == LlmPersona.WeiPersonaId,
+                $"[REPLAY-PLAYBACK] inspecting seat-0 request during seat-1 playback resolves '{personaSession.GetPersonaIdForRequest(prevWeiReq)}' (not seat-1)");
+
+            // When the selected request's persona cannot be established, display "unknown" (never current playback seat's persona)
+            var unknownPersonaTurns = new List<ReplayTurnSummary>();
+            foreach (var t in personaBundle.Summary.Turns)
+            {
+                unknownPersonaTurns.Add(new ReplayTurnSummary
+                {
+                    Season = t.Season, SeatId = t.SeatId, Faction = t.Faction,
+                    Requests = t.Requests, Actions = t.Actions, Accepted = t.Accepted, Rejected = t.Rejected, Invalid = t.Invalid,
+                    LastSummary = t.LastSummary,
+                    PersonaId = string.Equals(t.SeatId, "seat-0", StringComparison.Ordinal) ? "" : t.PersonaId,
+                    LastCommandJson = t.LastCommandJson, LastResult = t.LastResult, EndedBy = t.EndedBy, EndReason = t.EndReason, EndReasonText = t.EndReasonText
+                });
+            }
+            var unknownSummary = new ReplaySummaryData
+            {
+                RunId = personaBundle.Summary.RunId, Seed = personaBundle.Summary.Seed,
+                BalanceProfileKey = personaBundle.Summary.BalanceProfileKey, ManualLookupEnabled = personaBundle.Summary.ManualLookupEnabled,
+                SeasonsPlanned = personaBundle.Summary.SeasonsPlanned, SeasonsPlayed = personaBundle.Summary.SeasonsPlayed,
+                StopReason = personaBundle.Summary.StopReason, State = personaBundle.Summary.State,
+                ConfigRedacted = "provider=fake; model=fake",
+                Scoreboards = personaBundle.Summary.Scoreboards, Turns = unknownPersonaTurns
+            };
+            var unknownPersonaBundle = new ReplayBundle
+            {
+                Summary = unknownSummary, Bootstrap = personaBundle.Bootstrap, Requests = personaBundle.Requests
+            };
+            var unknownPersonaSession = new ReplaySession(unknownPersonaBundle) { PauseOnDivergence = true };
+            unknownPersonaSession.StepRequest();
+            unknownPersonaSession.StepRequest();
+            Check(unknownPersonaSession.CurrentSeatId == "seat-1" && unknownPersonaSession.CurrentPersonaId == LlmPersona.ShuPersonaId
+                && unknownPersonaSession.GetPersonaIdForRequest(unknownPersonaBundle.Requests[0]) == "unknown",
+                "[REPLAY-PLAYBACK] unestablished persona for seat-0 returns 'unknown' instead of seat-1's persona");
+
+            // Empty length-limited reply must never be labeled "end_turn"
+            var emptyLengthReq = new ReplayRequestRecord
+            {
+                RunId = customRunId, SeatId = "seat-0", Season = 1, TurnToken = 1, RequestIndex = 1,
+                RawModelText = "", FinishReason = "length", ParseOk = false, ResultOk = false, ResultRecorded = true
+            };
+            var emptyUnknownReq = new ReplayRequestRecord
+            {
+                RunId = customRunId, SeatId = "seat-0", Season = 1, TurnToken = 1, RequestIndex = 2,
+                RawModelText = "   ", FinishReason = null, ParseOk = false, ResultOk = false, ResultRecorded = true
+            };
+            var validEndTurnReq = new ReplayRequestRecord
+            {
+                RunId = customRunId, SeatId = "seat-0", Season = 1, TurnToken = 1, RequestIndex = 3,
+                RawModelText = "{\"type\":\"end_turn\",\"summary\":\"done\"}", FinishReason = "stop", ParseOk = true, ResultOk = true, ResultRecorded = true
+            };
+            var emptyBundle = new ReplayBundle
+            {
+                Summary = customBundle.Summary,
+                Bootstrap = customBundle.Bootstrap,
+                Requests = new List<ReplayRequestRecord> { emptyLengthReq }
+            };
+            var emptySession = new ReplaySession(emptyBundle);
+            string emptyLenLabel = emptySession.FormatRecordedActionLabel(emptyLengthReq);
+            string emptyLenSnapshot = emptySession.GetDisplayedSummarySnapshot();
+            string emptyUnkLabel = emptySession.FormatRecordedActionLabel(emptyUnknownReq);
+            string validEndLabel = emptySession.FormatRecordedActionLabel(validEndTurnReq);
+            Check(!emptyLenLabel.Contains("end_turn", StringComparison.OrdinalIgnoreCase)
+                && emptyLenLabel.Contains("empty recorded response", StringComparison.OrdinalIgnoreCase)
+                && emptyLenLabel.Contains("finish_reason=length", StringComparison.OrdinalIgnoreCase)
+                && !emptyLenSnapshot.Contains("end_turn", StringComparison.OrdinalIgnoreCase)
+                && emptyLenSnapshot.Contains("finish_reason=length", StringComparison.OrdinalIgnoreCase)
+                && !emptyUnkLabel.Contains("end_turn", StringComparison.OrdinalIgnoreCase)
+                && emptyUnkLabel.Contains("finish_reason=unknown", StringComparison.OrdinalIgnoreCase)
+                && validEndLabel.Contains("end_turn", StringComparison.Ordinal),
+                $"[REPLAY-PLAYBACK] empty length-limited reply labeled explicitly without end_turn ('{emptyLenLabel}')");
+
             // 5. Real saved run (run-20261117050620701-0270f853) if present in diplomacy-scenario-prep/runs
             string realRunId = "run-20261117050620701-0270f853";
             if (ReplayLoader.TryResolveRunFiles(realRunId, null, out string rs, out string rj, out string re, out string rb, out _))

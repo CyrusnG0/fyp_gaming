@@ -81,21 +81,98 @@ namespace LuanShi.Engine
                 ? _bundle.Requests[_currentRequestIndex]
                 : (_bundle.Requests.Count > 0 ? _bundle.Requests[_bundle.Requests.Count - 1] : null);
 
-        public string CurrentPersonaId
+        public string CurrentPersonaId => GetPersonaIdForSeatAndSeason(_currentSeatId, _currentSeason, null);
+
+        /// <summary>
+        /// Derives the recorded persona for a specific <see cref="ReplayRequestRecord"/> using
+        /// its recorded seat/season and run configuration, never falling back to the current playback seat.
+        /// Returns "unknown" when the selected persona cannot be established.
+        /// </summary>
+        public string GetPersonaIdForRequest(ReplayRequestRecord rec)
         {
-            get
+            if (rec == null || string.IsNullOrEmpty(rec.SeatId))
+                return "unknown";
+            return GetPersonaIdForSeatAndSeason(rec.SeatId, rec.Season, rec.PromptVersion);
+        }
+
+        private string GetPersonaIdForSeatAndSeason(string seatId, int season, string promptVersion)
+        {
+            if (string.IsNullOrEmpty(seatId))
+                return "unknown";
+
+            if (_bundle.Summary?.Turns != null)
             {
-                if (_bundle.Summary?.Turns != null)
+                bool sawSeatTurnWithoutPersona = false;
+                foreach (var t in _bundle.Summary.Turns)
                 {
-                    foreach (var t in _bundle.Summary.Turns)
-                        if (t.Season == _currentSeason && string.Equals(t.SeatId, _currentSeatId, StringComparison.Ordinal))
-                            return t.PersonaId;
-                    foreach (var t in _bundle.Summary.Turns)
-                        if (string.Equals(t.SeatId, _currentSeatId, StringComparison.Ordinal) && !string.IsNullOrEmpty(t.PersonaId))
-                            return t.PersonaId;
+                    if (t.Season == season && string.Equals(t.SeatId, seatId, StringComparison.Ordinal))
+                        return !string.IsNullOrEmpty(t.PersonaId) ? t.PersonaId : "unknown";
                 }
-                return "unrecorded";
+                foreach (var t in _bundle.Summary.Turns)
+                {
+                    if (string.Equals(t.SeatId, seatId, StringComparison.Ordinal))
+                    {
+                        if (!string.IsNullOrEmpty(t.PersonaId))
+                            return t.PersonaId;
+                        sawSeatTurnWithoutPersona = true;
+                    }
+                }
+                if (sawSeatTurnWithoutPersona)
+                    return "unknown";
             }
+
+            bool personasEnabledInConfig = _bundle.Summary?.ConfigRedacted != null
+                && _bundle.Summary.ConfigRedacted.IndexOf("personas=true", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool personasInPromptVersion = !string.IsNullOrEmpty(promptVersion)
+                && promptVersion.IndexOf("persona", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (personasEnabledInConfig || personasInPromptVersion)
+            {
+                string factionName = _engine?.State?.FindFaction(seatId)?.Name;
+                if (string.IsNullOrEmpty(factionName) && _bundle.Summary?.Scoreboards != null)
+                {
+                    foreach (var sb in _bundle.Summary.Scoreboards)
+                    {
+                        if (sb.Scores == null) continue;
+                        foreach (var sc in sb.Scores)
+                        {
+                            if (string.Equals(sc.SeatId, seatId, StringComparison.Ordinal) && !string.IsNullOrEmpty(sc.Faction))
+                            {
+                                factionName = sc.Faction;
+                                break;
+                            }
+                        }
+                        if (!string.IsNullOrEmpty(factionName)) break;
+                    }
+                }
+                if (!string.IsNullOrEmpty(factionName))
+                    return LlmPersona.ForKey(factionName).Id;
+            }
+
+            return "unknown";
+        }
+
+        /// <summary>
+        /// Formats the recorded action label for UI/report display. Never labels an empty response
+        /// as "end_turn"; only reports end_turn when the recorded response contains a valid end-turn command.
+        /// </summary>
+        public string FormatRecordedActionLabel(ReplayRequestRecord rec)
+        {
+            if (rec == null)
+                return "unknown";
+
+            if (!string.IsNullOrEmpty(rec.InquiryTool))
+                return !string.IsNullOrWhiteSpace(rec.RawModelText) ? rec.RawModelText : $"inquiry:{rec.InquiryTool}";
+
+            if (string.IsNullOrWhiteSpace(rec.RawModelText))
+            {
+                string finish = !string.IsNullOrWhiteSpace(rec.FinishReason) ? rec.FinishReason.Trim() : "unknown";
+                return $"empty recorded response (outcome unknown, finish_reason={finish})";
+            }
+
+            if (IsEndTurnRecord(rec, _bundle.Bootstrap?.Features))
+                return rec.RawModelText;
+
+            return rec.RawModelText;
         }
 
         public ReplaySession(ReplayBundle bundle, MapData hostMap = null)

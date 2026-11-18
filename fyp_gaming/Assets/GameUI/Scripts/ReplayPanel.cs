@@ -161,15 +161,15 @@ namespace LuanShi
                     _replayInspectedRequestIndex = firstInquiryIdx;
                 y += 20f;
 
-                string seatId = rec != null ? rec.SeatId : (_replaySession.CurrentSeatId ?? "seat-0");
-                string persona = _replaySession.CurrentPersonaId;
+                string seatId = rec != null && !string.IsNullOrEmpty(rec.SeatId) ? rec.SeatId : (_replaySession.CurrentSeatId ?? "unknown");
+                string persona = _replaySession.GetPersonaIdForRequest(rec);
                 string reqLink = rec != null ? $"S{rec.Season} T{rec.TurnToken} R{rec.RequestIndex} ({activeIdx + 1}/{reqCount})" : "-";
                 string exLink = rec != null && !string.IsNullOrEmpty(rec.ExchangeId) ? $" | ex={rec.ExchangeId}" : "";
                 string inqTag = rec != null && !string.IsNullOrEmpty(rec.InquiryTool) ? $" | INQUIRY:{rec.InquiryTool}" : "";
                 GUI.Label(new Rect(x, y, width, 16f), EllipsizeToWidth(uiPanelTitle, $"{seatId} ({persona}) | {reqLink}{exLink}{inqTag}", width), uiPanelTitle);
                 y += 17f;
 
-                string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
+                string cmdAction = EllipsizeToWidth(uiSmall, _replaySession.FormatRecordedActionLabel(rec), width);
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
                 y += 15f;
 
@@ -196,7 +196,9 @@ namespace LuanShi
 
                 GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
                 y += 14f;
-                string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
+                string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText)
+                    ? rec.ResponseContentText
+                    : (rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? rec.RawModelText : "(empty recorded response)");
                 Rect respRect = new Rect(x, y, width, 34f);
                 _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
                 GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);

@@ -35,10 +35,9 @@ namespace LuanShi.Engine
             }
 
             var rec = CurrentRequestRecord;
-            string seatId = rec != null ? rec.SeatId : seat;
-            sb.AppendLine($"Current Turn: {seatId} ({CurrentPersonaId})");
-            string act = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? rec.RawModelText : "end_turn";
-            sb.AppendLine("Action: " + act);
+            string seatId = rec != null && !string.IsNullOrEmpty(rec.SeatId) ? rec.SeatId : seat;
+            sb.AppendLine($"Current Turn: {seatId} ({GetPersonaIdForRequest(rec)})");
+            sb.AppendLine("Action: " + FormatRecordedActionLabel(rec));
 
             if (_isCompleted)
             {
