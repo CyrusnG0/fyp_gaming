@@ -14,6 +14,7 @@ internal static partial class Harness
         PromptSizeBoundaryReserveAssembler();
         PromptSizeBoundaryReserveCannotFit();
         PromptSizeBoundaryReserveRunner();
+        PromptSizeBoundaryGuarantee();
     }
 
     private static void PromptSizeBoundaryReserveAssembler()
@@ -27,22 +28,18 @@ internal static partial class Harness
             "[new] reserve: a 30000-char inquiry is cut while " + shown.Count + " legal march destinations stay ("
             + SectionCounts(r.Report, "march destinations") + ", section " + section.Length + " chars)");
 
-        // Wording: advice to repeat is only given when an inquiry is still possible.
-        Check(r.User.Contains("you may repeat a narrower inquiry for the rest", StringComparison.Ordinal),
-            "[new] reserve: with inquiries left the marker says the inquiry may be repeated narrower");
+        // Wording is neutral: it never promises a repeat (manual_lookup topics have no paging) and
+        // is identical whether or not inquiries remain.
+        Check(r.User.Contains("the rest is not shown, so treat this result as partial", StringComparison.Ordinal)
+              && !CutLines(r.User).Contains("repeat") && !CutLines(r.User).Contains("narrower"),
+            "[new] reserve: the cut marker and note make no promise that the rest can be fetched or repeated");
         RichContextInputs none = ProbeInputs(new PromptSizeProbeCase { InquiryChars = 30000 });
         none.Allowances.InquiriesLeftTurn = 0;
         RichContextResult rn = ProbeAssembleWithInputs(none);
         Check(rn.Report.InquiryKeptChars < rn.Report.InquiryOriginalChars
-              && rn.User.Contains("no further inquiry is available this turn", StringComparison.Ordinal)
-              && !rn.User.Contains("repeat a narrower inquiry", StringComparison.Ordinal),
-            "[new] reserve: with no inquiry left the marker and note say so and do not advise repeating");
-        RichContextInputs lastRequest = ProbeInputs(new PromptSizeProbeCase { InquiryChars = 30000 });
-        lastRequest.Allowances.RequestsLeftTurn = 1;
-        RichContextResult rl = ProbeAssembleWithInputs(lastRequest);
-        Check(rl.User.Contains("no further inquiry is available this turn", StringComparison.Ordinal)
-              && !rl.User.Contains("repeat a narrower inquiry", StringComparison.Ordinal),
-            "[new] reserve: with one request left (this reply) the marker does not advise repeating either");
+              && rn.User.Contains("the rest is not shown, so treat this result as partial", StringComparison.Ordinal)
+              && !CutLines(rn.User).Contains("repeat"),
+            "[new] reserve: with no inquiry left the same neutral wording is used");
     }
 
     /// <summary>Mandatory text fits only if the reserve is dropped: the prompt must be reported unfit.</summary>
@@ -78,14 +75,14 @@ internal static partial class Harness
         public int Total(int i) => Fake.Requests[i].System.Length + Fake.Requests[i].User.Length;
     }
 
-    private static ReserveRun ReserveSession(int limit, string reply2)
+    private static ReserveRun ReserveSession(int limit, string reply2, int sectionCap = 0)
     {
         var run = new ReserveRun { Limit = limit };
         run.Engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31011);
         LlmConfig config = LlmConfig.RichDeliberation();
         config.EnableManualLookup = true;
         config.MaxPromptChars = limit;
-        config.SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Rich };
+        config.SpatialContext = new SpatialContextOptions { Level = SpatialDetailLevel.Rich, MaxSectionChars = sectionCap };
         run.Runner = new LlmTurnRunner(run.Fake, config, null);
         run.Session = new SpectatorSession(run.Engine, run.Runner, 1, 31011);
         run.Fake.EnqueueSuccess("{\"tool\":\"manual_lookup\",\"topic\":\"recruit\"}", 0, 100, 20);
@@ -123,7 +120,7 @@ internal static partial class Harness
         Check(shown.Count > 0 && ReserveMarchesLegal(shown, legalNow)
               && user1.Contains("march destinations across your armies", StringComparison.Ordinal)
               && user1.Contains("(INCOMPLETE)", StringComparison.Ordinal)
-              && user1.Contains("you may repeat a narrower inquiry", StringComparison.Ordinal),
+              && user1.Contains("the rest is not shown", StringComparison.Ordinal),
             "[new] reserve runner: after the inquiry the next prompt (limit " + probe.Limit + ", " + probe.Total(1)
             + " chars of " + second + " uncut) labels the cut and lists " + shown.Count + " destinations, all legal");
         bool within = true;
@@ -149,6 +146,17 @@ internal static partial class Harness
               && json.Contains("\"unfit_reason\":\"mandatory_context_exceeds_limit\"", StringComparison.Ordinal),
             "[new] reserve runner: limit " + (first - 6000) + " (mandatory text + reserve cannot fit) stops with "
             + "prompt too large before any provider call (calls=" + tiny.Fake.CallCount + ")");
+    }
+
+    /// <summary>The inquiry cut marker and the completeness line about the latest inquiry result.</summary>
+    private static string CutLines(string user)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (string line in user.Split('\n'))
+            if (line.StartsWith("[INCOMPLETE: inquiry result cut", StringComparison.Ordinal)
+                || line.StartsWith("- latest inquiry result", StringComparison.Ordinal))
+                sb.Append(line).Append('\n');
+        return sb.ToString();
     }
 
     private struct ReserveMarch { public string Army; public int X, Z; }

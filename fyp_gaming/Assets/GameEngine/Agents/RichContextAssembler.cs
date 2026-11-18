@@ -105,6 +105,28 @@ namespace LuanShi.Engine
                         input.SpatialOptions, out spatialReport)
                     : PromptBuilder.MovementOptionsText(input.Movement));
 
+            // Semantic guarantee: when the host offers a legal destination, the prompt lists at least
+            // one (swapping in the minimal section if a budget removed them all) or is unfit.
+            bool movementBroken = false;
+            void EnsureDestination()
+            {
+                movementBroken = false;
+                if (!spatialOn || !HasLegalDestinations(input.Movement)
+                    || CountListedDestinations(movementText) > 0) return;
+                string minimal = PromptBuilder.RenderMinimalDestinationSection(input.Movement,
+                    input.SpatialOptions, out SpatialTruncationReport minimalReport);
+                int sectionCap = input.SpatialOptions.MaxSectionChars;
+                if (minimal == null || CountListedDestinations(minimal) == 0
+                    || (sectionCap > 0 && minimal.Length > sectionCap))
+                {
+                    movementBroken = true;
+                    return;
+                }
+                movementText = minimal;
+                spatialReport = minimalReport;
+            }
+            EnsureDestination();
+
             int moveSectionIndex = report.Sections.Count;
             AddMovement(input.Movement, report, spatialReport);
             report.Add("candidate orders", input.Options.Count, input.Options.Count, null);
@@ -135,6 +157,7 @@ namespace LuanShi.Engine
                         (movementText == null ? 0 : movementText.Length) - excess);
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
                         input.SpatialOptions, sectionBudget, out spatialReport);
+                    EnsureDestination();
                     if (moveSectionIndex < report.Sections.Count)
                     {
                         report.Sections.RemoveAt(moveSectionIndex);
@@ -151,6 +174,7 @@ namespace LuanShi.Engine
                 {
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
                         input.SpatialOptions, MovementFloor(input), out spatialReport);
+                    EnsureDestination();
                     if (moveSectionIndex < report.Sections.Count)
                     {
                         report.Sections.RemoveAt(moveSectionIndex);
@@ -167,7 +191,7 @@ namespace LuanShi.Engine
                     boundedInquiry = input.LatestInquiryResult;
                     inquiryKeptChars = inquiryOriginalChars;
                     UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
-                        inquiryOriginalChars, false, InquiryRemains(input.Allowances));
+                        inquiryOriginalChars, false);
                     Rebuild(boundedInquiry);
                     for (int pass = 0; pass < 16 && input.SystemChars + user.Length > fitLimit; pass++)
                     {
@@ -177,11 +201,11 @@ namespace LuanShi.Engine
                         if (next >= inquiryKeptChars) break;
                         inquiryKeptChars = next;
                         string bound = BoundInquiry(input.LatestInquiryResult, inquiryKeptChars,
-                            inquiryOriginalChars, InquiryRemains(input.Allowances), out int actualKept);
+                            inquiryOriginalChars, out int actualKept);
                         boundedInquiry = bound;
                         inquiryKeptChars = actualKept;
                         UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
-                            inquiryOriginalChars, inquiryKeptChars < inquiryOriginalChars, InquiryRemains(input.Allowances));
+                            inquiryOriginalChars, inquiryKeptChars < inquiryOriginalChars);
                         Rebuild(boundedInquiry);
                     }
                 }
@@ -215,8 +239,10 @@ namespace LuanShi.Engine
                 spatialReport.TotalChars = input.SystemChars + user.Length;
                 report.SpatialTruncation = spatialReport;
             }
+            if (movementBroken && report.UnfitReason == null)
+                report.UnfitReason = "no_legal_destination_fits";
             report.PromptChars = input.SystemChars + user.Length;
-            report.Fits = report.PromptChars <= report.MaxPromptChars;
+            report.Fits = report.PromptChars <= report.MaxPromptChars && !movementBroken;
             string observationJson = PromptBuilder.BoundedObservationJson(obs, events);
             int historyChars = 0;
             foreach (string line in history) historyChars += (line == null ? 0 : line.Length) + 2;
@@ -239,14 +265,14 @@ namespace LuanShi.Engine
         }
 
         private static void UpdateInquirySection(RichContextReport report, int index, int kept,
-            int original, bool truncated, bool inquiryRemains)
+            int original, bool truncated)
         {
             if (index < 0 || index >= report.Sections.Count) return;
             RichContextReport.Section section = report.Sections[index];
             section.Included = kept;
             section.Available = original;
             section.Note = truncated
-                ? "truncated to fit the prompt limit; " + InquiryAdvice(inquiryRemains)
+                ? "truncated to fit the prompt limit; " + InquiryAdvice
                 : null;
         }
 
@@ -256,8 +282,7 @@ namespace LuanShi.Engine
         /// the prompt the caller measures. Cuts are safe for surrogate pairs and (for JSON-ish text)
         /// never end inside a backslash or \uXXXX escape.
         /// </summary>
-        private static string BoundInquiry(string text, int requestedKept, int original, bool inquiryRemains,
-            out int kept)
+        private static string BoundInquiry(string text, int requestedKept, int original, out int kept)
         {
             kept = SafeCut(text, requestedKept);
             if (kept >= text.Length)
@@ -265,7 +290,7 @@ namespace LuanShi.Engine
                 kept = text.Length;
                 return text;
             }
-            string marker = InquiryMarker(original, kept, inquiryRemains);
+            string marker = InquiryMarker(original, kept);
             return marker + "\n" + text.Substring(0, kept);
         }
 

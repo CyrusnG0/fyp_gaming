@@ -21,30 +21,40 @@ namespace LuanShi.Engine
             return false;
         }
 
+        /// <summary>Destinations listed in a rendered movement section ("options: X,Z cost=..; ...").</summary>
+        internal static int CountListedDestinations(string movementText)
+        {
+            if (string.IsNullOrEmpty(movementText)) return 0;
+            int count = 0;
+            foreach (string raw in movementText.Split('\n'))
+            {
+                string line = raw.TrimEnd('\r');
+                if (!line.StartsWith("  options:", System.StringComparison.Ordinal)) continue;
+                foreach (string part in line.Substring(10).Split(';'))
+                {
+                    string[] xz = part.Trim().Split(' ')[0].Split(',');
+                    if (xz.Length == 2 && int.TryParse(xz[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                        && int.TryParse(xz[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                        count++;
+                }
+            }
+            return count;
+        }
+
         private static int MovementFloor(RichContextInputs input)
             => HasLegalDestinations(input.Movement) ? MovementReserveChars : 1;
 
-        /// <summary>True when the host would still accept another inquiry after this reply.</summary>
-        private static bool InquiryRemains(PromptBuilder.RichAllowances a)
-        {
-            if (a == null) return false;
-            // A follow-up inquiry needs one more request than this reply uses.
-            return (a.InquiriesLeftTurn < 0 || a.InquiriesLeftTurn > 0)
-                && (a.InquiriesLeftSession < 0 || a.InquiriesLeftSession > 0)
-                && (a.RequestsLeftTurn < 0 || a.RequestsLeftTurn >= 2)
-                && (a.RequestsLeftSession < 0 || a.RequestsLeftSession >= 2);
-        }
+        /// <summary>
+        /// Neutral on purpose: it states what the prompt lacks without promising that any tool can
+        /// fetch the rest (a manual_lookup topic, for one, has no paging) or that inquiries remain.
+        /// </summary>
+        private const string InquiryAdvice =
+            "the rest is not shown, so treat this result as partial";
 
-        /// <summary>Wording that stays true whether or not inquiries remain.</summary>
-        private static string InquiryAdvice(bool inquiryRemains)
-            => inquiryRemains
-                ? "you may repeat a narrower inquiry for the rest"
-                : "no further inquiry is available this turn, so treat this result as partial";
-
-        private static string InquiryMarker(int original, int kept, bool inquiryRemains)
+        private static string InquiryMarker(int original, int kept)
             => "[INCOMPLETE: inquiry result cut from "
                + original.ToString(CultureInfo.InvariantCulture) + " to "
                + kept.ToString(CultureInfo.InvariantCulture)
-               + " chars to fit the prompt limit; " + InquiryAdvice(inquiryRemains) + "]";
+               + " chars to fit the prompt limit; " + InquiryAdvice + "]";
     }
 }

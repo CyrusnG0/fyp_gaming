@@ -101,7 +101,7 @@ internal static partial class Harness
         Check(r.Report.InquiryKeptChars < r.Report.InquiryOriginalChars
               && r.User.Contains("[INCOMPLETE: inquiry result cut from", StringComparison.Ordinal)
               && r.User.Contains("to " + r.Report.InquiryKeptChars + " chars", StringComparison.Ordinal)
-              && r.User.Contains("truncated to fit the prompt limit; you may repeat a narrower inquiry for the rest",
+              && r.User.Contains("truncated to fit the prompt limit; the rest is not shown, so treat this result as partial",
                     StringComparison.Ordinal),
             "[new] probe budget: marker and completeness note are inside the final user prompt");
         Check(r.User.Length == r.Report.PromptChars - input.SystemChars,
