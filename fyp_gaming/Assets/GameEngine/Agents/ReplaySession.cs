@@ -81,71 +81,33 @@ namespace LuanShi.Engine
                 ? _bundle.Requests[_currentRequestIndex]
                 : (_bundle.Requests.Count > 0 ? _bundle.Requests[_bundle.Requests.Count - 1] : null);
 
-        public string CurrentPersonaId => GetPersonaIdForSeatAndSeason(_currentSeatId, _currentSeason, null);
+        public string CurrentPersonaId => GetPersonaIdForSeatAndSeason(_currentSeatId, _currentSeason);
 
         /// <summary>
-        /// Derives the recorded persona for a specific <see cref="ReplayRequestRecord"/> using
-        /// its recorded seat/season and run configuration, never falling back to the current playback seat.
-        /// Returns "unknown" when the selected persona cannot be established.
+        /// Returns the recorded persona for a specific <see cref="ReplayRequestRecord"/> using only
+        /// direct recorded evidence for that exact seat and season.
+        /// Returns "unknown" when that evidence is absent; never infers from faction name,
+        /// prompt-version wording, or another season's/seat's turn.
         /// </summary>
         public string GetPersonaIdForRequest(ReplayRequestRecord rec)
         {
             if (rec == null || string.IsNullOrEmpty(rec.SeatId))
                 return "unknown";
-            return GetPersonaIdForSeatAndSeason(rec.SeatId, rec.Season, rec.PromptVersion);
+            return GetPersonaIdForSeatAndSeason(rec.SeatId, rec.Season);
         }
 
-        private string GetPersonaIdForSeatAndSeason(string seatId, int season, string promptVersion)
+        private string GetPersonaIdForSeatAndSeason(string seatId, int season)
         {
-            if (string.IsNullOrEmpty(seatId))
+            if (string.IsNullOrEmpty(seatId) || season <= 0)
                 return "unknown";
 
             if (_bundle.Summary?.Turns != null)
             {
-                bool sawSeatTurnWithoutPersona = false;
                 foreach (var t in _bundle.Summary.Turns)
                 {
                     if (t.Season == season && string.Equals(t.SeatId, seatId, StringComparison.Ordinal))
                         return !string.IsNullOrEmpty(t.PersonaId) ? t.PersonaId : "unknown";
                 }
-                foreach (var t in _bundle.Summary.Turns)
-                {
-                    if (string.Equals(t.SeatId, seatId, StringComparison.Ordinal))
-                    {
-                        if (!string.IsNullOrEmpty(t.PersonaId))
-                            return t.PersonaId;
-                        sawSeatTurnWithoutPersona = true;
-                    }
-                }
-                if (sawSeatTurnWithoutPersona)
-                    return "unknown";
-            }
-
-            bool personasEnabledInConfig = _bundle.Summary?.ConfigRedacted != null
-                && _bundle.Summary.ConfigRedacted.IndexOf("personas=true", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool personasInPromptVersion = !string.IsNullOrEmpty(promptVersion)
-                && promptVersion.IndexOf("persona", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (personasEnabledInConfig || personasInPromptVersion)
-            {
-                string factionName = _engine?.State?.FindFaction(seatId)?.Name;
-                if (string.IsNullOrEmpty(factionName) && _bundle.Summary?.Scoreboards != null)
-                {
-                    foreach (var sb in _bundle.Summary.Scoreboards)
-                    {
-                        if (sb.Scores == null) continue;
-                        foreach (var sc in sb.Scores)
-                        {
-                            if (string.Equals(sc.SeatId, seatId, StringComparison.Ordinal) && !string.IsNullOrEmpty(sc.Faction))
-                            {
-                                factionName = sc.Faction;
-                                break;
-                            }
-                        }
-                        if (!string.IsNullOrEmpty(factionName)) break;
-                    }
-                }
-                if (!string.IsNullOrEmpty(factionName))
-                    return LlmPersona.ForKey(factionName).Id;
             }
 
             return "unknown";

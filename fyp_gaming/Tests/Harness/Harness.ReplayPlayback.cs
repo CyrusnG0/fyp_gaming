@@ -439,6 +439,34 @@ internal static partial class Harness
                 && unknownPersonaSession.GetPersonaIdForRequest(unknownPersonaBundle.Requests[0]) == "unknown",
                 "[REPLAY-PLAYBACK] unestablished persona for seat-0 returns 'unknown' instead of seat-1's persona");
 
+            // Missing selected-turn persona when another turn (different season) has one, and when faction persona could differ from default
+            var crossSeasonTurns = new List<ReplayTurnSummary>
+            {
+                new ReplayTurnSummary { Season = 1, SeatId = "seat-0", Faction = "Wei", PersonaId = LlmPersona.ShuPersonaId }, // override differs from default wei-mild
+                new ReplayTurnSummary { Season = 1, SeatId = "seat-1", Faction = "Shu", PersonaId = LlmPersona.ShuPersonaId }
+            };
+            var crossSeasonBundle = new ReplayBundle
+            {
+                Summary = new ReplaySummaryData
+                {
+                    RunId = personaBundle.Summary.RunId, Seed = personaBundle.Summary.Seed,
+                    BalanceProfileKey = personaBundle.Summary.BalanceProfileKey, ManualLookupEnabled = personaBundle.Summary.ManualLookupEnabled,
+                    SeasonsPlanned = 2, SeasonsPlayed = 2, ConfigRedacted = "provider=fake; personas=true",
+                    Scoreboards = personaBundle.Summary.Scoreboards, Turns = crossSeasonTurns
+                },
+                Bootstrap = personaBundle.Bootstrap,
+                Requests = personaBundle.Requests
+            };
+            var crossSeasonSession = new ReplaySession(crossSeasonBundle);
+            var s2WeiReq = new ReplayRequestRecord
+            {
+                RunId = personaBundle.Summary.RunId, SeatId = "seat-0", Season = 2, TurnToken = 3, RequestIndex = 1,
+                PromptVersion = PromptBuilder.PersonaPromptVersion
+            };
+            Check(crossSeasonSession.GetPersonaIdForRequest(personaBundle.Requests[0]) == LlmPersona.ShuPersonaId
+                && crossSeasonSession.GetPersonaIdForRequest(s2WeiReq) == "unknown",
+                "[REPLAY-PLAYBACK] missing selected-turn persona returns 'unknown' without inferring from faction, prompt version, or another season");
+
             // Empty length-limited reply must never be labeled "end_turn"
             var emptyLengthReq = new ReplayRequestRecord
             {
