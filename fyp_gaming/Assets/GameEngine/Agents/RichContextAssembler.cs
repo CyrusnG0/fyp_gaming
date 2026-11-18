@@ -5,7 +5,7 @@ using System.Text;
 
 namespace LuanShi.Engine
 {
-    internal static class RichContextAssembler
+    internal static partial class RichContextAssembler
     {
         public static RichContextResult Assemble(RichContextInputs input, LlmConfig config)
         {
@@ -131,7 +131,7 @@ namespace LuanShi.Engine
                     int excess = input.SystemChars + user.Length - fitLimit;
                     // Budget 0 means "no budget" to the renderer (it would return the FULL section);
                     // reserve one char so the smallest section is selected instead.
-                    int sectionBudget = Math.Max(1,
+                    int sectionBudget = Math.Max(MovementFloor(input),
                         (movementText == null ? 0 : movementText.Length) - excess);
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
                         input.SpatialOptions, sectionBudget, out spatialReport);
@@ -145,12 +145,12 @@ namespace LuanShi.Engine
             }
             if (level >= 5)
             {
-                // The movement section is at its floor before the inquiry budget is measured, so
-                // the inquiry gets every character not spent on mandatory text.
+                // The movement section is held at its reserve before the inquiry budget is measured,
+                // so the inquiry gets what is left after mandatory text and that reserve.
                 if (spatialOn)
                 {
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
-                        input.SpatialOptions, 1, out spatialReport);
+                        input.SpatialOptions, MovementFloor(input), out spatialReport);
                     if (moveSectionIndex < report.Sections.Count)
                     {
                         report.Sections.RemoveAt(moveSectionIndex);
@@ -167,7 +167,7 @@ namespace LuanShi.Engine
                     boundedInquiry = input.LatestInquiryResult;
                     inquiryKeptChars = inquiryOriginalChars;
                     UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
-                        inquiryOriginalChars, false);
+                        inquiryOriginalChars, false, InquiryRemains(input.Allowances));
                     Rebuild(boundedInquiry);
                     for (int pass = 0; pass < 16 && input.SystemChars + user.Length > fitLimit; pass++)
                     {
@@ -177,11 +177,11 @@ namespace LuanShi.Engine
                         if (next >= inquiryKeptChars) break;
                         inquiryKeptChars = next;
                         string bound = BoundInquiry(input.LatestInquiryResult, inquiryKeptChars,
-                            inquiryOriginalChars, out int actualKept);
+                            inquiryOriginalChars, InquiryRemains(input.Allowances), out int actualKept);
                         boundedInquiry = bound;
                         inquiryKeptChars = actualKept;
                         UpdateInquirySection(report, inquirySectionIndex, inquiryKeptChars,
-                            inquiryOriginalChars, inquiryKeptChars < inquiryOriginalChars);
+                            inquiryOriginalChars, inquiryKeptChars < inquiryOriginalChars, InquiryRemains(input.Allowances));
                         Rebuild(boundedInquiry);
                     }
                 }
@@ -239,14 +239,14 @@ namespace LuanShi.Engine
         }
 
         private static void UpdateInquirySection(RichContextReport report, int index, int kept,
-            int original, bool truncated)
+            int original, bool truncated, bool inquiryRemains)
         {
             if (index < 0 || index >= report.Sections.Count) return;
             RichContextReport.Section section = report.Sections[index];
             section.Included = kept;
             section.Available = original;
             section.Note = truncated
-                ? "truncated to fit the prompt limit; repeat a narrower inquiry for the rest"
+                ? "truncated to fit the prompt limit; " + InquiryAdvice(inquiryRemains)
                 : null;
         }
 
@@ -256,7 +256,8 @@ namespace LuanShi.Engine
         /// the prompt the caller measures. Cuts are safe for surrogate pairs and (for JSON-ish text)
         /// never end inside a backslash or \uXXXX escape.
         /// </summary>
-        private static string BoundInquiry(string text, int requestedKept, int original, out int kept)
+        private static string BoundInquiry(string text, int requestedKept, int original, bool inquiryRemains,
+            out int kept)
         {
             kept = SafeCut(text, requestedKept);
             if (kept >= text.Length)
@@ -264,10 +265,7 @@ namespace LuanShi.Engine
                 kept = text.Length;
                 return text;
             }
-            string marker = "[INCOMPLETE: inquiry result cut from "
-                + original.ToString(CultureInfo.InvariantCulture) + " to "
-                + kept.ToString(CultureInfo.InvariantCulture)
-                + " chars to fit the prompt limit; repeat a narrower inquiry for the rest]";
+            string marker = InquiryMarker(original, kept, inquiryRemains);
             return marker + "\n" + text.Substring(0, kept);
         }
 

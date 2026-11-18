@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using LuanShi.Engine;
 
@@ -9,7 +10,7 @@ internal static partial class Harness
 {
     private static void PromptSizeBoundaryLongTurn()
     {
-        int turns = 16, continued = 0, trimmedTurns = 0, silentLoss = 0, maxChars = 0;
+        int turns = 16, continued = 0, trimmedTurns = 0, silentLoss = 0, maxChars = 0, lostMoves = 0;
         for (int t = 1; t <= turns; t++)
         {
             var c = new PromptSizeProbeCase
@@ -35,6 +36,9 @@ internal static partial class Harness
             bool trimNoted = !(anyTrim || rep.TrimLevel > 0)
                 || r.User.Contains("(INCOMPLETE)", StringComparison.Ordinal)
                 || r.User.Contains("trim level", StringComparison.Ordinal);
+            List<ReserveMarch> shown = ReserveDisplayedMarches(r.User);
+            bool movesKept = shown.Count > 0 && ReserveMarchesLegal(shown, input.Movement);
+            if (!movesKept) lostMoves++;
             if (!labelled || !trimNoted) silentLoss++;
             if (rep.Fits) continued++; else if (string.IsNullOrEmpty(rep.UnfitReason)) silentLoss++;
             if (rep.TrimLevel > 0) trimmedTurns++;
@@ -44,10 +48,11 @@ internal static partial class Harness
                 + rep.InquiryKeptChars + "/" + rep.InquiryOriginalChars + " hist="
                 + SectionCounts(rep, "own action feedback") + " mem=" + SectionCounts(rep, "long-term")
                 + " events=" + SectionCounts(rep, "observation events") + " moves="
-                + SectionCounts(rep, "march destinations"));
+                + SectionCounts(rep, "march destinations") + " listed=" + shown.Count);
             Check(candidates && privacy && budget,
                 "[new] long turn " + t + ": candidate orders, privacy line and completeness block kept");
         }
+        Check(lostMoves == 0, "[new] long turns: every turn still lists legal march destinations (" + lostMoves + " without)");
         Check(continued == turns && silentLoss == 0 && trimmedTurns > 0 && maxChars <= PromptSizeProbeLimit,
             "[new] long turns: all " + turns + " turns fit " + PromptSizeProbeLimit + " chars (max "
             + maxChars + "), " + trimmedTurns + " trimmed, 0 unlabelled losses");

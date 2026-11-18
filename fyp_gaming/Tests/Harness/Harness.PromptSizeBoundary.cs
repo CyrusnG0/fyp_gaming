@@ -116,11 +116,12 @@ internal static partial class Harness
         {
             string hbZeroSection = PromptSizeProbeMovementSection(hbZeroResult.User);
             Check(PromptSizeProbeNonMovementReachesLimit(hbZeroResult)
-                  && hbZeroSection.Length <= oneBudgetSection.Length
+                  && hbZeroSection.Length <= RichContextAssembler.MovementReserveChars
+                  && hbZeroSection.Length < fullSection.Length
                   && hbZeroResult.Report.SpatialTruncation != null
                   && hbZeroResult.Report.SpatialTruncation.MoveOptionsDropped > 0,
                 $"[new] probe H-b fixed: at {hbZeroCities} extra cities the non-movement text alone reaches "
-                + $"the ceiling, and the assembler now returns the {hbZeroSection.Length}-char floor with "
+                + $"the ceiling, and the assembler now returns the {hbZeroSection.Length}-char reserve (not the full section) with "
                 + $"dropped={hbZeroResult.Report.SpatialTruncation?.MoveOptionsDropped} instead of the full "
                 + $"{fullSection.Length} chars");
             Check(!hbZeroResult.Report.Fits,
@@ -157,6 +158,7 @@ internal static partial class Harness
         PromptSizeBoundaryPilotSummary();
         PromptSizeBoundaryOriginalCommitParity();
         PromptSizeBoundaryRunnerDiagnostics();
+        PromptSizeBoundaryReserve();
         PromptSizeBoundaryLongTurn();
 
         if (PromptSizeProbeWrite(outPath, outRows))

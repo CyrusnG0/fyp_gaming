@@ -101,7 +101,7 @@ internal static partial class Harness
         Check(r.Report.InquiryKeptChars < r.Report.InquiryOriginalChars
               && r.User.Contains("[INCOMPLETE: inquiry result cut from", StringComparison.Ordinal)
               && r.User.Contains("to " + r.Report.InquiryKeptChars + " chars", StringComparison.Ordinal)
-              && r.User.Contains("truncated to fit the prompt limit; repeat a narrower inquiry for the rest",
+              && r.User.Contains("truncated to fit the prompt limit; you may repeat a narrower inquiry for the rest",
                     StringComparison.Ordinal),
             "[new] probe budget: marker and completeness note are inside the final user prompt");
         Check(r.User.Length == r.Report.PromptChars - input.SystemChars,
@@ -143,9 +143,16 @@ internal static partial class Harness
     /// <summary>Mandatory text fits, but the 200-char inquiry floor plus marker does not.</summary>
     private static void PromptSizeBoundaryFloorUnfit()
     {
-        var c = new PromptSizeProbeCase { HistoryLineChars = 1600, InquiryChars = 5000 };
-        RichContextInputs input = ProbeInputs(c);
-        RichContextResult r = ProbeAssembleWithInputs(input);
+        // The movement reserve is part of the mandatory text, so find the history size at which
+        // mandatory text plus the reserve fits and only the inquiry floor (marker + 200 chars) does not.
+        RichContextInputs input = null;
+        RichContextResult r = null;
+        for (int chars = 1700; chars >= 1000; chars--)
+        {
+            input = ProbeInputs(new PromptSizeProbeCase { HistoryLineChars = chars, InquiryChars = 5000 });
+            r = ProbeAssembleWithInputs(input);
+            if (!r.Report.Fits && r.Report.UnfitReason == "inquiry_result_floor_unfit") break;
+        }
         Check(!r.Report.Fits && r.Report.UnfitReason == "inquiry_result_floor_unfit",
             $"[new] probe floor: mandatory text fits but the 200-char floor does not "
             + $"(prompt {r.Report.PromptChars}, reason={r.Report.UnfitReason})");
