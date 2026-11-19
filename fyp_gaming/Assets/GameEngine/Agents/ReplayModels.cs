@@ -198,6 +198,8 @@ namespace LuanShi.Engine
         public int AcceptedActionsReplayed;
         public int ExpectedRejectedActions;
         public int RejectedActionsReplayed;
+        public int ExpectedInvalidReplies;
+        public int InvalidRepliesReplayed;
         public int UnexpectedRejections;
         public int UnexpectedAcceptances;
         public int RejectionReasonMismatches;
@@ -239,6 +241,7 @@ namespace LuanShi.Engine
         public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
         public bool IsIncompleteRun;
+        public bool IsFakeScripted;
         public string StopReason;
         public int FinalRecordedSeason;
         public string FinalRecordedSeatId;
@@ -255,10 +258,12 @@ namespace LuanShi.Engine
             var sb = new StringBuilder(2048);
             sb.AppendLine("=== LUANSHI OFFLINE REPLAY COMPARISON REPORT ===");
             string sSeed = Seed != 0 ? Seed.ToString() : "unknown";
-            sb.AppendLine($"Run ID: {RunId} | Seed: {sSeed} | Profile: {BalanceProfileKey}");
+            sb.AppendLine($"Run ID: {RunId} | Seed: {sSeed} | Profile: {BalanceProfileKey} | Setup: {SetupSource ?? "unknown"} | Map: {MapSource ?? "unknown"}");
+            if (IsFakeScripted)
+                sb.AppendLine("Provider: FAKE / SCRIPTED REHEARSAL (not a real-model decision)");
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
             sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
-            sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");
+            sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched | Rejected Actions: {RejectedActionsReplayed}/{ExpectedRejectedActions} | Invalid Replies: {InvalidRepliesReplayed}/{ExpectedInvalidReplies} (unexpected rej: {UnexpectedRejections}, unexpected acc: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");
             sb.AppendLine($"Voluntary EndTurns: {VoluntaryEndTurnsReplayed}/{ExpectedVoluntaryEndTurns} matched");
             sb.AppendLine($"Action Outcome Mismatches: {ActionOutcomeMismatches}");
             sb.AppendLine();
@@ -315,7 +320,10 @@ namespace LuanShi.Engine
                     sb.AppendLine("  * " + dep);
             }
             sb.AppendLine();
-            sb.AppendLine($"OVERALL RAW VERIFICATION: {(RawExactMatch ? "PASS" : "FAIL (RAW MISMATCHES REPORTED HONESTLY)")}");
+            string overallLabel = !RawExactMatch
+                ? "FAIL (RAW MISMATCHES REPORTED HONESTLY)"
+                : (MapSource == "host_map_unverified" ? "PASS (HOST MAP UNVERIFIED)" : "PASS");
+            sb.AppendLine($"OVERALL RAW VERIFICATION: {overallLabel}");
             sb.AppendLine("================================================");
             return sb.ToString();
         }

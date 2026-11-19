@@ -39,9 +39,11 @@ namespace LuanShi
             GUI.Label(new Rect(4f, rowY, innerW - 8f, 16f), "[CURRENT REPLAY COMPUTED STATUS]", uiPanelTitle);
             rowY += 18f;
 
-            string statusStr = exactPass
-                ? "Status: PASS (all observation hashes and scoreboards match recorded summary)"
-                : "Status: FAIL (raw mismatches reported honestly; not smoothed over)";
+            string statusStr = !exactPass
+                ? "Status: FAIL (raw mismatches reported honestly; not smoothed over)"
+                : (rpt.MapSource == "host_map_unverified"
+                    ? "Status: PASS (state/hashes match; supplied host map unverified)"
+                    : "Status: PASS (all observation hashes and scoreboards match recorded summary)");
             GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), statusStr, exactPass ? uiSmall : uiReason);
             rowY += 15f;
             GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Observation Hashes: {rpt.ObservationHashesMatched}/{rpt.TotalRequests} matched ({rpt.ObservationHashMismatches} mismatches)", uiSmall);
@@ -82,9 +84,11 @@ namespace LuanShi
             rowY += 18f;
             GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Direct Observations: {rpt.DirectObservationMatched}/{rpt.DirectObservationCount} matched", uiSmall);
             rowY += 15f;
-            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Command Inferred: {rpt.CommandInferredMatched}/{rpt.CommandInferredCount} matched (army-shu-4 moved to (21,1))", uiSmall);
+            string cmdNote = rpt.SetupSource == "legacy_demo" ? " (army-shu-4 moved to (21,1))" : "";
+            string unvNote = rpt.SetupSource == "legacy_demo" ? " neutral entities (city-south, watch-tower-1 in fog)" : " entities in fog/setup";
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Command Inferred: {rpt.CommandInferredMatched}/{rpt.CommandInferredCount} matched{cmdNote}", uiSmall);
             rowY += 15f;
-            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Unverified Scene Setup: {rpt.UnverifiedSceneSetupCount} neutral entities (city-south, watch-tower-1 in fog)", uiSmall);
+            GUI.Label(new Rect(4f, rowY, innerW - 8f, 14f), $"Unverified Scene Setup: {rpt.UnverifiedSceneSetupCount}{unvNote}", uiSmall);
 
             GUI.EndScrollView();
         }

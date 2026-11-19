@@ -18,6 +18,8 @@ namespace LuanShi.Engine
         public List<ScenarioTower> Towers;
         public string ScenarioPath;
         public string SettingsPath;
+        public string StagedSource;
+        public bool IsFakeScripted;
 
         public string GameId => $"controlled-{ScenarioId}-{Seed}";
     }
@@ -70,6 +72,17 @@ namespace LuanShi.Engine
                 throw new InvalidDataException("scenario.json with stage_incoming_diplomacy=true is not supported by scenario fallback without a recorded bootstrap.");
 
             ReplayBootstrapFeatures features = ParseFeatures(obj, settingsPath, summary);
+            string stagedSource = null;
+            bool stagedFixture = false;
+            if (obj.TryGet("staged", out JsonNode stgNode) && stgNode is JsonObject stgObj)
+            {
+                stagedSource = Str(stgObj, "source");
+                stagedFixture = Bool(stgObj, "fixture", false);
+            }
+            string actualProvider = !string.IsNullOrEmpty(summary?.Provider) ? summary.Provider : null;
+            bool isFake = !string.IsNullOrEmpty(actualProvider)
+                ? string.Equals(actualProvider, "fake", StringComparison.OrdinalIgnoreCase)
+                : (stagedFixture && string.Equals(stagedSource, "fake_scripted", StringComparison.OrdinalIgnoreCase));
 
             return new ReplayScenarioSetup
             {
@@ -85,6 +98,8 @@ namespace LuanShi.Engine
                 Towers = towers,
                 ScenarioPath = Path.GetFullPath(scenarioPath),
                 SettingsPath = (!string.IsNullOrEmpty(settingsPath) && File.Exists(settingsPath)) ? Path.GetFullPath(settingsPath) : null,
+                StagedSource = stagedSource,
+                IsFakeScripted = isFake,
             };
         }
 

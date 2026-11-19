@@ -18,7 +18,7 @@ namespace LuanShi.Engine
         private const float BaseStepInterval = 0.8f;
 
         private int _totalSeasons, _totalRequests;
-        private int _expectedAcceptedActions, _expectedRejectedActions, _expectedVoluntaryEndTurns;
+        private int _expectedAcceptedActions, _expectedRejectedActions, _expectedInvalidReplies, _expectedVoluntaryEndTurns;
         private int _currentRequestIndex, _currentSeason, _currentTurnToken;
         private string _currentSeatId;
         private bool _turnOpen, _isCompleted;
@@ -30,7 +30,7 @@ namespace LuanShi.Engine
         private int _observationHashesMatched, _observationHashMismatches;
         private readonly List<string> _observationHashDiscrepancies = new List<string>();
 
-        private int _acceptedActionsReplayed, _rejectedActionsReplayed, _unexpectedRejections, _unexpectedAcceptances;
+        private int _acceptedActionsReplayed, _rejectedActionsReplayed, _invalidRepliesReplayed, _unexpectedRejections, _unexpectedAcceptances;
         private int _rejectionReasonMismatches, _actionOutcomeMismatches;
         private readonly List<string> _actionDiscrepancies = new List<string>();
         private int _voluntaryEndTurnsReplayed;
@@ -59,9 +59,11 @@ namespace LuanShi.Engine
         public string CurrentSeatId => _currentSeatId;
         public int ExpectedAcceptedActions => _expectedAcceptedActions;
         public int ExpectedRejectedActions => _expectedRejectedActions;
+        public int ExpectedInvalidReplies => _expectedInvalidReplies;
         public int ExpectedVoluntaryEndTurns => _expectedVoluntaryEndTurns;
         public int AcceptedActionsReplayed => _acceptedActionsReplayed;
         public int RejectedActionsReplayed => _rejectedActionsReplayed;
+        public int InvalidRepliesReplayed => _invalidRepliesReplayed;
         public int UnexpectedRejections => _unexpectedRejections;
         public int UnexpectedAcceptances => _unexpectedAcceptances;
         public int RejectionReasonMismatches => _rejectionReasonMismatches;
@@ -125,6 +127,9 @@ namespace LuanShi.Engine
             if (!string.IsNullOrEmpty(rec.InquiryTool))
                 return !string.IsNullOrWhiteSpace(rec.RawModelText) ? rec.RawModelText : $"inquiry:{rec.InquiryTool}";
 
+            if (IsDeliberationNoteRecord(rec))
+                return !string.IsNullOrWhiteSpace(rec.RawModelText) ? rec.RawModelText : "note (deliberation)";
+
             if (string.IsNullOrWhiteSpace(rec.RawModelText))
             {
                 string finish = !string.IsNullOrWhiteSpace(rec.FinishReason) ? rec.FinishReason.Trim() : "unknown";
@@ -136,6 +141,10 @@ namespace LuanShi.Engine
 
             return rec.RawModelText;
         }
+
+        public bool IsFakeScriptedSession()
+            => (_bundle.ScenarioSetup != null && _bundle.ScenarioSetup.IsFakeScripted)
+               || string.Equals(_bundle.Summary?.Provider, "fake", StringComparison.OrdinalIgnoreCase);
 
         public ReplaySession(ReplayBundle bundle, MapData hostMap = null)
         {
@@ -155,18 +164,21 @@ namespace LuanShi.Engine
 
             _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
             _totalRequests = _bundle.Requests.Count;
-            _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedVoluntaryEndTurns = 0;
+            _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedInvalidReplies = 0; _expectedVoluntaryEndTurns = 0;
             var activeFeatures = _bundle.Bootstrap?.Features ?? _bundle.ScenarioSetup?.Features;
             for (int i = 0; i < _bundle.Requests.Count; i++)
             {
                 var req = _bundle.Requests[i];
                 if (!string.IsNullOrEmpty(req.InquiryTool)) continue;
+                if (IsDeliberationNoteRecord(req)) continue;
                 if (IsEndTurnRecord(req, activeFeatures)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
-                else { if (req.ResultOk) _expectedAcceptedActions++; else _expectedRejectedActions++; }
+                else if (!req.ParseOk) _expectedInvalidReplies++;
+                else if (req.ResultOk) _expectedAcceptedActions++;
+                else _expectedRejectedActions++;
             }
 
             _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
-            _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
+            _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _invalidRepliesReplayed = 0; _unexpectedRejections = 0;
             _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
             _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null; _seasonSummaries = null;
 
@@ -305,12 +317,18 @@ namespace LuanShi.Engine
             }
 
             bool isInquiry = !string.IsNullOrEmpty(req.InquiryTool);
-            ParseResult parsed = isInquiry ? default : LlmActionParser.Parse(req.RawModelText, _allowAttack, _allowResearch, diplomacy);
-            bool isEndTurn = !isInquiry && parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
+            bool isNote = !isInquiry && IsDeliberationNoteRecord(req);
+            ParseResult parsed = (isInquiry || isNote) ? null : LlmActionParser.Parse(req.RawModelText, _allowAttack, _allowResearch, diplomacy);
+            bool replayedParseOk = parsed != null && parsed.Ok && parsed.Action != null;
+            bool isEndTurn = !isInquiry && !isNote && replayedParseOk && parsed.Action.EndTurn;
             bool replayedOk = false;
             string replayedError = null;
+            int prevEventCount = _engine?.Log?.Records?.Count ?? 0;
+            ActionCommand executedCmd = null;
+            int marchFromX = -1, marchFromZ = -1;
+            bool marchWasEnemyAdjacent = false;
 
-            if (isInquiry)
+            if (isInquiry || isNote)
             {
                 replayedOk = true;
             }
@@ -339,7 +357,6 @@ namespace LuanShi.Engine
             }
             else
             {
-                bool replayedParseOk = parsed.Ok && parsed.Action != null;
                 if (!replayedParseOk)
                 {
                     replayedOk = false;
@@ -349,6 +366,17 @@ namespace LuanShi.Engine
                 {
                     ActionCommand cmd = LlmActionParser.ToCommand(parsed.Action);
                     cmd.ControllerType = ControllerType.Llm;
+                    executedCmd = cmd;
+                    if (cmd.Type == ActionType.March || cmd.Type == "army_march")
+                    {
+                        var ma = _engine.State.FindArmy(cmd.TargetId);
+                        if (ma != null)
+                        {
+                            marchFromX = ma.X;
+                            marchFromZ = ma.Z;
+                            marchWasEnemyAdjacent = IsAnyEnemyArmyAdjacent(req.SeatId, ma.X, ma.Z);
+                        }
+                    }
                     ValidationResult res = _visibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_engine, req.SeatId, cmd)
                         ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
                         : _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
@@ -357,11 +385,22 @@ namespace LuanShi.Engine
                 }
 
                 if (req.ParseOk && req.ResultOk && replayedOk) _acceptedActionsReplayed++;
-                else if ((!req.ParseOk || !req.ResultOk) && !replayedOk)
+                else if (!req.ParseOk && !replayedOk)
                 {
-                    bool categoryMatch = req.ParseOk == replayedParseOk;
+                    if (!replayedParseOk) _invalidRepliesReplayed++;
+                    else
+                    {
+                        _rejectionReasonMismatches++; _actionOutcomeMismatches++;
+                        string msg = $"Req {req.TotalRequests} (Season {req.Season}): invalid-reply mismatch (recParse={req.ParseOk}, actParse={replayedParseOk}, recErr='{req.ResultError}', actErr='{replayedError}')";
+                        _actionDiscrepancies.Add(msg);
+                        RecordDivergence(msg);
+                    }
+                }
+                else if (req.ParseOk && !req.ResultOk && !replayedOk)
+                {
+                    bool categoryMatch = replayedParseOk;
                     bool reasonMatch = true;
-                    if (req.ParseOk && replayedParseOk && !string.IsNullOrEmpty(req.ResultError))
+                    if (replayedParseOk && !string.IsNullOrEmpty(req.ResultError))
                         reasonMatch = string.Equals(replayedError, req.ResultError, StringComparison.Ordinal);
 
                     if (categoryMatch && reasonMatch) _rejectedActionsReplayed++;
@@ -389,15 +428,9 @@ namespace LuanShi.Engine
                 }
             }
 
-            string actType = isInquiry ? req.InquiryTool : (isEndTurn ? "end_turn" : (parsed.Ok && parsed.Action != null ? parsed.Action.Type : "invalid"));
-            string actSummary = isInquiry
-                ? $"Inquiry: {req.InquiryTool}"
-                : (isEndTurn
-                    ? "Voluntary end of turn"
-                    : (parsed.Ok && parsed.Action != null
-                        ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
-                        : (!string.IsNullOrEmpty(req.ResultError) ? $"invalid ({req.ResultError})" : "invalid")));
-            string resText = isInquiry ? "inquiry" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected"));
+            string actType = isInquiry ? req.InquiryTool : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedParseOk ? parsed.Action.Type : "invalid")));
+            string actSummary = BuildFeedActionSummary(req, isInquiry, isNote, isEndTurn, parsed, replayedOk, executedCmd, marchFromX, marchFromZ, marchWasEnemyAdjacent, prevEventCount);
+            string resText = isInquiry ? "inquiry" : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : (!replayedParseOk ? "invalid" : "rejected"))));
             string facName = "unknown";
             if (_engine?.State?.Factions != null)
             {
@@ -418,7 +451,7 @@ namespace LuanShi.Engine
                 ActionType = actType,
                 ActionSummary = actSummary,
                 CommandJson = req.CommandJson,
-                ResultOk = isInquiry || (isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk),
+                ResultOk = isInquiry || isNote || (isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk),
                 ResultText = resText,
                 ResultError = replayedError ?? req.ResultError,
                 InquiryTool = req.InquiryTool,
@@ -537,6 +570,91 @@ namespace LuanShi.Engine
         }
 
         private void RecordScoreboard(int season) => _replayedScores.Add(new ReplaySeasonScoreboard { Season = season, Scores = CurrentScores() });
+
+        private static bool IsDeliberationNoteRecord(ReplayRequestRecord req)
+        {
+            if (req == null || !string.IsNullOrEmpty(req.InquiryTool) || !req.ParseOk || req.ResultRecorded)
+                return false;
+            if (string.IsNullOrWhiteSpace(req.RawModelText)) return false;
+            if (!StrictJson.TryParse(req.RawModelText, out JsonNode root, out _)) return false;
+            return root is JsonObject obj && obj.TryGet("note", out _);
+        }
+
+        private bool IsAnyEnemyArmyAdjacent(string seatId, int x, int z)
+        {
+            if (_engine?.State?.Map == null || _engine.State.Armies == null) return false;
+            int idx = _engine.State.Map.Index(x, z);
+            if (idx < 0 || idx >= _engine.State.Map.Neighbors.Length) return false;
+            int[] nbrs = _engine.State.Map.Neighbors[idx];
+            if (nbrs == null) return false;
+            foreach (var army in _engine.State.Armies)
+            {
+                if (army.Troops <= 0 || string.Equals(army.OwnerSeatId, seatId, StringComparison.Ordinal)) continue;
+                int aIdx = _engine.State.Map.Index(army.X, army.Z);
+                for (int i = 0; i < nbrs.Length; i++)
+                    if (nbrs[i] == aIdx) return true;
+            }
+            return false;
+        }
+
+        private string BuildFeedActionSummary(
+            ReplayRequestRecord req, bool isInquiry, bool isNote, bool isEndTurn,
+            ParseResult parsed, bool replayedOk, ActionCommand cmd,
+            int marchFromX, int marchFromZ, bool marchWasEnemyAdjacent, int prevEventCount)
+        {
+            if (isInquiry) return $"Inquiry: {req.InquiryTool}";
+            if (isNote) return "Deliberation note";
+            if (isEndTurn) return "Voluntary end of turn";
+            if (!parsed.Ok || parsed.Action == null)
+                return !string.IsNullOrEmpty(req.ResultError) ? $"invalid ({req.ResultError})" : "invalid";
+
+            var sb = new StringBuilder();
+            if (replayedOk && cmd != null && (cmd.Type == ActionType.March || cmd.Type == "army_march") && marchFromX >= 0)
+            {
+                sb.Append($"march {cmd.TargetId} ({marchFromX},{marchFromZ})->({cmd.ParamA},{cmd.ParamB})");
+                if (marchWasEnemyAdjacent && !IsAnyEnemyArmyAdjacent(req.SeatId, cmd.ParamA, cmd.ParamB))
+                    sb.Append(" [retreat]");
+            }
+            else
+            {
+                sb.Append($"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim());
+            }
+
+            if (_engine?.Log?.Records != null)
+            {
+                for (int i = prevEventCount; i < _engine.Log.Records.Count; i++)
+                {
+                    var ev = _engine.Log.Records[i];
+                    if (ev.EventType == "battle_field" && ev.Payload != null)
+                    {
+                        ev.Payload.TryGetValue("attacker_army_id", out string att);
+                        ev.Payload.TryGetValue("defender_army_id", out string def);
+                        ev.Payload.TryGetValue("outcome", out string outcome);
+                        sb.Append($" | battle {att} vs {def}: {outcome}");
+                    }
+                    else if (ev.EventType == "battle_siege" && ev.Payload != null)
+                    {
+                        ev.Payload.TryGetValue("army_id", out string att);
+                        ev.Payload.TryGetValue("city_id", out string cid);
+                        ev.Payload.TryGetValue("outcome", out string outcome);
+                        sb.Append($" | siege {att} vs {cid}: {outcome}");
+                    }
+                    else if (ev.EventType == "army_routed" && ev.Payload != null)
+                    {
+                        ev.Payload.TryGetValue("army_id", out string aid);
+                        ev.Payload.TryGetValue("from", out string from);
+                        ev.Payload.TryGetValue("to", out string to);
+                        sb.Append($" | routed {aid} {from}->{to}");
+                    }
+                    else if (ev.EventType == "city_captured" && ev.Payload != null)
+                    {
+                        ev.Payload.TryGetValue("city_id", out string cid);
+                        sb.Append($" | captured {cid} -> {ev.ActorSeatId}");
+                    }
+                }
+            }
+            return sb.ToString();
+        }
 
         private static bool IsEndTurnRecord(ReplayRequestRecord req, ReplayBootstrapFeatures features)
         {

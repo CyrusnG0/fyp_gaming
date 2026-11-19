@@ -15,6 +15,8 @@ namespace LuanShi.Engine
             string seat = _currentSeatId ?? "seat-0";
             string totalS = _totalSeasons > 0 ? _totalSeasons.ToString() : "?";
             sb.AppendLine($"OFFLINE REPLAY  |  Season {_currentSeason}/{totalS}  |  {state} (viewing {seat})");
+            if (IsFakeScriptedSession())
+                sb.AppendLine("FAKE / SCRIPTED REHEARSAL (not a real-model decision)");
             sb.AppendLine($"Zero API calls  |  Req {_currentRequestIndex}/{_totalRequests}  |  Obs matched {_observationHashesMatched}/{_currentRequestIndex}");
             if (_hasDivergence && !string.IsNullOrEmpty(_divergenceSummary))
                 sb.AppendLine("DIVERGENCE: " + _divergenceSummary);
@@ -42,13 +44,16 @@ namespace LuanShi.Engine
             if (_isCompleted)
             {
                 bool exact = _finalReport != null && _finalReport.RawExactMatch;
-                sb.AppendLine("VERIFICATION: " + (exact ? "PASS (RAW EXACT)" : "COMPLETED WITH DISCREPANCIES"));
+                string verLabel = !exact
+                    ? "COMPLETED WITH DISCREPANCIES"
+                    : (_finalReport.MapSource == "host_map_unverified" ? "PASS (HOST MAP UNVERIFIED)" : "PASS (RAW EXACT)");
+                sb.AppendLine("VERIFICATION: " + verLabel);
                 int dirObs = _finalReport != null ? _finalReport.DirectObservationMatched : 0;
                 int dirCount = _finalReport != null ? _finalReport.DirectObservationCount : 0;
                 int cmdInf = _finalReport != null ? _finalReport.CommandInferredMatched : 0;
                 int cmdCount = _finalReport != null ? _finalReport.CommandInferredCount : 0;
                 int unverified = _finalReport != null ? _finalReport.UnverifiedSceneSetupCount : 0;
-                sb.AppendLine($"Obs: {_observationHashesMatched}/{_totalRequests}  |  Accepted: {_acceptedActionsReplayed}/{_expectedAcceptedActions} (Rej: {_rejectedActionsReplayed}/{_expectedRejectedActions}, Mismatch: {_actionOutcomeMismatches})  |  Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)");
+                sb.AppendLine($"Obs: {_observationHashesMatched}/{_totalRequests}  |  Accepted: {_acceptedActionsReplayed}/{_expectedAcceptedActions} (Rej: {_rejectedActionsReplayed}/{_expectedRejectedActions}, Invalid: {_invalidRepliesReplayed}/{_expectedInvalidReplies}, Mismatch: {_actionOutcomeMismatches})  |  Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)");
             }
             return sb.ToString().TrimEnd();
         }
@@ -225,7 +230,11 @@ namespace LuanShi.Engine
             bool rawExact = _observationHashMismatches == 0 && finalSeasonExact && allSeasonsExact
                             && _actionOutcomeMismatches == 0 && directMatched == directCount && cmdMatched == cmdCount;
 
-            string[] fpNotes = _bundle.Bootstrap == null
+            bool isLegacyFiveSeasonDemo = _bundle.Bootstrap == null
+                && _bundle.ScenarioSetup == null
+                && (_bundle.Summary == null || string.IsNullOrEmpty(_bundle.Summary.RunId)
+                    || string.Equals(_bundle.Summary.RunId, ReplayLoader.VerifiedDemoRunId, StringComparison.Ordinal));
+            string[] fpNotes = isLegacyFiveSeasonDemo
                 ? new[]
                 {
                     "In Season 1 EndSeason, city tax is calculated as (int)(Population * 0.01f).",
@@ -249,7 +258,9 @@ namespace LuanShi.Engine
             else if (_bundle.ScenarioSetup != null)
             {
                 deps.Add($"Setup source: scenario.json fallback ({_bundle.ScenarioSetup.ScenarioId}, schema {_bundle.ScenarioSetup.Schema}); original *-bootstrap.json was absent.");
-                deps.Add($"Map source: {_bundle.MapSource ?? "host_map_unverified"} (scenario.json does not embed initial_map; terrain/neighbors came from host/scene MapData).");
+                deps.Add($"Map source: {_bundle.MapSource ?? "host_map_unverified"} (scenario.json does not embed initial_map; terrain/neighbors came from host/scene MapData and have not been independently verified).");
+                if (IsFakeScriptedSession())
+                    deps.Add("Provider: FAKE / SCRIPTED REHEARSAL (scripted fixture, not a real-model decision).");
                 deps.Add($"Command schemas enabled: attack={_allowAttack}, research={_allowResearch}, diplomacy={_allowDiplomacy}, visible_march_routes={_visibleMarchRoutes}.");
             }
             else
@@ -278,6 +289,8 @@ namespace LuanShi.Engine
                 AcceptedActionsReplayed = _acceptedActionsReplayed,
                 ExpectedRejectedActions = _expectedRejectedActions,
                 RejectedActionsReplayed = _rejectedActionsReplayed,
+                ExpectedInvalidReplies = _expectedInvalidReplies,
+                InvalidRepliesReplayed = _invalidRepliesReplayed,
                 UnexpectedRejections = _unexpectedRejections,
                 UnexpectedAcceptances = _unexpectedAcceptances,
                 RejectionReasonMismatches = _rejectionReasonMismatches,
@@ -307,6 +320,7 @@ namespace LuanShi.Engine
                 ProposedFloatingPointNotes = fpNotes,
                 DisclosedDependencies = deps.ToArray(),
                 IsIncompleteRun = _isIncompleteRun,
+                IsFakeScripted = IsFakeScriptedSession(),
                 StopReason = _stopReason,
                 FinalRecordedSeason = _currentSeason,
                 FinalRecordedSeatId = _currentSeatId,

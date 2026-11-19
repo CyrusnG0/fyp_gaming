@@ -615,15 +615,100 @@ internal static partial class Harness
                 Check(captureEvt != null && captureEvt.Payload["city_id"] == "cs-city-ford"
                     && csSession.Engine.State.FindCity("cs-city-ford")?.OwnerSeatId == "seat-1",
                     "[CS-REPLAY] Ford Granary captured by seat-1");
-                Check(csSession.RejectedActionsReplayed == 1 && csSession.ActionOutcomeMismatches == 0
-                    && csSession.EventFeed.Count == 31 && csSession.EventFeed[6].ActionType == "invalid" && !csSession.EventFeed[6].ResultOk,
-                    "[CS-REPLAY] Req 7 invalid reply replayed as rejected with 0 action outcome mismatches");
+                Check(csSession.RejectedActionsReplayed == 0 && csSession.ExpectedRejectedActions == 0
+                    && csSession.InvalidRepliesReplayed == 1 && csSession.ExpectedInvalidReplies == 1
+                    && csSession.ActionOutcomeMismatches == 0
+                    && csSession.EventFeed.Count == 31 && csSession.EventFeed[6].ActionType == "invalid"
+                    && csSession.EventFeed[6].ResultText == "invalid" && !csSession.EventFeed[6].ResultOk,
+                    "[CS-REPLAY] Req 7 invalid reply tracked as Invalid (1/1) distinct from engine-rejected (0/0)");
                 Check(csRpt != null && csRpt.AllSeasonsScoreboardExactMatch && csRpt.FinalScoreboardExactMatch,
                     "[CS-REPLAY] all S1-S3 scoreboards match recorded summary exactly");
+                Check(csRpt != null && csRpt.ProposedFloatingPointNotes != null && csRpt.ProposedFloatingPointNotes.Count == 0,
+                    "[CS-REPLAY] controlled three-season fallback has no legacy 5-season floating-point notes");
+                string csSnap = csSession.GetDisplayedSummarySnapshot();
+                Check(csSnap.Contains("PASS (HOST MAP UNVERIFIED)", StringComparison.Ordinal)
+                    && csSnap.Contains("Rej: 0/0, Invalid: 1/1", StringComparison.Ordinal)
+                    && !csSnap.Contains("FAKE / SCRIPTED", StringComparison.Ordinal),
+                    $"[CS-REPLAY] snapshot shows HOST MAP UNVERIFIED and Rej: 0/0, Invalid: 1/1 (actual:\n{csSnap})");
             }
             else
             {
                 Console.WriteLine("  [CS-REPLAY] skipped (cs-route-seasons-v1 run files not present)");
+            }
+
+            // 7. Controlled-scenario fallback for Luna's fight-or-retreat fixture (cs-tactical-choice-v1, fake rehearsal)
+            string tcRunId = "run-20261119085338997-f7604704";
+            string tcRel = Path.Combine(".kimi-code", "worktrees", "demo-tactical-choice", "runs", "controlled-scenarios", "controlled-20261119T085338Z-d6a7e671", "cs-tactical-choice-v1");
+            string tcDir = null;
+            foreach (string probe in new[] {
+                Path.Combine(cur, tcRel),
+                Path.Combine(cur, "..", tcRel),
+                Path.Combine(cur, "..", "..", tcRel),
+                Path.Combine(cur, "..", "..", "..", tcRel),
+                Path.Combine(cur, "..", "..", "..", "..", tcRel),
+            })
+            {
+                if (Directory.Exists(probe)) { tcDir = Path.GetFullPath(probe); break; }
+            }
+            if (tcDir != null && ReplayLoader.TryResolveRunFiles(tcRunId, tcDir, out string tcs, out string tcj, out string tce, out string tcb, out _))
+            {
+                Check(tcb == null, "[TC-REPLAY] tactical-choice fixture has no *-bootstrap.json (resolved via scenario.json fallback)");
+                ReplayBundle tcBundle = ReplayLoader.Load(tcs, tcj, tce, tcRunId, tcb);
+                Check(tcBundle.SetupSource == "scenario_fallback" && tcBundle.MapSource == "host_map_unverified"
+                    && tcBundle.ScenarioSetup != null && tcBundle.ScenarioSetup.IsFakeScripted,
+                    $"[TC-REPLAY] provenance & fake_scripted flag recorded (setup={tcBundle.SetupSource}, map={tcBundle.MapSource}, fake={tcBundle.ScenarioSetup?.IsFakeScripted})");
+
+                var tcSession = new ReplaySession(tcBundle, DemoMap()) { PauseOnDivergence = true };
+                tcSession.RunToCompletion();
+                var tcRpt = tcSession.FinalReport;
+                Console.WriteLine($"  [TC-REPLAY] completed={tcSession.IsCompleted} hasDiv={tcSession.HasDivergence} obs={tcSession.ObservationHashesMatched}/{tcBundle.Requests.Count} acc={tcSession.AcceptedActionsReplayed}/{tcSession.ExpectedAcceptedActions} rej={tcSession.RejectedActionsReplayed}/{tcSession.ExpectedRejectedActions} inv={tcSession.InvalidRepliesReplayed}/{tcSession.ExpectedInvalidReplies} endTurns={tcSession.VoluntaryEndTurnsReplayed}/{tcSession.ExpectedVoluntaryEndTurns} allSeasonsExact={tcRpt?.AllSeasonsScoreboardExactMatch}");
+
+                Check(tcSession.IsCompleted && !tcSession.HasDivergence && tcSession.ObservationHashesMatched == 7,
+                    $"[TC-REPLAY] 7/7 observation hashes matched without divergence (matched={tcSession.ObservationHashesMatched}/7)");
+                Check(tcSession.AcceptedActionsReplayed == 1 && tcSession.ExpectedAcceptedActions == 1
+                    && tcSession.RejectedActionsReplayed == 0 && tcSession.ExpectedRejectedActions == 0
+                    && tcSession.InvalidRepliesReplayed == 0 && tcSession.ExpectedInvalidReplies == 0
+                    && tcSession.VoluntaryEndTurnsReplayed == 4 && tcSession.ActionOutcomeMismatches == 0,
+                    "[TC-REPLAY] action/note/inquiry/end_turn accounting exact with 0 mismatches");
+                Check(tcRpt != null && tcRpt.AllSeasonsScoreboardExactMatch && tcRpt.FinalScoreboardExactMatch,
+                    "[TC-REPLAY] S1-S2 scoreboards match recorded summary exactly");
+                Check(tcRpt != null && tcRpt.ProposedFloatingPointNotes != null && tcRpt.ProposedFloatingPointNotes.Count == 0,
+                    "[TC-REPLAY] no legacy floating-point notes on controlled fixture");
+
+                var ownA = tcSession.Engine.State.FindArmy("cs-army-own");
+                var enemyA = tcSession.Engine.State.FindArmy("cs-army-enemy");
+                var hiddenA = tcSession.Engine.State.FindArmy("cs-army-hidden");
+                var homeC = tcSession.Engine.State.FindCity("cs-city-home");
+                var enemyC = tcSession.Engine.State.FindCity("cs-city-enemy");
+                Console.WriteLine($"  [TC-REPLAY final armies] own=({ownA?.X},{ownA?.Z})/{ownA?.Troops} enemy=({enemyA?.X},{enemyA?.Z})/{enemyA?.Troops} hidden=({hiddenA?.X},{hiddenA?.Z})/{hiddenA?.Troops}");
+                Check(ownA != null && ownA.X == 7 && ownA.Z == 8 && ownA.Troops == 500
+                    && enemyA != null && enemyA.X == 9 && enemyA.Z == 8 && enemyA.Troops == 2700
+                    && hiddenA != null && hiddenA.X == 22 && hiddenA.Z == 9 && hiddenA.Troops == 450,
+                    $"[TC-REPLAY] final army positions and troop counts match (own=500, Shu armies deserted 10% on S2 food=0 to enemy=2700, hidden=450; actual own={ownA?.Troops}, enemy={enemyA?.Troops}, hidden={hiddenA?.Troops})");
+                Check(homeC != null && homeC.OwnerSeatId == "seat-0" && enemyC != null && enemyC.OwnerSeatId == "seat-1",
+                    "[TC-REPLAY] city owners unchanged (no capture in this fixture; capture verified in cs-route-seasons-v1)");
+
+                bool sawRetreat = false, sawNote = false, sawInq = false;
+                foreach (var fe in tcSession.EventFeed)
+                {
+                    if (fe.ActionSummary != null && fe.ActionSummary.Contains("[retreat]", StringComparison.Ordinal)) sawRetreat = true;
+                    if (fe.ActionType == "note" && fe.ResultText == "note") sawNote = true;
+                    if (fe.ActionType == "manual_lookup" && fe.ResultText == "inquiry") sawInq = true;
+                }
+                Check(sawRetreat && sawNote && sawInq,
+                    $"[TC-REPLAY] feed records retreat ({sawRetreat}), deliberation note ({sawNote}), and inquiry ({sawInq})");
+
+                string tcSnap = tcSession.GetDisplayedSummarySnapshot();
+                string tcFormatted = tcRpt.FormatReport();
+                Check(tcSnap.Contains("FAKE / SCRIPTED REHEARSAL", StringComparison.Ordinal)
+                    && tcSnap.Contains("PASS (HOST MAP UNVERIFIED)", StringComparison.Ordinal)
+                    && tcFormatted.Contains("FAKE / SCRIPTED REHEARSAL", StringComparison.Ordinal)
+                    && tcFormatted.Contains("PASS (HOST MAP UNVERIFIED)", StringComparison.Ordinal),
+                    "[TC-REPLAY] summary/report clearly label fake scripted rehearsal and host map unverified");
+            }
+            else
+            {
+                Console.WriteLine("  [TC-REPLAY] skipped (cs-tactical-choice-v1 run files not present)");
             }
         }
         finally

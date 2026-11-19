@@ -64,7 +64,7 @@ namespace LuanShi
                 _replaySession = candidateSession;
                 _replayLastViewedSeat = SeatRotation.FirstSeat(engine.State) ?? "seat-0";
                 RefreshReplayView();
-                SyncSpectatorArmyVisuals();
+                SyncReplayVisuals();
                 Debug.Log("[Replay] initialized with " + _replayBundle.Requests.Count + " requests from " + runKey);
             }
             catch (Exception ex)
@@ -231,7 +231,7 @@ namespace LuanShi
             {
                 _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
                 RefreshReplayView();
-                SyncSpectatorArmyVisuals();
+                SyncReplayVisuals();
             }
 
             if (_replaySession.IsCompleted && !_replayFinalReportLogged)
@@ -269,6 +269,14 @@ namespace LuanShi
             else if (Input.GetKeyDown(KeyCode.Alpha2)) ReplaySetSpeed(1.0f);
             else if (Input.GetKeyDown(KeyCode.Alpha3)) ReplaySetSpeed(2.0f);
             else if (Input.GetKeyDown(KeyCode.Alpha4)) ReplaySetSpeed(4.0f);
+        }
+
+        void SyncReplayVisuals()
+        {
+            if (engine == null) return;
+            SyncSpectatorArmyVisuals();
+            SyncBattleVisuals();
+            foreach (var c in engine.State.Cities) TintCity(c.Id);
         }
 
         void RefreshReplayView()
@@ -340,7 +348,7 @@ namespace LuanShi
             _replaySession.StepSeason();
             _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
             RefreshReplayView();
-            SyncSpectatorArmyVisuals();
+            SyncReplayVisuals();
         }
 
         void ReplayStepRequest()
@@ -349,7 +357,7 @@ namespace LuanShi
             _replaySession.StepRequest();
             _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
             RefreshReplayView();
-            SyncSpectatorArmyVisuals();
+            SyncReplayVisuals();
         }
 
         void ReplayReset()
@@ -358,7 +366,7 @@ namespace LuanShi
             jsonFeed.Clear();
             _replaySession.Reset();
             engine = _replaySession.Engine;
-            if (_replayBundle != null && _replayBundle.Bootstrap != null)
+            if (_replayBundle != null && (_replayBundle.Bootstrap != null || _replayBundle.ScenarioSetup != null))
             {
                 bool visualsModified = false;
                 RebuildReplayVisuals(ref visualsModified);
@@ -367,7 +375,7 @@ namespace LuanShi
             _replayFinalReportLogged = false;
             _replayLastViewedSeat = SeatRotation.FirstSeat(engine.State) ?? "seat-0";
             RefreshReplayView();
-            SyncSpectatorArmyVisuals();
+            SyncReplayVisuals();
         }
 
         void HandleReplayEvent(ReplayFeedEvent evt)

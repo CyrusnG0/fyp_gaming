@@ -34,8 +34,15 @@ namespace LuanShi
             float y = area.y + 10f;
 
             // Header & Metadata
-            GUI.Label(new Rect(x, y, width, 20f), "OFFLINE REPLAY — ZERO API CALLS", uiPanelTitle);
+            bool isFake = (_replayBundle != null && _replayBundle.ScenarioSetup != null && _replayBundle.ScenarioSetup.IsFakeScripted)
+                || (_replayBundle != null && _replayBundle.Summary != null && string.Equals(_replayBundle.Summary.Provider, "fake", StringComparison.OrdinalIgnoreCase));
+            GUI.Label(new Rect(x, y, width, 20f), isFake ? "OFFLINE REPLAY — FAKE / SCRIPTED REHEARSAL" : "OFFLINE REPLAY — ZERO API CALLS", isFake ? uiReason : uiPanelTitle);
             y += 22f;
+            if (isFake)
+            {
+                GUI.Label(new Rect(x, y, width, 14f), "Scripted fixture only (not a real-model decision)", uiReason);
+                y += 15f;
+            }
 
             ReplaySummaryData sum = _replayBundle != null ? _replayBundle.Summary : null;
             string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : "unknown";
@@ -215,11 +222,17 @@ namespace LuanShi
             int expActs = _replaySession.ExpectedAcceptedActions;
             int rejs = _replaySession.RejectedActionsReplayed;
             int expRejs = _replaySession.ExpectedRejectedActions;
+            int invs = _replaySession.InvalidRepliesReplayed;
+            int expInvs = _replaySession.ExpectedInvalidReplies;
             int mismatches = _replaySession.ActionOutcomeMismatches;
             if (_replaySession.IsCompleted)
             {
                 bool rawPass = _replaySession.FinalReport != null && _replaySession.FinalReport.RawExactMatch;
-                string status = rawPass ? "VERIFICATION: PASS (RAW EXACT)" : "VERIFICATION: COMPLETED WITH DISCREPANCIES";
+                string status = !rawPass
+                    ? "VERIFICATION: COMPLETED WITH DISCREPANCIES"
+                    : (_replaySession.FinalReport.MapSource == "host_map_unverified"
+                        ? "VERIFICATION: PASS (HOST MAP UNVERIFIED)"
+                        : "VERIFICATION: PASS (RAW EXACT)");
                 GUI.Label(new Rect(x, y, width, 16f), status, rawPass ? uiPanelTitle : uiReason);
                 y += 16f;
                 int dirObs = _replaySession.FinalReport != null ? _replaySession.FinalReport.DirectObservationMatched : 0;
@@ -227,13 +240,13 @@ namespace LuanShi
                 int cmdInf = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredMatched : 0;
                 int cmdCount = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredCount : 0;
                 int unverified = _replaySession.FinalReport != null ? _replaySession.FinalReport.UnverifiedSceneSetupCount : 0;
-                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{totalReq}  |  Accepted: {acts}/{expActs} (Rej: {rejs}/{expRejs}, Mismatch: {mismatches})", uiSmall);
+                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{totalReq} | Acc: {acts}/{expActs} | Rej: {rejs}/{expRejs} | Inv: {invs}/{expInvs} | Mis: {mismatches}", uiSmall);
                 y += 14f;
                 GUI.Label(new Rect(x, y, width, 14f), $"Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)", uiSmall);
             }
             else
             {
-                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{reqIdx}  |  Accepted: {acts}/{reqIdx} (Rej: {rejs}, Mismatch: {mismatches})", uiSmall);
+                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{reqIdx} | Acc: {acts}/{expActs} | Rej: {rejs} | Inv: {invs} | Mis: {mismatches}", uiSmall);
             }
         }
 
