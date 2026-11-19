@@ -326,7 +326,6 @@ namespace LuanShi.Engine
             int prevEventCount = _engine?.Log?.Records?.Count ?? 0;
             ActionCommand executedCmd = null;
             int marchFromX = -1, marchFromZ = -1;
-            bool marchWasEnemyAdjacent = false;
 
             if (isInquiry || isNote)
             {
@@ -374,7 +373,6 @@ namespace LuanShi.Engine
                         {
                             marchFromX = ma.X;
                             marchFromZ = ma.Z;
-                            marchWasEnemyAdjacent = IsAnyEnemyArmyAdjacent(req.SeatId, ma.X, ma.Z);
                         }
                     }
                     ValidationResult res = _visibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_engine, req.SeatId, cmd)
@@ -429,7 +427,7 @@ namespace LuanShi.Engine
             }
 
             string actType = isInquiry ? req.InquiryTool : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedParseOk ? parsed.Action.Type : "invalid")));
-            string actSummary = BuildFeedActionSummary(req, isInquiry, isNote, isEndTurn, parsed, replayedOk, executedCmd, marchFromX, marchFromZ, marchWasEnemyAdjacent, prevEventCount);
+            string actSummary = BuildFeedActionSummary(req, isInquiry, isNote, isEndTurn, parsed, replayedOk, executedCmd, marchFromX, marchFromZ, prevEventCount);
             string resText = isInquiry ? "inquiry" : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : (!replayedParseOk ? "invalid" : "rejected"))));
             string facName = "unknown";
             if (_engine?.State?.Factions != null)
@@ -580,45 +578,22 @@ namespace LuanShi.Engine
             return root is JsonObject obj && obj.TryGet("note", out _);
         }
 
-        private bool IsAnyEnemyArmyAdjacent(string seatId, int x, int z)
-        {
-            if (_engine?.State?.Map == null || _engine.State.Armies == null) return false;
-            int idx = _engine.State.Map.Index(x, z);
-            if (idx < 0 || idx >= _engine.State.Map.Neighbors.Length) return false;
-            int[] nbrs = _engine.State.Map.Neighbors[idx];
-            if (nbrs == null) return false;
-            foreach (var army in _engine.State.Armies)
-            {
-                if (army.Troops <= 0 || string.Equals(army.OwnerSeatId, seatId, StringComparison.Ordinal)) continue;
-                int aIdx = _engine.State.Map.Index(army.X, army.Z);
-                for (int i = 0; i < nbrs.Length; i++)
-                    if (nbrs[i] == aIdx) return true;
-            }
-            return false;
-        }
-
         private string BuildFeedActionSummary(
             ReplayRequestRecord req, bool isInquiry, bool isNote, bool isEndTurn,
             ParseResult parsed, bool replayedOk, ActionCommand cmd,
-            int marchFromX, int marchFromZ, bool marchWasEnemyAdjacent, int prevEventCount)
+            int marchFromX, int marchFromZ, int prevEventCount)
         {
             if (isInquiry) return $"Inquiry: {req.InquiryTool}";
             if (isNote) return "Deliberation note";
             if (isEndTurn) return "Voluntary end of turn";
-            if (!parsed.Ok || parsed.Action == null)
+            if (parsed == null || !parsed.Ok || parsed.Action == null)
                 return !string.IsNullOrEmpty(req.ResultError) ? $"invalid ({req.ResultError})" : "invalid";
 
             var sb = new StringBuilder();
             if (replayedOk && cmd != null && (cmd.Type == ActionType.March || cmd.Type == "army_march") && marchFromX >= 0)
-            {
                 sb.Append($"march {cmd.TargetId} ({marchFromX},{marchFromZ})->({cmd.ParamA},{cmd.ParamB})");
-                if (marchWasEnemyAdjacent && !IsAnyEnemyArmyAdjacent(req.SeatId, cmd.ParamA, cmd.ParamB))
-                    sb.Append(" [retreat]");
-            }
             else
-            {
                 sb.Append($"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim());
-            }
 
             if (_engine?.Log?.Records != null)
             {

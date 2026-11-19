@@ -64,7 +64,6 @@ namespace LuanShi
                 _replaySession = candidateSession;
                 _replayLastViewedSeat = SeatRotation.FirstSeat(engine.State) ?? "seat-0";
                 RefreshReplayView();
-                SyncReplayVisuals();
                 Debug.Log("[Replay] initialized with " + _replayBundle.Requests.Count + " requests from " + runKey);
             }
             catch (Exception ex)
@@ -231,7 +230,6 @@ namespace LuanShi
             {
                 _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
                 RefreshReplayView();
-                SyncReplayVisuals();
             }
 
             if (_replaySession.IsCompleted && !_replayFinalReportLogged)
@@ -289,6 +287,7 @@ namespace LuanShi
             _replayLastViewedSeat = seat;
             currentSeat = seat;
             RefreshObservation();
+            SyncReplayVisuals();
             ApplyFog();
         }
 
@@ -348,7 +347,6 @@ namespace LuanShi
             _replaySession.StepSeason();
             _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
             RefreshReplayView();
-            SyncReplayVisuals();
         }
 
         void ReplayStepRequest()
@@ -357,7 +355,6 @@ namespace LuanShi
             _replaySession.StepRequest();
             _replaySyncedRequestIndex = _replaySession.CurrentRequestIndex;
             RefreshReplayView();
-            SyncReplayVisuals();
         }
 
         void ReplayReset()
@@ -375,7 +372,6 @@ namespace LuanShi
             _replayFinalReportLogged = false;
             _replayLastViewedSeat = SeatRotation.FirstSeat(engine.State) ?? "seat-0";
             RefreshReplayView();
-            SyncReplayVisuals();
         }
 
         void HandleReplayEvent(ReplayFeedEvent evt)

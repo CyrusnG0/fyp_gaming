@@ -625,6 +625,13 @@ internal static partial class Harness
                     "[CS-REPLAY] all S1-S3 scoreboards match recorded summary exactly");
                 Check(csRpt != null && csRpt.ProposedFloatingPointNotes != null && csRpt.ProposedFloatingPointNotes.Count == 0,
                     "[CS-REPLAY] controlled three-season fallback has no legacy 5-season floating-point notes");
+                bool sawRoutInFeed = false;
+                foreach (var fe in csSession.EventFeed)
+                {
+                    if (fe.ActionSummary != null && fe.ActionSummary.Contains("routed cs-army-own", StringComparison.Ordinal))
+                        sawRoutInFeed = true;
+                }
+                Check(sawRoutInFeed, "[CS-REPLAY] feed records actual army_routed event for cs-army-own");
                 string csSnap = csSession.GetDisplayedSummarySnapshot();
                 Check(csSnap.Contains("PASS (HOST MAP UNVERIFIED)", StringComparison.Ordinal)
                     && csSnap.Contains("Rej: 0/0, Invalid: 1/1", StringComparison.Ordinal)
@@ -688,15 +695,22 @@ internal static partial class Harness
                 Check(homeC != null && homeC.OwnerSeatId == "seat-0" && enemyC != null && enemyC.OwnerSeatId == "seat-1",
                     "[TC-REPLAY] city owners unchanged (no capture in this fixture; capture verified in cs-route-seasons-v1)");
 
-                bool sawRetreat = false, sawNote = false, sawInq = false;
+                bool sawMarchCoords = false, noInferredRetreat = true, sawNote = false, sawInq = false;
                 foreach (var fe in tcSession.EventFeed)
                 {
-                    if (fe.ActionSummary != null && fe.ActionSummary.Contains("[retreat]", StringComparison.Ordinal)) sawRetreat = true;
+                    if (fe.ActionSummary != null && fe.ActionSummary.Contains("march cs-army-own (8,8)->(7,8)", StringComparison.Ordinal)) sawMarchCoords = true;
+                    if (fe.ActionSummary != null && fe.ActionSummary.Contains("[retreat]", StringComparison.Ordinal)) noInferredRetreat = false;
                     if (fe.ActionType == "note" && fe.ResultText == "note") sawNote = true;
                     if (fe.ActionType == "manual_lookup" && fe.ResultText == "inquiry") sawInq = true;
                 }
-                Check(sawRetreat && sawNote && sawInq,
-                    $"[TC-REPLAY] feed records retreat ({sawRetreat}), deliberation note ({sawNote}), and inquiry ({sawInq})");
+                Check(sawMarchCoords && noInferredRetreat && sawNote && sawInq,
+                    $"[TC-REPLAY] feed records march coords without inferred [retreat] (coords={sawMarchCoords}, noRetreat={noInferredRetreat}), note ({sawNote}), inquiry ({sawInq})");
+
+                var seat0Obs = tcSession.Engine.Observe("seat-0");
+                var seat1Obs = tcSession.Engine.Observe("seat-1");
+                Check(seat0Obs.FindArmy("cs-army-hidden") == null && seat0Obs.FindCity("cs-city-enemy") == null
+                    && seat1Obs.FindArmy("cs-army-hidden") != null && seat1Obs.FindCity("cs-city-enemy") != null,
+                    "[TC-REPLAY] fog-of-war hides cs-army-hidden and cs-city-enemy from seat-0 while seat-1 sees them");
 
                 string tcSnap = tcSession.GetDisplayedSummarySnapshot();
                 string tcFormatted = tcRpt.FormatReport();
