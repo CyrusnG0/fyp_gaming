@@ -198,7 +198,7 @@ namespace LuanShi
             bool known = city.OwnerSeatId == currentSeat || (obs != null && obs.FindCity(cityId) != null);
             var color = OwnerColor(known ? city.OwnerSeatId : null);
 
-            var go = cityObjs[cityId];
+            if (!cityObjs.TryGetValue(cityId, out var go) || go == null) return;
             var sprite = go.GetComponentInChildren<SpriteRenderer>();
             if (sprite != null) { sprite.color = color; return; }
 

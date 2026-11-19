@@ -429,12 +429,10 @@ namespace LuanShi.Engine
             string actType = isInquiry ? req.InquiryTool : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedParseOk ? parsed.Action.Type : "invalid")));
             string actSummary = BuildFeedActionSummary(req, isInquiry, isNote, isEndTurn, parsed, replayedOk, executedCmd, marchFromX, marchFromZ, prevEventCount);
             string resText = isInquiry ? "inquiry" : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : (!replayedParseOk ? "invalid" : "rejected"))));
-            string facName = "unknown";
-            if (_engine?.State?.Factions != null)
-            {
-                foreach (var f in _engine.State.Factions)
-                    if (string.Equals(f.SeatId, req.SeatId, StringComparison.Ordinal)) { facName = f.Name; break; }
-            }
+            string facName = FactionNameOrSeat(req.SeatId);
+            BuildFeedHeadlineAndOutcomes(
+                req, facName, isInquiry, isNote, isEndTurn, parsed, replayedParseOk, replayedOk, replayedError,
+                executedCmd, marchFromX, marchFromZ, prevEventCount, out string headline, out string outcomeDetails);
 
             var feedEvt = new ReplayFeedEvent
             {
@@ -442,12 +440,15 @@ namespace LuanShi.Engine
                 RunId = req.RunId,
                 SeatId = req.SeatId,
                 Faction = facName,
+                PersonaId = GetPersonaIdForRequest(req),
                 Season = req.Season,
                 TurnToken = req.TurnToken,
                 RequestIndex = req.RequestIndex,
                 ExchangeId = req.ExchangeId,
                 ActionType = actType,
                 ActionSummary = actSummary,
+                Headline = headline,
+                OutcomeDetails = outcomeDetails,
                 CommandJson = req.CommandJson,
                 ResultOk = isInquiry || isNote || (isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk),
                 ResultText = resText,
@@ -629,6 +630,117 @@ namespace LuanShi.Engine
                 }
             }
             return sb.ToString();
+        }
+
+        private string FactionNameOrSeat(string seatId)
+        {
+            if (string.IsNullOrEmpty(seatId)) return "unknown";
+            if (_engine?.State?.Factions != null)
+            {
+                foreach (var f in _engine.State.Factions)
+                    if (string.Equals(f.SeatId, seatId, StringComparison.Ordinal)) return f.Name;
+            }
+            return seatId;
+        }
+
+        private void BuildFeedHeadlineAndOutcomes(
+            ReplayRequestRecord req, string facName, bool isInquiry, bool isNote, bool isEndTurn,
+            ParseResult parsed, bool replayedParseOk, bool replayedOk, string replayedError,
+            ActionCommand cmd, int marchFromX, int marchFromZ, int prevEventCount,
+            out string headline, out string outcomeDetails)
+        {
+            var outcomes = new List<string>();
+            if (_engine?.Log?.Records != null)
+            {
+                for (int i = prevEventCount; i < _engine.Log.Records.Count; i++)
+                {
+                    var ev = _engine.Log.Records[i];
+                    if (ev.Payload == null) continue;
+                    if (ev.EventType == "battle_field")
+                    {
+                        ev.Payload.TryGetValue("attacker_army_id", out string attId);
+                        ev.Payload.TryGetValue("defender_army_id", out string defId);
+                        ev.Payload.TryGetValue("attacker_seat_id", out string attSeat);
+                        ev.Payload.TryGetValue("defender_seat_id", out string defSeat);
+                        ev.Payload.TryGetValue("attacker_troops_before", out string attBefore);
+                        ev.Payload.TryGetValue("attacker_troops_after", out string attAfter);
+                        ev.Payload.TryGetValue("defender_troops_before", out string defBefore);
+                        ev.Payload.TryGetValue("defender_troops_after", out string defAfter);
+                        ev.Payload.TryGetValue("outcome", out string outcome);
+                        ev.Payload.TryGetValue("winner_seat_id", out string winnerSeat);
+                        string attFac = !string.IsNullOrEmpty(attSeat) ? FactionNameOrSeat(attSeat) : facName;
+                        string defFac = !string.IsNullOrEmpty(defSeat) ? FactionNameOrSeat(defSeat) : "unknown";
+                        string winFac = !string.IsNullOrEmpty(winnerSeat) ? FactionNameOrSeat(winnerSeat) : "unknown";
+                        outcomes.Add($"Battle: {attFac} ({attId}, {attBefore}->{attAfter} troops) attacks {defFac} ({defId}, {defBefore}->{defAfter} troops) | Outcome: {outcome} | Winner: {winFac}");
+                    }
+                    else if (ev.EventType == "battle_siege")
+                    {
+                        ev.Payload.TryGetValue("army_id", out string attId);
+                        ev.Payload.TryGetValue("city_id", out string cid);
+                        ev.Payload.TryGetValue("attacker_troops_before", out string attBefore);
+                        ev.Payload.TryGetValue("attacker_troops_after", out string attAfter);
+                        ev.Payload.TryGetValue("garrison_before", out string garBefore);
+                        ev.Payload.TryGetValue("garrison_after", out string garAfter);
+                        ev.Payload.TryGetValue("outcome", out string outcome);
+                        string cityName = _engine.State.FindCity(cid)?.Name ?? cid;
+                        outcomes.Add($"Siege: {facName} ({attId}, {attBefore}->{attAfter}) vs {cityName} ({cid}, garrison {garBefore}->{garAfter}) | Outcome: {outcome}");
+                    }
+                    else if (ev.EventType == "army_routed")
+                    {
+                        ev.Payload.TryGetValue("army_id", out string aid);
+                        ev.Payload.TryGetValue("city_id", out string cid);
+                        ev.Payload.TryGetValue("from", out string from);
+                        ev.Payload.TryGetValue("to", out string to);
+                        ev.Payload.TryGetValue("troops", out string troops);
+                        string cityName = !string.IsNullOrEmpty(cid) ? (_engine.State.FindCity(cid)?.Name ?? cid) : "unknown";
+                        string ownerFac = FactionNameOrSeat(ev.ActorSeatId);
+                        outcomes.Add($"Routed: {ownerFac} {aid} routed {from} -> {cityName} {to} with {troops} troops");
+                    }
+                    else if (ev.EventType == "city_captured")
+                    {
+                        ev.Payload.TryGetValue("city_id", out string cid);
+                        string cityName = _engine.State.FindCity(cid)?.Name ?? cid;
+                        string newOwner = FactionNameOrSeat(ev.ActorSeatId);
+                        outcomes.Add($"Captured: {newOwner} ({ev.ActorSeatId}) captured {cityName} ({cid})");
+                    }
+                }
+            }
+            outcomeDetails = outcomes.Count > 0 ? string.Join("\n", outcomes) : "";
+
+            string seatTag = !string.IsNullOrEmpty(req.SeatId) ? $"{facName} ({req.SeatId})" : facName;
+            if (isInquiry) { headline = $"{seatTag} ran manual lookup: {req.InquiryTool}"; return; }
+            if (isNote) { headline = $"{seatTag} recorded a deliberation note"; return; }
+            if (isEndTurn) { headline = $"{seatTag} ended its turn"; return; }
+            if (!replayedParseOk || parsed == null || !parsed.Ok || parsed.Action == null)
+            {
+                string err = !string.IsNullOrEmpty(replayedError) ? replayedError : (!string.IsNullOrEmpty(req.ResultError) ? req.ResultError : "parse_failure");
+                headline = $"{seatTag} submitted an invalid reply ({err})";
+                return;
+            }
+            if (!replayedOk)
+            {
+                string err = !string.IsNullOrEmpty(replayedError) ? replayedError : "rejected";
+                headline = $"{seatTag} {parsed.Action.Type} rejected ({err})";
+                return;
+            }
+
+            if (cmd != null && (cmd.Type == ActionType.March || cmd.Type == "army_march"))
+            {
+                var army = _engine?.State?.FindArmy(cmd.TargetId);
+                string armyName = army != null && !string.IsNullOrEmpty(army.Name) ? $"{army.Name} ({cmd.TargetId})" : cmd.TargetId;
+                var destCity = _engine?.State?.CityAt(cmd.ParamA, cmd.ParamB);
+                string destText = destCity != null ? $"{destCity.Name} ({cmd.ParamA},{cmd.ParamB})" : $"({cmd.ParamA},{cmd.ParamB})";
+                string fromText = marchFromX >= 0 ? $"from ({marchFromX},{marchFromZ}) " : "";
+                headline = $"{seatTag} marched {armyName} {fromText}to {destText}";
+                return;
+            }
+
+            string targetName = cmd?.TargetId ?? parsed.Action.TargetId ?? "";
+            var targetCity = !string.IsNullOrEmpty(targetName) ? _engine?.State?.FindCity(targetName) : null;
+            if (targetCity != null) targetName = $"{targetCity.Name} ({targetCity.Id})";
+            headline = string.IsNullOrEmpty(targetName)
+                ? $"{seatTag}: {parsed.Action.Type}"
+                : $"{seatTag}: {parsed.Action.Type} -> {targetName}";
         }
 
         private static bool IsEndTurnRecord(ReplayRequestRecord req, ReplayBootstrapFeatures features)

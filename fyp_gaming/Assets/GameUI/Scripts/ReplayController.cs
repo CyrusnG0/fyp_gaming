@@ -188,14 +188,39 @@ namespace LuanShi
             {
                 if (kv.Value == null) continue;
                 var unit = kv.Value.GetComponent<TBTK.Unit>();
-                if (unit != null && unit.node != null && unit.node.unit == unit)
-                    unit.node.unit = null;
-                if (!IsSceneAuthoredObjectName(kv.Value.name)) Destroy(kv.Value);
+                if (unit != null)
+                {
+                    if (unit.node != null && unit.node.unit == unit)
+                        unit.node.unit = null;
+                    foreach (var faction in TBTK.UnitManager.GetFactionList())
+                        if (faction != null && faction.unitList != null)
+                            faction.unitList.Remove(unit);
+                }
+                if (!IsSceneAuthoredObjectName(kv.Value.name))
+                {
+                    kv.Value.SetActive(false);
+                    kv.Value.name = "__replay_destroyed_" + kv.Value.name;
+                    Destroy(kv.Value);
+                }
             }
             foreach (var kv in cityObjs)
-                if (kv.Value != null && !IsSceneAuthoredObjectName(kv.Value.name)) Destroy(kv.Value);
+            {
+                if (kv.Value != null && !IsSceneAuthoredObjectName(kv.Value.name))
+                {
+                    kv.Value.SetActive(false);
+                    kv.Value.name = "__replay_destroyed_" + kv.Value.name;
+                    Destroy(kv.Value);
+                }
+            }
             foreach (var kv in watchTowerObjs)
-                if (kv.Value != null && !IsSceneAuthoredObjectName(kv.Value.name)) Destroy(kv.Value);
+            {
+                if (kv.Value != null && !IsSceneAuthoredObjectName(kv.Value.name))
+                {
+                    kv.Value.SetActive(false);
+                    kv.Value.name = "__replay_destroyed_" + kv.Value.name;
+                    Destroy(kv.Value);
+                }
+            }
 
             cityObjs.Clear();
             armyObjs.Clear();
@@ -369,6 +394,8 @@ namespace LuanShi
                 RebuildReplayVisuals(ref visualsModified);
             }
             _replaySyncedRequestIndex = -1;
+            _replayInspectedRequestIndex = -1;
+            _replayCurrentEventScroll = Vector2.zero;
             _replayFinalReportLogged = false;
             _replayLastViewedSeat = SeatRotation.FirstSeat(engine.State) ?? "seat-0";
             RefreshReplayView();

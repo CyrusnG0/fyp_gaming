@@ -146,6 +146,9 @@ namespace LuanShi.Engine
         public string ResultError;
         public string InquiryTool;
         public string Explanation;
+        public string PersonaId;
+        public string Headline;
+        public string OutcomeDetails;
         public string ObservationHash;
     }
 

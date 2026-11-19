@@ -21,7 +21,7 @@ namespace LuanShi
         private int _replayInspectedRequestIndex = -1;
 
         static Rect ReplayPanelArea()
-            => new Rect(SidePanelX, SidePanelY, SidePanelWidth, Mathf.Min(580f, Screen.height - SidePanelY - 40f));
+            => new Rect(SidePanelX, SidePanelY, SidePanelWidth, Mathf.Min(680f, Screen.height - SidePanelY - 40f));
 
         void DrawReplayPanel()
         {
@@ -64,10 +64,19 @@ namespace LuanShi
             }
             if (string.IsNullOrEmpty(personaInfo)) personaInfo = "unknown";
             string setupTag = _replayBundle != null && _replayBundle.SetupSource == "scenario_fallback"
-                ? "  |  setup: scenario.json fallback (no bootstrap)"
+                ? "  |  setup: scenario.json fallback"
                 : "";
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "historical personas: " + personaInfo + setupTag, width), uiSmall);
-            y += 18f;
+            y += 16f;
+            if (_replayBundle != null && _replayBundle.MapSource == "host_map_unverified")
+            {
+                GUI.Label(new Rect(x, y, width, 15f), "Warning: host_map_unverified (terrain not independently verified)", uiReason);
+                y += 16f;
+            }
+            else
+            {
+                y += 2f;
+            }
 
             if (_replaySession == null)
             {
@@ -125,7 +134,12 @@ namespace LuanShi
 
             // Faction Scoreboards
             DrawReplayScoreboards(x, y, width);
-            y += _replaySession.IsCompleted ? 78f : 66f;
+            y += _replaySession.IsCompleted ? 72f : 60f;
+
+            // Prominent Current Event & Recorded Model Explanation card
+            float cardH = Mathf.Clamp(area.yMax - y - 220f, 96f, 136f);
+            DrawReplayCurrentEventCard(x, y, width, cardH);
+            y += cardH + 6f;
 
             // Sub-navigation: Event Feed vs Exchanges vs Seasons vs Comparison
             float tabW = (width - 12f) / 4f;
@@ -135,20 +149,23 @@ namespace LuanShi
             if (GUI.Button(new Rect(x + (tabW + 4f) * 3f, y, tabW, 20f), "Comparison", _replaySubTab == "comparison" ? uiTabActive : uiButton)) _replaySubTab = "comparison";
             y += 24f;
 
+            float footerReserve = _replaySession.IsCompleted ? 50f : 22f;
+            float tabBodyH = Mathf.Max(100f, area.yMax - y - footerReserve);
+
             if (_replaySubTab == "feed")
             {
-                DrawReplayEventFeed(x, y, width, 180f);
-                y += 184f;
+                DrawReplayEventFeed(x, y, width, tabBodyH);
+                y += tabBodyH + 4f;
             }
             else if (_replaySubTab == "seasons")
             {
-                DrawReplaySeasonSummaries(x, y, width, 180f);
-                y += 184f;
+                DrawReplaySeasonSummaries(x, y, width, tabBodyH);
+                y += tabBodyH + 4f;
             }
             else if (_replaySubTab == "comparison")
             {
-                DrawReplayComparison(x, y, width, 180f);
-                y += 184f;
+                DrawReplayComparison(x, y, width, tabBodyH);
+                y += tabBodyH + 4f;
             }
             else
             {
@@ -348,56 +365,6 @@ namespace LuanShi
             {
                 if (GUI.Button(rect, "Step request", uiButton)) ReplayStepRequest();
             }
-        }
-
-        void DrawReplayEventFeed(float x, float y, float width, float height)
-        {
-            var feed = _replaySession != null ? _replaySession.EventFeed : null;
-            int count = feed != null ? feed.Count : 0;
-            GUI.Label(new Rect(x, y, width, 16f), $"EVENT FEED ({count} events replayed):", uiPanelTitle);
-            y += 18f;
-            float viewH = height - 18f;
-
-            if (count == 0)
-            {
-                GUI.Label(new Rect(x, y, width, 30f), "Replay at start. Click Play or Step to replay recorded actions.", uiHint);
-                return;
-            }
-
-            float rowHeight = 44f;
-            float contentHeight = count * rowHeight;
-            Rect viewRect = new Rect(x, y, width, viewH);
-            _replayFeedScroll = GUI.BeginScrollView(viewRect, _replayFeedScroll, new Rect(0, 0, width - 20f, contentHeight));
-
-            for (int i = 0; i < count; i++)
-            {
-                var evt = feed[i];
-                float rowY = i * rowHeight;
-                Rect r = new Rect(0, rowY, width - 20f, rowHeight - 2f);
-                DrawSolidColor(r, i % 2 == 0 ? new Color(0.12f, 0.12f, 0.12f, 0.6f) : new Color(0.08f, 0.08f, 0.08f, 0.6f));
-
-                string mark = evt.ResultOk ? "✓" : "✗";
-                string link = !string.IsNullOrEmpty(evt.ExchangeId) ? $" | {evt.ExchangeId}" : "";
-                string header = $"#{evt.Sequence} S{evt.Season} T{evt.TurnToken} R{evt.RequestIndex}{link} | {evt.Faction} | {mark} {evt.ResultText}";
-                GUI.Label(new Rect(4f, rowY + 1f, width - 28f, 14f), EllipsizeToWidth(uiSmall, header, width - 28f), uiSmall);
-
-                string actLine = $"Action: {evt.ActionSummary}";
-                GUI.Label(new Rect(4f, rowY + 14f, width - 28f, 13f), EllipsizeToWidth(uiMonoTiny, actLine, width - 28f), uiMonoTiny);
-
-                if (evt.RequestIndex > 0)
-                {
-                    string exp = !string.IsNullOrEmpty(evt.Explanation) ? evt.Explanation : "unknown";
-                    string expLine = $"Recorded explanation: \"{exp}\"";
-                    GUI.Label(new Rect(4f, rowY + 26f, width - 28f, 14f), EllipsizeToWidth(uiHint, expLine, width - 28f), uiHint);
-                    if (GUI.Button(r, GUIContent.none, GUIStyle.none))
-                    {
-                        int idx = FindRequestIndexForFeedEvent(evt);
-                        if (idx >= 0) { _replayInspectedRequestIndex = idx; _replaySubTab = "details"; }
-                    }
-                }
-            }
-
-            GUI.EndScrollView();
         }
 
         int FindFirstInquiryRequestIndex()

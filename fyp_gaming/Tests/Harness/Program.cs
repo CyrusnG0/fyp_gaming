@@ -132,6 +132,7 @@ internal static partial class Harness
         RunCombatMovementRehearsal();
         RunReplayBootstrap();
         RunReplayPlayback();
+        RunReplayPresentation();
         RunEconomyDeterminism();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
