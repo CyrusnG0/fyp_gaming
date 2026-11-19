@@ -25,6 +25,7 @@ namespace LuanShi.Engine
             startingGold: BalanceConfig.StartGold,
             cityBaseFoodYield: BalanceConfig.CityBaseFoodYield,
             armyFoodUpkeepMultiplier: 1f,
+            armyFoodUpkeepMultiplierDecimal: 1m,
             domesticGoldCostMultiplier: 1f);
 
         /// <summary>
@@ -39,6 +40,7 @@ namespace LuanShi.Engine
             startingGold: BalanceConfig.EasyStartGold,
             cityBaseFoodYield: BalanceConfig.EasyCityBaseFoodYield,
             armyFoodUpkeepMultiplier: BalanceConfig.EasyArmyFoodUpkeepMultiplier,
+            armyFoodUpkeepMultiplierDecimal: BalanceConfig.EasyArmyFoodUpkeepMultiplierDecimal,
             domesticGoldCostMultiplier: BalanceConfig.EasyDomesticGoldCostMultiplier);
 
         /// <summary>
@@ -54,6 +56,7 @@ namespace LuanShi.Engine
             startingGold: BalanceConfig.FoodEasyStartGold,
             cityBaseFoodYield: BalanceConfig.FoodEasyCityBaseFoodYield,
             armyFoodUpkeepMultiplier: BalanceConfig.FoodEasyArmyFoodUpkeepMultiplier,
+            armyFoodUpkeepMultiplierDecimal: BalanceConfig.FoodEasyArmyFoodUpkeepMultiplierDecimal,
             domesticGoldCostMultiplier: BalanceConfig.FoodEasyDomesticGoldCostMultiplier);
 
         /// <summary>Stable schema key used by hosts, run records and evidence notes.</summary>
@@ -71,6 +74,9 @@ namespace LuanShi.Engine
         /// <summary>Multiplier on the food troops eat per season (garrison and field army alike).</summary>
         public float ArmyFoodUpkeepMultiplier { get; }
 
+        /// <summary>Exact base-10 multiplier on the food troops eat per season.</summary>
+        public decimal ArmyFoodUpkeepMultiplierDecimal { get; }
+
         /// <summary>Multiplier on the gold cost of domestic orders (輕徭, 募兵).</summary>
         public float DomesticGoldCostMultiplier { get; }
 
@@ -78,13 +84,14 @@ namespace LuanShi.Engine
         public bool IsStandard => Key == StandardKey;
 
         private BalanceProfile(string key, int startingFood, int startingGold, int cityBaseFoodYield,
-            float armyFoodUpkeepMultiplier, float domesticGoldCostMultiplier)
+            float armyFoodUpkeepMultiplier, decimal armyFoodUpkeepMultiplierDecimal, float domesticGoldCostMultiplier)
         {
             Key = key;
             StartingFood = startingFood;
             StartingGold = startingGold;
             CityBaseFoodYield = cityBaseFoodYield;
             ArmyFoodUpkeepMultiplier = armyFoodUpkeepMultiplier;
+            ArmyFoodUpkeepMultiplierDecimal = armyFoodUpkeepMultiplierDecimal;
             DomesticGoldCostMultiplier = domesticGoldCostMultiplier;
         }
 
@@ -121,6 +128,10 @@ namespace LuanShi.Engine
         /// </summary>
         public float TroopFoodUpkeep(int troops, string unitType)
             => troops * UnitTypes.FoodPerTroop(unitType) * ArmyFoodUpkeepMultiplier;
+
+        /// <summary>Exact base-10 seasonal food ration for deterministic economy resolution.</summary>
+        public decimal TroopFoodUpkeepDecimal(int troops, string unitType)
+            => troops * UnitTypes.FoodPerTroopDecimal(unitType) * ArmyFoodUpkeepMultiplierDecimal;
 
         /// <summary>
         /// Seeds one owned city with this profile's opening economy. Hosts call this instead of

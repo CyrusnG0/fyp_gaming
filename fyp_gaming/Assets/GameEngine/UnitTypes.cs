@@ -56,6 +56,18 @@ namespace LuanShi.Engine
             }
         }
 
+        /// <summary>Exact base-10 糧 per troop per season for deterministic economy resolution.</summary>
+        public static decimal FoodPerTroopDecimal(string type)
+        {
+            switch (Normalize(type))
+            {
+                case Cavalry: return BalanceConfig.FoodPerTroopCavalryDecimal;
+                case Siege: return BalanceConfig.FoodPerTroopSiegeDecimal;
+                case Archer: return BalanceConfig.FoodPerTroopArcherDecimal;
+                default: return BalanceConfig.FoodPerTroopInfantryDecimal;
+            }
+        }
+
         /// <summary>Design §5.4: 步/弓 6, 騎 8, 器械 3 hex per season (before the 冬 multiplier).</summary>
         public static int MovePoints(string type)
         {

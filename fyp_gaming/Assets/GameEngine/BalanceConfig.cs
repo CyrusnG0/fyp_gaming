@@ -31,6 +31,7 @@ namespace LuanShi.Engine
         public const int MoraleMax = 100;
         public const int MoraleYieldPenaltyThreshold = 30; // LOCKED (ADR-010): 民心 below this loses yields
         public const float MoraleYieldPenalty = 0.5f;     // LOCKED (ADR-010): food and gold yield reduction
+        public const decimal MoraleYieldPenaltyDecimal = 0.5m;
 
         public const int DefenseStart = 0;                // TBD: 城防, range 0..DefenseMax
         public const int DefenseMax = 5;
@@ -64,6 +65,10 @@ namespace LuanShi.Engine
         public const float FoodPerTroopArcher = 0.1f;     // TBD (design §5.4): 弓兵
         public const float FoodPerTroopCavalry = 0.2f;    // TBD (design §5.4): 騎兵 600/1,000 (double)
         public const float FoodPerTroopSiege = 0.05f;     // TBD (design §5.4): 器械 150/1,000
+        public const decimal FoodPerTroopInfantryDecimal = 0.1m;
+        public const decimal FoodPerTroopArcherDecimal = 0.1m;
+        public const decimal FoodPerTroopCavalryDecimal = 0.2m;
+        public const decimal FoodPerTroopSiegeDecimal = 0.05m;
 
         // 相剋 (design §5.3 / §6.1): 步>弓, 騎>步, 弓>騎; 器械 is weak in field battles.
         public const float UnitCounterBonus = 1.3f;       // LOCKED (design §5.3/§6.1: 0.8–1.3)
@@ -83,6 +88,11 @@ namespace LuanShi.Engine
         public const float TaxGoldPerPop = 0.01f;         // TBD: gold per citizen per season
         public const float FoodPerPop = 0.02f;            // TBD: food eaten per citizen per season
         public const float StarvationPopLoss = 0.10f;     // TBD: pop fraction lost when food runs out
+        public const decimal PopGrowthRateDecimal = 0.05m;
+        public const decimal PopGrowthVarianceDecimal = 0.02m;
+        public const decimal TaxGoldPerPopDecimal = 0.01m;
+        public const decimal FoodPerPopDecimal = 0.02m;
+        public const decimal StarvationPopLossDecimal = 0.10m;
 
         public const int StartPopulation = 10000;         // TBD
         public const int StartFood = 500;                 // TBD
@@ -97,6 +107,7 @@ namespace LuanShi.Engine
         public const int EasyStartGold = 900;                  // reduced: 3× the standard opening gold
         public const int EasyCityBaseFoodYield = 300;          // reduced: 1.5× the standard passive harvest
         public const float EasyArmyFoodUpkeepMultiplier = 0.5f;    // reduced: troop (army/garrison) upkeep halved
+        public const decimal EasyArmyFoodUpkeepMultiplierDecimal = 0.5m;
         public const float EasyDomesticGoldCostMultiplier = 0.5f;  // reduced: 輕徭/募兵 gold halved, rounded up
 
         // ---- opt-in combat-test profile (BalanceProfile.FoodEasy, 2026-11-14) -------------------
@@ -108,6 +119,7 @@ namespace LuanShi.Engine
         public const int FoodEasyStartGold = EasyStartGold;            // combat-test: 900 gold (matches EasyResearch)
         public const int FoodEasyCityBaseFoodYield = 600;              // combat-test: 3× standard passive harvest
         public const float FoodEasyArmyFoodUpkeepMultiplier = 0.25f;   // combat-test: quarter troop (army/garrison) upkeep
+        public const decimal FoodEasyArmyFoodUpkeepMultiplierDecimal = 0.25m;
         public const float FoodEasyDomesticGoldCostMultiplier = EasyDomesticGoldCostMultiplier;  // matches EasyResearch 0.5×
 
         // ---- 戰鬥 M2/M3 (design §6, ACTIONS.md §4) ------------------------------
@@ -174,6 +186,7 @@ namespace LuanShi.Engine
         public const float WinterFoodYieldMult = 0.3f;    // LOCKED (design §3 table): 冬 糧產 ×0.3
         public const float WinterMarchBudgetMult = 0.7f;  // LOCKED (design §3 table + §10.1 嚴冬): 行軍 ×0.7
         public const float WinterDesertionExtraTroopLoss = 0.05f;  // LOCKED (design §10.1 嚴冬): 逃兵 +5%
+        public const decimal WinterDesertionExtraTroopLossDecimal = 0.05m;
 
         private static readonly string[] SeasonNames = { "Spring", "Summer", "Autumn", "Winter" };  // 春/夏/秋/冬
 
@@ -197,6 +210,18 @@ namespace LuanShi.Engine
             }
         }
 
+        /// <summary>Exact base-10 天時 harvest multiplier for deterministic economy resolution.</summary>
+        public static decimal SeasonFoodYieldMultDecimal(int season)
+        {
+            switch (SeasonIndex(season))
+            {
+                case 0: return 0.7m;
+                case 1: return 1.0m;
+                case 2: return 2.0m;
+                default: return 0.3m;
+            }
+        }
+
         /// <summary>Effective per-army hex budget this season: 冬 marches at WinterMarchBudgetMult (§10.1 嚴冬).</summary>
         public static int MarchBudget(int season, string unitType)
             => (int)(UnitTypes.MovePoints(unitType) * (IsWinter(season) ? WinterMarchBudgetMult : 1f));
@@ -209,6 +234,7 @@ namespace LuanShi.Engine
         public const int RevoltRiskMoraleThreshold = 25;   // LOCKED (design §4.1 line 149): 民心 <25 → 民變風險
         public const float RevoltChancePerMoralePoint = 0.02f;  // TBD: chance = (25 − 民心) × 2% per season
         public const float RevoltGarrisonLossPct = 0.10f;  // TBD: garrison lost to the rising (design silent)
+        public const decimal RevoltGarrisonLossPctDecimal = 0.10m;
         public const int RevoltMoraleGainAfterVenting = 15;     // TBD: 民心 +15 once the anger is spent (clamp ≤100)
 
         // ---- 逃兵 army supply & desertion (design §5.1 補給, §6.3 斷補, §10.1 嚴冬) ----
@@ -217,6 +243,7 @@ namespace LuanShi.Engine
         // prices 斷補 at 10%/season (§6.3). MVP simplification: no 補給 field — an army eats
         // Troops × UnitTypes.FoodPerTroop(army.UnitType) per season out of its faction's food; failing that, it deserts.
         public const float DesertionTroopLossPct = 0.10f;  // LOCKED (design §6.3 斷補): 逃兵 10%/季
+        public const decimal DesertionTroopLossPctDecimal = 0.10m;
         public const int DesertionMoraleLoss = 15;         // TBD: 士氣 lost with the deserters (design silent)
 
         // ---- 研究 research (design §9 四條線 × 5 級, §4.2 學堂) -------------------
@@ -251,6 +278,11 @@ namespace LuanShi.Engine
             => (agriLevel >= 1 ? 1f + ResearchAgriFoodBonus : 1f)
              * (agriLevel >= 5 ? 1f + ResearchAgriL5FoodBonus : 1f);
 
+        /// <summary>Exact base-10 農政 harvest multiplier for deterministic economy resolution.</summary>
+        public static decimal ResearchFoodYieldMultDecimal(int agriLevel)
+            => (agriLevel >= 1 ? 1.10m : 1m)
+             * (agriLevel >= 5 ? 1.25m : 1m);
+
         /// <summary>§9 兵法 L1 練兵: the faction's 訓練 cap (base TrainingMax).</summary>
         public static int TrainingCap(int militaryLevel)
             => TrainingMax + (militaryLevel >= 1 ? ResearchMilTrainingCapBonus : 0);
@@ -262,6 +294,10 @@ namespace LuanShi.Engine
         /// <summary>§9 吏治 L1 賦稅: gold-per-population multiplier at season resolution.</summary>
         public static float ResearchTaxMult(int governanceLevel)
             => governanceLevel >= 1 ? 1f + ResearchGovTaxBonus : 1f;
+
+        /// <summary>Exact base-10 吏治 L1 tax multiplier for deterministic economy resolution.</summary>
+        public static decimal ResearchTaxMultDecimal(int governanceLevel)
+            => governanceLevel >= 1 ? 1.10m : 1m;
 
         /// <summary>
         /// §9 吏治 L4 學堂: research points per season. 15 base (TBD) × 1.25 = 19, rounded — 學堂 the

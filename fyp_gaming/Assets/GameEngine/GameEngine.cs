@@ -86,7 +86,7 @@ namespace LuanShi.Engine
                 Season = State.Season,
                 SeasonName = BalanceConfig.SeasonName(State.Season),
             };
-            float seasonFood = BalanceConfig.SeasonFoodYieldMult(State.Season);   // 天時 (design §3)
+            decimal seasonFood = BalanceConfig.SeasonFoodYieldMultDecimal(State.Season);   // 天時 (design §3)
 
             foreach (var city in State.Cities)
             {
@@ -99,7 +99,7 @@ namespace LuanShi.Engine
 
                 // 民心 below the threshold halves both yields (ADR-010, LOCKED).
                 bool disheartened = city.Morale < BalanceConfig.MoraleYieldPenaltyThreshold;
-                float yieldFactor = disheartened ? 1f - BalanceConfig.MoraleYieldPenalty : 1f;
+                decimal yieldFactor = disheartened ? 1m - BalanceConfig.MoraleYieldPenaltyDecimal : 1m;
 
                 // 研究 (design §9), read at the point of use — no cached derived state (ADR-014):
                 // 農政 L1/L5 scale this city's harvest, 吏治 L1 scales its tax.
@@ -107,23 +107,23 @@ namespace LuanShi.Engine
                 int govLevel = fac?.ResearchLevel(ResearchLine.Governance) ?? 0;
 
                 int taxes = revolted ? 0
-                          : (int)(float)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor
-                                         * BalanceConfig.ResearchTaxMult(govLevel));
+                          : (int)(city.Population * BalanceConfig.TaxGoldPerPopDecimal * yieldFactor
+                                  * BalanceConfig.ResearchTaxMultDecimal(govLevel));
                 city.Gold += taxes;
 
                 int harvest = revolted ? 0
-                            : (int)(float)(Balance.CityBaseFoodYield
-                                           * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood
-                                           * BalanceConfig.ResearchFoodYieldMult(agriLevel));
+                            : (int)(Balance.CityBaseFoodYield
+                                    * (1m + city.ReclaimPct / 100m) * yieldFactor * seasonFood
+                                    * BalanceConfig.ResearchFoodYieldMultDecimal(agriLevel));
                 city.Food += harvest;
-                int eaten = (int)(float)(city.Population * BalanceConfig.FoodPerPop
-                                         + Balance.TroopFoodUpkeep(city.Garrison, city.GarrisonType));
+                int eaten = (int)(city.Population * BalanceConfig.FoodPerPopDecimal
+                                  + Balance.TroopFoodUpkeepDecimal(city.Garrison, city.GarrisonType));
                 city.Food -= eaten;
 
                 string note = null;
                 if (city.Food < 0)
                 {
-                    int lost = (int)(float)(city.Population * BalanceConfig.StarvationPopLoss);
+                    int lost = (int)(city.Population * BalanceConfig.StarvationPopLossDecimal);
                     city.Population -= lost;
                     city.Food = 0;
                     AddNote(ref note, $"Famine! Population reduced by {lost}");
@@ -132,14 +132,14 @@ namespace LuanShi.Engine
                 }
                 else
                 {
-                    float rate = BalanceConfig.PopGrowthRate
-                               + (float)(rng.NextDouble() * 2 - 1) * BalanceConfig.PopGrowthVariance;
-                    city.Population += (int)(float)(city.Population * rate);
+                    decimal rate = BalanceConfig.PopGrowthRateDecimal
+                                 + ((decimal)rng.NextDouble() * 2m - 1m) * BalanceConfig.PopGrowthVarianceDecimal;
+                    city.Population += (int)(city.Population * rate);
                 }
 
                 if (revolted)
                 {
-                    int garrisonLost = (int)(float)(city.Garrison * BalanceConfig.RevoltGarrisonLossPct);
+                    int garrisonLost = (int)(city.Garrison * BalanceConfig.RevoltGarrisonLossPctDecimal);
                     city.Garrison -= garrisonLost;
                     AddMorale(city, BalanceConfig.RevoltMoraleGainAfterVenting);
                     AddNote(ref note, $"Revolt! output halted this season, garrison −{garrisonLost}");
@@ -210,7 +210,7 @@ namespace LuanShi.Engine
         /// </summary>
         private void ResolveArmySupply(ArmyState army)
         {
-            int need = (int)Balance.TroopFoodUpkeep(army.Troops, army.UnitType);
+            int need = (int)Balance.TroopFoodUpkeepDecimal(army.Troops, army.UnitType);
             if (need <= 0) return;
 
             if (FoodPoolOf(army.OwnerSeatId) < need)
@@ -232,8 +232,8 @@ namespace LuanShi.Engine
         /// <summary>逃兵 (design §6.3 10%/季, §10.1 嚴冬 +5%): men leave and 士氣 falls with them.</summary>
         private void Desert(ArmyState army, string cause)
         {
-            float pct = BalanceConfig.DesertionTroopLossPct
-                      + (BalanceConfig.IsWinter(State.Season) ? BalanceConfig.WinterDesertionExtraTroopLoss : 0f);
+            decimal pct = BalanceConfig.DesertionTroopLossPctDecimal
+                        + (BalanceConfig.IsWinter(State.Season) ? BalanceConfig.WinterDesertionExtraTroopLossDecimal : 0m);
             int lost = (int)(army.Troops * pct);
             army.Troops -= lost;
             army.Morale = Clamp(army.Morale - BalanceConfig.DesertionMoraleLoss,
