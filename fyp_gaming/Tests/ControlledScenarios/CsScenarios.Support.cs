@@ -16,6 +16,7 @@ namespace LuanShi.ControlledScenarios
             "cs-research-purchase-v1", "cs-inquiry-manual-v1", "cs-memory-note-followup-v1",
             "cs-strong-threat-fight-or-retreat-v1",
             "cs-diplomacy-voluntary-response-v1",
+            RouteChoiceId,
         };
 
         public static IReadOnlyList<string> Keys { get; } = Array.AsReadOnly(AllIds);
@@ -33,6 +34,7 @@ namespace LuanShi.ControlledScenarios
                 case "cs-inquiry-manual-v1": spec = InquiryManual(seed); return true;
                 case "cs-memory-note-followup-v1": spec = MemoryNoteFollowup(seed); return true;
                 case "cs-diplomacy-voluntary-response-v1": spec = DiplomacyVoluntaryResponse(seed); return true;
+                case RouteChoiceId: spec = RouteChoice(seed); return true;
                 default: spec = null; return false;
             }
         }

@@ -74,6 +74,11 @@ namespace LuanShi.ControlledScenarios
         public bool StageIncomingDiplomacy;
         public bool EnableManualLookup;
         public bool EnableDeliberation;
+        /// <summary>Opt-in Rich spatial map context (production prompt path); default off.</summary>
+        public bool EnableSpatial;
+
+        /// <summary>Optional scenario goal appended to the study seat's prompt by the test adapter.</summary>
+        public string Goal;
         public int ResearchPoints;
         public List<CsFactionSetup> Factions = new List<CsFactionSetup>();
         public List<CsCitySetup> Cities = new List<CsCitySetup>();
@@ -149,6 +154,7 @@ namespace LuanShi.ControlledScenarios
                 StageIncomingDiplomacy = Setup?.StageIncomingDiplomacy ?? false,
                 EnableManualLookup = Staged?.Features?.ManualLookup ?? false,
                 EnableDeliberation = Staged?.Features?.Deliberation ?? false,
+                EnableSpatial = Staged?.Features?.Spatial ?? false,
                 MaxRequests = Staged?.Ceilings?.MaxRequests ?? 0,
                 MaxWallSeconds = Staged?.Ceilings?.MaxWallSeconds ?? 0,
                 RequestTimeoutMs = Staged?.Ceilings?.RequestTimeoutMs ?? 0,
@@ -176,6 +182,7 @@ namespace LuanShi.ControlledScenarios
                         Attack = spec.EnableAttack, Research = spec.EnableResearch,
                         Diplomacy = spec.EnableDiplomacy,
                         ManualLookup = spec.EnableManualLookup, Deliberation = spec.EnableDeliberation,
+                        Spatial = spec.EnableSpatial,
                     },
                     Scripts = spec.Scripts,
                     Fixture = true,
@@ -207,6 +214,7 @@ namespace LuanShi.ControlledScenarios
         [JsonPropertyName("diplomacy")] public bool Diplomacy { get; set; }
         [JsonPropertyName("manual_lookup")] public bool ManualLookup { get; set; }
         [JsonPropertyName("deliberation")] public bool Deliberation { get; set; }
+        [JsonPropertyName("spatial")] public bool Spatial { get; set; }
     }
 
     public sealed class CsScenarioStagedBlock

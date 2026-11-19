@@ -55,6 +55,8 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-35] WallCutAttribution", WallCutAttribution),
                 Entry("[CS-36] CredentialGapRegression", Review2CredentialGaps),
                 Entry("[CS-39] Review3Fixes", Review3Fixes),
+                Entry("[CS-R1] RouteChoiceEngineChecks", RouteChoiceEngineChecks),
+                Entry("[CS-R2] RouteChoiceLivePlumbing", RouteChoiceLivePlumbing),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

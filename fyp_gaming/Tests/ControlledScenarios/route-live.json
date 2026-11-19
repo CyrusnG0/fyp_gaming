@@ -1,0 +1,3 @@
+{"schema":"luanshi-controlled-scenarios/1","provider":{"kind":"openai-compatible","model":"from-env"},
+"run_ceilings":{"max_scenarios":1,"max_run_requests":20,"max_run_wall_seconds":600,"max_scenario_requests":20,"max_scenario_wall_seconds":600,"request_timeout_ms":90000,"max_output_tokens":8000,"unknown_usage_policy":"report"},
+"scenarios":[{"scenario_id":"cs-route-choice-v1","seed":5151}]}

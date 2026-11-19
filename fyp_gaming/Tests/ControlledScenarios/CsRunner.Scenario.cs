@@ -129,6 +129,8 @@ namespace LuanShi.ControlledScenarios
                             { "diplomacy", spec.EnableDiplomacy },
                             { "manual_lookup", spec.EnableManualLookup },
                             { "deliberation", spec.EnableDeliberation },
+                            { "spatial", spec.EnableSpatial },
+                            { "goal", spec.Goal ?? "" },
                         } },
                     { "ceilings", new Dictionary<string, object>
                         {
@@ -174,7 +176,11 @@ namespace LuanShi.ControlledScenarios
                 {
                     AfterSnapshot = seat => CsWorld.Capture(engine, seat, config, false),
                 };
-                var runner = new LlmTurnRunner(transport, config, recorder, memory, notes);
+                // The goal adapter sits OUTSIDE the recorder so the saved prompt is the exact final one.
+                ILlmTransport sent = string.IsNullOrEmpty(spec.Goal)
+                    ? (ILlmTransport)transport
+                    : new CsGoalTransport(transport, context.ActiveSeatId, spec.StudySeat, spec.Goal);
+                var runner = new LlmTurnRunner(sent, config, recorder, memory, notes);
                 recorder.BindRunId(runner.RunId);
                 session = new SpectatorSession(engine, runner, spec.Seasons, spec.Seed, recorder);
 
@@ -234,6 +240,7 @@ namespace LuanShi.ControlledScenarios
                         Attack = spec.EnableAttack, Research = spec.EnableResearch,
                         Diplomacy = spec.EnableDiplomacy,
                         ManualLookup = spec.EnableManualLookup, Deliberation = spec.EnableDeliberation,
+                        Spatial = spec.EnableSpatial,
                     },
                     Captures = captures, RunLines = runLines, Exchanges = recorder.ExchangeLines(),
                     RunFileName = Path.GetFileName(recorder.RunPath ?? runner.RunId + ".jsonl"),

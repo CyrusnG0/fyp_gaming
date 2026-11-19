@@ -285,6 +285,7 @@ namespace LuanShi.ControlledScenarios
                 EnableDiplomacy = spec.EnableDiplomacy,
                 EnableManualLookup = spec.EnableManualLookup,
                 EnableDeliberation = spec.EnableDeliberation,
+                SpatialContext = SpatialFor(spec),
                 MaxRequestsPerTurn = 6,
                 MaxActionsPerTurn = 5,
                 MaxInvalidPerTurn = 2,
@@ -313,6 +314,7 @@ namespace LuanShi.ControlledScenarios
             config.EnableDiplomacy = spec.EnableDiplomacy;
             config.EnableManualLookup = spec.EnableManualLookup;
             config.EnableDeliberation = spec.EnableDeliberation;
+            config.SpatialContext = SpatialFor(spec);
             config.MaxRequestsPerTurn = 6;
             config.MaxActionsPerTurn = 5;
             config.MaxInvalidPerTurn = 2;
@@ -324,6 +326,9 @@ namespace LuanShi.ControlledScenarios
             config.MaxInquiriesPerSession = 20;
             return config;
         }
+
+        private static SpatialContextOptions SpatialFor(CsScenarioSpec spec)
+            => new SpatialContextOptions { Level = spec.EnableSpatial ? SpatialDetailLevel.Rich : SpatialDetailLevel.Off };
 
         public static string Hash(CsScenarioSpec spec, LlmConfig config)
         {
@@ -337,6 +342,8 @@ namespace LuanShi.ControlledScenarios
                 { "diplomacy", config.EnableDiplomacy },
                 { "manual_lookup", config.EnableManualLookup },
                 { "deliberation", config.EnableDeliberation },
+                { "spatial", spec.EnableSpatial },
+                { "goal", spec.Goal ?? "" },
                 { "max_requests_per_turn", config.MaxRequestsPerTurn },
                 { "max_actions_per_turn", config.MaxActionsPerTurn },
                 { "max_invalid_per_turn", config.MaxInvalidPerTurn },
@@ -371,6 +378,8 @@ namespace LuanShi.ControlledScenarios
                 { "diplomacy", config.EnableDiplomacy },
                 { "manual_lookup", config.EnableManualLookup },
                 { "deliberation", config.EnableDeliberation },
+                { "spatial", spec.EnableSpatial },
+                { "goal", spec.Goal ?? "" },
                 { "max_requests_per_turn", config.MaxRequestsPerTurn },
                 { "max_actions_per_turn", config.MaxActionsPerTurn },
                 { "max_invalid_per_turn", config.MaxInvalidPerTurn },
