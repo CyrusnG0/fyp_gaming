@@ -1,0 +1,3 @@
+{"schema":"luanshi-controlled-scenarios/1","provider":{"kind":"fake","model":"fake-model"},
+"run_ceilings":{"max_scenarios":1,"max_run_requests":40,"max_run_wall_seconds":120,"max_scenario_requests":40,"max_scenario_wall_seconds":120,"request_timeout_ms":30000,"max_output_tokens":8000,"unknown_usage_policy":"report"},
+"scenarios":[{"scenario_id":"cs-route-seasons-v1","seed":5151}]}

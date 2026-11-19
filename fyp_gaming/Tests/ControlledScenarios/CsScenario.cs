@@ -304,6 +304,10 @@ namespace LuanShi.ControlledScenarios
             "{\"type\":\"march\",\"target_id\":\"" + OwnArmyId + "\",\"param_a\":" + x
             + ",\"param_b\":" + z + ",\"summary\":\"advance\"}";
 
+        public static string MarchEnemy(int x, int z) =>
+            "{\"type\":\"march\",\"target_id\":\"" + EnemyArmyId + "\",\"param_a\":" + x
+            + ",\"param_b\":" + z + ",\"summary\":\"advance\"}";
+
         public static string AttackArmy(int x, int z) =>
             "{\"type\":\"attack_army\",\"target_id\":\"" + OwnArmyId + "\",\"param_a\":" + x
             + ",\"param_b\":" + z + ",\"summary\":\"attack the visible enemy\"}";
