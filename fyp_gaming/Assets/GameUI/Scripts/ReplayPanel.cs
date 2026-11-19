@@ -56,7 +56,10 @@ namespace LuanShi
                 personaInfo = string.Join("  |  ", personas);
             }
             if (string.IsNullOrEmpty(personaInfo)) personaInfo = "unknown";
-            GUI.Label(new Rect(x, y, width, 14f), "historical personas: " + personaInfo, uiSmall);
+            string setupTag = _replayBundle != null && _replayBundle.SetupSource == "scenario_fallback"
+                ? "  |  setup: scenario.json fallback (no bootstrap)"
+                : "";
+            GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "historical personas: " + personaInfo + setupTag, width), uiSmall);
             y += 18f;
 
             if (_replaySession == null)

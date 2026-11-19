@@ -246,6 +246,12 @@ namespace LuanShi.Engine
                 if (_isIncompleteRun)
                     deps.Add($"Incomplete/paused run: stopped at Season {_currentSeason} ({_currentSeatId ?? "unknown"}), reason='{_stopReason ?? "unknown"}'. Final incomplete season was not rolled over.");
             }
+            else if (_bundle.ScenarioSetup != null)
+            {
+                deps.Add($"Setup source: scenario.json fallback ({_bundle.ScenarioSetup.ScenarioId}, schema {_bundle.ScenarioSetup.Schema}); original *-bootstrap.json was absent.");
+                deps.Add($"Map source: {_bundle.MapSource ?? "host_map_unverified"} (scenario.json does not embed initial_map; terrain/neighbors came from host/scene MapData).");
+                deps.Add($"Command schemas enabled: attack={_allowAttack}, research={_allowResearch}, diplomacy={_allowDiplomacy}, visible_march_routes={_visibleMarchRoutes}.");
+            }
             else
             {
                 deps.Add("RNG Seed 12345: EndSeason population growth sequence (rng.NextDouble() called per owned non-starving city).");
@@ -261,6 +267,8 @@ namespace LuanShi.Engine
                 RunId = _bundle.Summary?.RunId ?? "unknown",
                 Seed = _bundle.Summary != null ? _bundle.Summary.Seed : 0,
                 BalanceProfileKey = _bundle.Summary?.BalanceProfileKey ?? (_bundle.Bootstrap?.BalanceProfile?.Key ?? "unknown"),
+                SetupSource = _bundle.SetupSource ?? (_bundle.Bootstrap != null ? "bootstrap" : (_bundle.ScenarioSetup != null ? "scenario_fallback" : "legacy_demo")),
+                MapSource = _bundle.MapSource ?? (_bundle.Bootstrap != null ? "bootstrap" : (_bundle.ScenarioSetup != null ? "host_map_unverified" : "legacy_default_map")),
                 SeasonsVerified = _replayedScores.Count,
                 TotalRequests = _bundle.Requests.Count,
                 ObservationHashesMatched = _observationHashesMatched,

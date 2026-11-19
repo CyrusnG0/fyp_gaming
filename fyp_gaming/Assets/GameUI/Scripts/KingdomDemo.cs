@@ -77,6 +77,8 @@ namespace LuanShi
         public bool replayMode;
         [Tooltip("The run ID or directory containing recorded match evidence.")]
         public string replayRunId = "run-20261109082434809-51b7ebd5";
+        [Tooltip("Optional folder path containing the run files (for example a controlled-scenario run folder). Leave blank to search default run directories.")]
+        public string replaySearchRoot = "";
 
         private GameEngine engine;
         private bool ready;

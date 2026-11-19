@@ -51,6 +51,7 @@ namespace LuanShi.Engine
     public sealed class ReplaySummaryData
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string BalanceProfileKey;
         public bool ManualLookupEnabled;
@@ -80,6 +81,7 @@ namespace LuanShi.Engine
     public sealed class ReplayRequestRecord
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string Provider;
         public string Model;
@@ -152,6 +154,9 @@ namespace LuanShi.Engine
         public ReplaySummaryData Summary;
         public IReadOnlyList<ReplayRequestRecord> Requests;
         public ReplayBootstrapData Bootstrap;
+        public ReplayScenarioSetup ScenarioSetup;
+        public string SetupSource;
+        public string MapSource;
         public string SummaryPath;
         public string JsonlPath;
         public string ExchangesPath;
@@ -177,8 +182,11 @@ namespace LuanShi.Engine
     public sealed class ReplayComparisonReport
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string BalanceProfileKey;
+        public string SetupSource;
+        public string MapSource;
         public int SeasonsVerified;
         public int TotalRequests;
 

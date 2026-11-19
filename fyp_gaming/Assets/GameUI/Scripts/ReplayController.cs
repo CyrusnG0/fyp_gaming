@@ -33,7 +33,8 @@ namespace LuanShi
             statusMsg = "Offline match replay — zero model calls; controls are docked on the right";
 
             string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : ReplayLoader.VerifiedDemoRunId;
-            if (!ReplayLoader.TryResolveRunFiles(runKey, null, out string sPath, out string jPath, out string ePath, out string bPath, out string err))
+            string searchRoot = !string.IsNullOrWhiteSpace(replaySearchRoot) ? replaySearchRoot.Trim() : null;
+            if (!ReplayLoader.TryResolveRunFiles(runKey, searchRoot, out string sPath, out string jPath, out string ePath, out string bPath, out string err))
             {
                 _replaySession = null;
                 _replayBundle = null;
@@ -57,7 +58,7 @@ namespace LuanShi
                 }
                 candidateSession = new ReplaySession(_replayBundle, engine != null ? engine.State.Map : null);
                 engine = candidateSession.Engine;
-                if (_replayBundle.Bootstrap != null)
+                if (_replayBundle.Bootstrap != null || _replayBundle.ScenarioSetup != null)
                     RebuildReplayVisuals(ref visualsModified);
                 candidateSession.OnEventReplayed += HandleReplayEvent;
                 _replaySession = candidateSession;

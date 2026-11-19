@@ -131,7 +131,7 @@ namespace LuanShi.Engine
                 return $"empty recorded response (outcome unknown, finish_reason={finish})";
             }
 
-            if (IsEndTurnRecord(rec, _bundle.Bootstrap?.Features))
+            if (IsEndTurnRecord(rec, _bundle.Bootstrap?.Features ?? _bundle.ScenarioSetup?.Features))
                 return rec.RawModelText;
 
             return rec.RawModelText;
@@ -141,8 +141,8 @@ namespace LuanShi.Engine
         {
             _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
             bool isLegacyDemo = _bundle.Summary != null && string.Equals(_bundle.Summary.RunId, ReplayLoader.VerifiedDemoRunId, StringComparison.Ordinal);
-            if (!isLegacyDemo && _bundle.Bootstrap == null)
-                throw new InvalidOperationException($"ReplaySession requires a replay bootstrap for run '{_bundle.Summary?.RunId ?? "unknown"}'.");
+            if (!isLegacyDemo && _bundle.Bootstrap == null && _bundle.ScenarioSetup == null)
+                throw new InvalidOperationException($"ReplaySession requires a replay bootstrap or scenario.json fallback for run '{_bundle.Summary?.RunId ?? "unknown"}'.");
             _hostMap = hostMap;
             Reset();
         }
@@ -156,11 +156,12 @@ namespace LuanShi.Engine
             _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
             _totalRequests = _bundle.Requests.Count;
             _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedVoluntaryEndTurns = 0;
+            var activeFeatures = _bundle.Bootstrap?.Features ?? _bundle.ScenarioSetup?.Features;
             for (int i = 0; i < _bundle.Requests.Count; i++)
             {
                 var req = _bundle.Requests[i];
                 if (!string.IsNullOrEmpty(req.InquiryTool)) continue;
-                if (IsEndTurnRecord(req, _bundle.Bootstrap?.Features)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
+                if (IsEndTurnRecord(req, activeFeatures)) { if (req.ResultOk) _expectedVoluntaryEndTurns++; }
                 else { if (req.ResultOk) _expectedAcceptedActions++; else _expectedRejectedActions++; }
             }
 
@@ -177,6 +178,18 @@ namespace LuanShi.Engine
                 _allowDiplomacy = f != null && f.Diplomacy;
                 _visibleMarchRoutes = f != null && f.VisibleMarchRoutes;
                 _engine = ReplayBootstrapLoader.CreateEngine(_bundle.Bootstrap);
+                _currentSeason = _engine.State.Season;
+                return;
+            }
+
+            if (_bundle.ScenarioSetup != null)
+            {
+                var f = _bundle.ScenarioSetup.Features;
+                _allowAttack = f != null && f.Attack;
+                _allowResearch = f != null && f.Research;
+                _allowDiplomacy = f != null && f.Diplomacy;
+                _visibleMarchRoutes = f != null && f.VisibleMarchRoutes;
+                _engine = ReplayScenarioFallback.CreateEngine(_bundle.ScenarioSetup, _bundle.Summary, _hostMap);
                 _currentSeason = _engine.State.Season;
                 return;
             }

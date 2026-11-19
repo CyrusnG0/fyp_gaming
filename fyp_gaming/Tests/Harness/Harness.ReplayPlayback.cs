@@ -539,6 +539,92 @@ internal static partial class Harness
             {
                 Console.WriteLine("  [REAL-RUN] skipped (real run files not present in this checkout)");
             }
+
+            // 6. Controlled-scenario fallback (run-20261119080859920-a52c3e69 in cs-route-seasons-v1)
+            string csRunId = "run-20261119080859920-a52c3e69";
+            string csRel = Path.Combine(".kimi-code", "worktrees", "prompt-size-integration", "runs", "controlled-scenarios", "controlled-20261119T080859Z-d6d9e6ca", "cs-route-seasons-v1");
+            string csDir = null;
+            string cur = Directory.GetCurrentDirectory();
+            foreach (string probe in new[] {
+                Path.Combine(cur, csRel),
+                Path.Combine(cur, "..", csRel),
+                Path.Combine(cur, "..", "..", csRel),
+                Path.Combine(cur, "..", "..", "..", csRel),
+                Path.Combine(cur, "..", "..", "..", "..", csRel),
+            })
+            {
+                if (Directory.Exists(probe)) { csDir = Path.GetFullPath(probe); break; }
+            }
+            if (csDir != null && ReplayLoader.TryResolveRunFiles(csRunId, csDir, out string css, out string csj, out string cse, out string csb, out _))
+            {
+                Check(csb == null, "[CS-REPLAY] original run has no *-bootstrap.json (resolved via scenario.json fallback)");
+                ReplayBundle csBundle = ReplayLoader.Load(css, csj, cse, csRunId, csb);
+                Check(csBundle.SetupSource == "scenario_fallback" && csBundle.MapSource == "host_map_unverified"
+                    && csBundle.Bootstrap == null && csBundle.ScenarioSetup != null,
+                    $"[CS-REPLAY] provenance recorded honestly (setup={csBundle.SetupSource}, map={csBundle.MapSource})");
+
+                // Missing hostMap must fail clearly rather than guessing terrain
+                bool noMapThrew = false;
+                try { new ReplaySession(csBundle, null); }
+                catch (InvalidOperationException) { noMapThrew = true; }
+                Check(noMapThrew, "[CS-REPLAY] scenario fallback fails clearly when hostMap is null");
+
+                var csSession = new ReplaySession(csBundle, DemoMap()) { PauseOnDivergence = true };
+                csSession.RunToCompletion();
+                var csRpt = csSession.FinalReport;
+                Console.WriteLine($"  [CS-REPLAY] completed={csSession.IsCompleted} hasDiv={csSession.HasDivergence} div='{csSession.DivergenceSummary}' obs={csSession.ObservationHashesMatched}/{csBundle.Requests.Count} acc={csSession.AcceptedActionsReplayed}/{csSession.ExpectedAcceptedActions} rej={csSession.RejectedActionsReplayed}/{csSession.ExpectedRejectedActions} actMismatch={csSession.ActionOutcomeMismatches} endTurns={csSession.VoluntaryEndTurnsReplayed}/{csSession.ExpectedVoluntaryEndTurns} allSeasonsExact={csRpt?.AllSeasonsScoreboardExactMatch}");
+                if (csRpt?.RawScoreboardMismatches != null && csRpt.RawScoreboardMismatches.Count > 0)
+                    foreach (var m in csRpt.RawScoreboardMismatches)
+                        Console.WriteLine("  [CS-REPLAY sb mismatch] " + m);
+                foreach (var sb in csSession.ReplayedScores)
+                {
+                    var parts = new List<string>();
+                    foreach (var sc in sb.Scores) parts.Add($"{sc.Faction}({sc.SeatId}):G={sc.Gold},F={sc.Food},P={sc.Population},Gar={sc.Garrison},C={sc.Cities}");
+                    Console.WriteLine($"  [CS-REPLAY S{sb.Season}] " + string.Join(" | ", parts));
+                }
+
+                var battles = new List<EventRecord>();
+                EventRecord routEvt = null, captureEvt = null;
+                foreach (var ev in csSession.Engine.Log.Records)
+                {
+                    if (ev.EventType == "battle_field") battles.Add(ev);
+                    else if (ev.EventType == "army_routed") routEvt = ev;
+                    else if (ev.EventType == "city_captured") captureEvt = ev;
+                }
+                for (int bi = 0; bi < battles.Count; bi++)
+                {
+                    var p = battles[bi].Payload;
+                    Console.WriteLine($"  [CS-REPLAY battle {bi + 1}] {p["attacker_army_id"]}({p["attacker_troops_before"]}->{p["attacker_troops_after"]}) vs {p["defender_army_id"]}({p["defender_troops_before"]}->{p["defender_troops_after"]}) outcome={p["outcome"]} winner={p["winner_seat_id"]}");
+                }
+                if (routEvt != null)
+                    Console.WriteLine($"  [CS-REPLAY rout] {routEvt.Payload["army_id"]} -> {routEvt.Payload["city_id"]} {routEvt.Payload["to"]} troops={routEvt.Payload["troops"]} morale={routEvt.Payload["morale"]}");
+                if (captureEvt != null)
+                    Console.WriteLine($"  [CS-REPLAY capture] city={captureEvt.Payload["city_id"]} by={captureEvt.Payload["army_id"]} owner={csSession.Engine.State.FindCity("cs-city-ford")?.OwnerSeatId}");
+                var ownArmy = csSession.Engine.State.FindArmy("cs-army-own");
+                Console.WriteLine($"  [CS-REPLAY final cs-army-own] pos=({ownArmy?.X},{ownArmy?.Z}) troops={ownArmy?.Troops} morale={ownArmy?.Morale}");
+
+                Check(csSession.IsCompleted && !csSession.HasDivergence && csSession.ObservationHashesMatched == 31,
+                    $"[CS-REPLAY] 31/31 observation hashes matched without divergence (matched={csSession.ObservationHashesMatched}/31)");
+                Check(battles.Count == 2
+                    && battles[0].Payload["outcome"] == "defender_holds" && battles[0].Payload["attacker_troops_after"] == "1375" && battles[0].Payload["defender_troops_after"] == "2095"
+                    && battles[1].Payload["outcome"] == "defender_routed" && battles[1].Payload["attacker_troops_after"] == "1913" && battles[1].Payload["defender_troops_after"] == "933",
+                    "[CS-REPLAY] both battle outcomes match recorded values");
+                Check(routEvt != null && routEvt.Payload["city_id"] == "cs-city-home" && routEvt.Payload["troops"] == "654"
+                    && ownArmy != null && ownArmy.X == 6 && ownArmy.Z == 8 && ownArmy.Troops == 654,
+                    "[CS-REPLAY] cs-army-own routed to Home (6,8) with 654 troops");
+                Check(captureEvt != null && captureEvt.Payload["city_id"] == "cs-city-ford"
+                    && csSession.Engine.State.FindCity("cs-city-ford")?.OwnerSeatId == "seat-1",
+                    "[CS-REPLAY] Ford Granary captured by seat-1");
+                Check(csSession.RejectedActionsReplayed == 1 && csSession.ActionOutcomeMismatches == 0
+                    && csSession.EventFeed.Count == 31 && csSession.EventFeed[6].ActionType == "invalid" && !csSession.EventFeed[6].ResultOk,
+                    "[CS-REPLAY] Req 7 invalid reply replayed as rejected with 0 action outcome mismatches");
+                Check(csRpt != null && csRpt.AllSeasonsScoreboardExactMatch && csRpt.FinalScoreboardExactMatch,
+                    "[CS-REPLAY] all S1-S3 scoreboards match recorded summary exactly");
+            }
+            else
+            {
+                Console.WriteLine("  [CS-REPLAY] skipped (cs-route-seasons-v1 run files not present)");
+            }
         }
         finally
         {

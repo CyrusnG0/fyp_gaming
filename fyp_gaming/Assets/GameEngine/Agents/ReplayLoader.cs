@@ -77,8 +77,9 @@ namespace LuanShi.Engine
 
                 string bootFile = Path.Combine(dir, $"{cleanRunId}-bootstrap.json");
                 if (File.Exists(bootFile)) b = bootFile;
+                bool hasScenarioFallback = File.Exists(Path.Combine(dir, "scenario.json"));
 
-                bool hasAllRequired = s != null && j != null && e != null && (isLegacyDemo || b != null);
+                bool hasAllRequired = s != null && j != null && e != null && (isLegacyDemo || b != null || hasScenarioFallback);
                 if (hasAllRequired)
                 {
                     summaryPath = Path.GetFullPath(s);
@@ -94,7 +95,7 @@ namespace LuanShi.Engine
                     if (s == null) missing.Add("missing summary");
                     if (j == null) missing.Add("missing jsonl");
                     if (e == null) missing.Add("missing exchanges");
-                    if (!isLegacyDemo && b == null) missing.Add("missing bootstrap");
+                    if (!isLegacyDemo && b == null && !hasScenarioFallback) missing.Add("missing bootstrap or scenario.json");
                     error = $"Directory '{dir}' has incomplete files for run '{cleanRunId}': {string.Join(", ", missing)}.";
                     return false;
                 }
@@ -135,11 +136,33 @@ namespace LuanShi.Engine
             }
 
             ReplayBootstrapData bootstrap = null;
+            ReplayScenarioSetup scenarioSetup = null;
+            string setupSource = "legacy_demo";
+            string mapSource = "legacy_default_map";
             if (!isLegacyDemo)
             {
-                if (string.IsNullOrEmpty(bootstrapPath) || !File.Exists(bootstrapPath))
-                    throw new FileNotFoundException($"Missing replay bootstrap for run '{summary.RunId}': {bootstrapPath ?? "(not found)"}");
-                bootstrap = ReplayBootstrapLoader.LoadFromFile(bootstrapPath, summary.RunId, summary.Seed);
+                if (!string.IsNullOrEmpty(bootstrapPath) && File.Exists(bootstrapPath))
+                {
+                    bootstrap = ReplayBootstrapLoader.LoadFromFile(bootstrapPath, summary.RunId, summary.Seed);
+                    setupSource = "bootstrap";
+                    mapSource = "bootstrap";
+                }
+                else
+                {
+                    string runDir = Path.GetDirectoryName(Path.GetFullPath(jsonlPath));
+                    string scenarioPath = !string.IsNullOrEmpty(runDir) ? Path.Combine(runDir, "scenario.json") : null;
+                    string settingsPath = !string.IsNullOrEmpty(runDir) ? Path.Combine(runDir, "settings.json") : null;
+                    if (!string.IsNullOrEmpty(scenarioPath) && File.Exists(scenarioPath))
+                    {
+                        scenarioSetup = ReplayScenarioFallback.Load(scenarioPath, settingsPath, summary);
+                        setupSource = "scenario_fallback";
+                        mapSource = "host_map_unverified";
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException($"Missing replay bootstrap or scenario.json for run '{summary.RunId}': {bootstrapPath ?? "(not found)"}");
+                    }
+                }
             }
 
             var exchanges = LoadExchanges(exchangesPath, summary.RunId);
@@ -160,7 +183,8 @@ namespace LuanShi.Engine
             }
 
             return new ReplayBundle {
-                Summary = summary, Requests = requests, Bootstrap = bootstrap,
+                Summary = summary, Requests = requests, Bootstrap = bootstrap, ScenarioSetup = scenarioSetup,
+                SetupSource = setupSource, MapSource = mapSource,
                 SummaryPath = summaryPath, JsonlPath = jsonlPath, ExchangesPath = exchangesPath, BootstrapPath = bootstrapPath
             };
         }
@@ -229,7 +253,7 @@ namespace LuanShi.Engine
                 throw new InvalidDataException("Invalid summary JSON: " + err);
 
             var data = new ReplaySummaryData {
-                RunId = GetString(obj, "run_id"), Seed = GetInt(obj, "seed"),
+                RunId = GetString(obj, "run_id"), ScenarioId = GetString(obj, "scenario_id"), Seed = GetInt(obj, "seed"),
                 ManualLookupEnabled = GetBool(obj, "manual_lookup_enabled"),
                 SeasonsPlanned = GetInt(obj, "seasons_planned"), SeasonsPlayed = GetInt(obj, "seasons_played"),
                 StopReason = GetString(obj, "stop_reason"), State = GetString(obj, "state"),
