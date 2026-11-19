@@ -58,7 +58,9 @@ namespace LuanShi.ControlledScenarios
             // The audit reads unknown names from inside reply; the flat list stays for run summaries.
             // after_state is a state field, named by StateObject only when it is genuinely absent.
             var replyUnknown = new List<string>();
-            if (!responded) { unknown.Add("reply.response_text"); replyUnknown.Add("response_text"); }
+            // Null means unknown; an observed empty string remains an empty reply.
+            string replyText = responded ? Redact(cap.ReplyText) : null;
+            if (replyText == null) { unknown.Add("reply.response_text"); replyUnknown.Add("response_text"); }
             if (finish == null) { unknown.Add("reply.finish_reason"); replyUnknown.Add("finish_reason"); }
             if (input == null) { unknown.Add("reply.input_tokens"); replyUnknown.Add("input_tokens"); }
             if (output == null) { unknown.Add("reply.output_tokens"); replyUnknown.Add("output_tokens"); }
@@ -73,7 +75,7 @@ namespace LuanShi.ControlledScenarios
                     ? "fake_scripted" : "fixture_" + (context.ProviderKind ?? "unknown");
             return new Dictionary<string, object>
             {
-                { "raw_text", responded ? Redact(cap.ReplyText) : null },
+                { "raw_text", replyText },
                 { "source", source },
                 { "finish_reason", finish },
                 { "input_tokens", input },

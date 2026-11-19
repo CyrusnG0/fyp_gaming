@@ -59,6 +59,9 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-R2] RouteChoiceLivePlumbing", RouteChoiceLivePlumbing),
                 Entry("[CS-S1] RouteSeasonsEngineChecks", RouteSeasonsEngineChecks),
                 Entry("[CS-S2] RouteSeasonsFakeRehearsal", RouteSeasonsFakeRehearsal),
+                Entry("[CS-N1] NullReplyTextIsUnknown", NullReplyTextIsUnknown),
+                Entry("[CS-T1] TacticalChoiceChecks", TacticalChoiceChecks),
+                Entry("[LONG] LongDemoChecks", LongDemoChecks),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {
