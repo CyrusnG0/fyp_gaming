@@ -107,23 +107,23 @@ namespace LuanShi.Engine
                 int govLevel = fac?.ResearchLevel(ResearchLine.Governance) ?? 0;
 
                 int taxes = revolted ? 0
-                          : (int)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor
-                                  * BalanceConfig.ResearchTaxMult(govLevel));
+                          : (int)(float)(city.Population * BalanceConfig.TaxGoldPerPop * yieldFactor
+                                         * BalanceConfig.ResearchTaxMult(govLevel));
                 city.Gold += taxes;
 
                 int harvest = revolted ? 0
-                            : (int)(Balance.CityBaseFoodYield
-                                  * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood
-                                  * BalanceConfig.ResearchFoodYieldMult(agriLevel));
+                            : (int)(float)(Balance.CityBaseFoodYield
+                                           * (1f + city.ReclaimPct / 100f) * yieldFactor * seasonFood
+                                           * BalanceConfig.ResearchFoodYieldMult(agriLevel));
                 city.Food += harvest;
-                int eaten = (int)(city.Population * BalanceConfig.FoodPerPop
-                                + Balance.TroopFoodUpkeep(city.Garrison, city.GarrisonType));
+                int eaten = (int)(float)(city.Population * BalanceConfig.FoodPerPop
+                                         + Balance.TroopFoodUpkeep(city.Garrison, city.GarrisonType));
                 city.Food -= eaten;
 
                 string note = null;
                 if (city.Food < 0)
                 {
-                    int lost = (int)(city.Population * BalanceConfig.StarvationPopLoss);
+                    int lost = (int)(float)(city.Population * BalanceConfig.StarvationPopLoss);
                     city.Population -= lost;
                     city.Food = 0;
                     AddNote(ref note, $"Famine! Population reduced by {lost}");
@@ -134,12 +134,12 @@ namespace LuanShi.Engine
                 {
                     float rate = BalanceConfig.PopGrowthRate
                                + (float)(rng.NextDouble() * 2 - 1) * BalanceConfig.PopGrowthVariance;
-                    city.Population += (int)(city.Population * rate);
+                    city.Population += (int)(float)(city.Population * rate);
                 }
 
                 if (revolted)
                 {
-                    int garrisonLost = (int)(city.Garrison * BalanceConfig.RevoltGarrisonLossPct);
+                    int garrisonLost = (int)(float)(city.Garrison * BalanceConfig.RevoltGarrisonLossPct);
                     city.Garrison -= garrisonLost;
                     AddMorale(city, BalanceConfig.RevoltMoraleGainAfterVenting);
                     AddNote(ref note, $"Revolt! output halted this season, garrison −{garrisonLost}");
