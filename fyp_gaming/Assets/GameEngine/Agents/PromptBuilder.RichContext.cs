@@ -17,6 +17,13 @@ namespace LuanShi.Engine
         /// <summary>Distinct identity for the rich-deliberation experiment prompt.</summary>
         public const string RichDeliberationPromptVersion = "demo-slice-7-rich-deliberation-1";
 
+        /// <summary>
+        /// True when a run record's prompt version indicates the RichContextAssembler path
+        /// (which may include more than <see cref="MaxPromptObservationEvents"/> events before trim).
+        /// </summary>
+        public static bool IsRichPromptVersion(string version)
+            => !string.IsNullOrEmpty(version) && version.IndexOf("-rich-", StringComparison.Ordinal) >= 0;
+
         internal const string RichSectionHeader = "\nINFORMATION ACCESS AND LIMITS (host facts for this request):\n";
 
         private const string RichAddendum =

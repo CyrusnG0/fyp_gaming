@@ -125,7 +125,9 @@ namespace LuanShi.Engine
                 ? req.ControllerType
                 : ControllerType.Llm;
 
-        private static void ParseReplayRecordAction(ReplayRequestRecord req, bool diplomacy, bool isLlmController,
+        private static void ParseReplayRecordAction(ReplayRequestRecord req,
+            bool allowAttack, bool allowResearch, bool allowDiplomacy, bool allowGarrisonConversion,
+            bool isLlmController,
             out ActionCommand cmd, out bool isEndTurn, out bool replayedParseOk, out string parseError,
             out string actType, out string actSummary)
         {
@@ -164,8 +166,8 @@ namespace LuanShi.Engine
             // parser accepts it. The recorded outcome, not today's parser, defines replay.
             ParseResult parsed = !req.ParseOk
                 ? ParseResult.Failure(req.ResultError ?? "recorded invalid response")
-                : LlmActionParser.Parse(req.RawModelText, false, false, diplomacy,
-                    PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
+                : LlmActionParser.Parse(req.RawModelText, allowAttack, allowResearch,
+                    allowDiplomacy, allowGarrisonConversion);
             isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
             replayedParseOk = parsed.Ok && parsed.Action != null;
             parseError = replayedParseOk ? null : (parsed.Error ?? "parse_failure");

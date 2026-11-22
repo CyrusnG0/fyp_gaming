@@ -15,8 +15,11 @@ internal static partial class Harness
         Check(!ReplayLoader.TryResolveRunFiles("", out _, out _, out _, out string errEmpty), "empty runId rejected");
         Check(errEmpty != null && errEmpty.Contains("required"), "error message mentions required");
 
-        Check(!ReplayLoader.TryResolveRunFiles("run-other", out _, out _, out _, out string errOther), "unsupported runId rejected");
-        Check(errOther != null && errOther.Contains("restricted"), "error message mentions restricted");
+        Check(!ReplayLoader.TryResolveRunFiles("run-other", out _, out _, out _, out string errOther), "missing runId rejected");
+        Check(errOther != null && errOther.Contains("Could not resolve"), "error message mentions missing run resolution");
+
+        Check(!ReplayLoader.TryResolveRunFiles("../bad-run", out _, out _, out _, out string errBad), "unsafe runId rejected");
+        Check(errBad != null && errBad.Contains("unsupported filename"), "error message rejects unsafe runId characters");
 
         string runId = ReplayLoader.VerifiedDemoRunId;
         bool resolved = ReplayLoader.TryResolveRunFiles(runId, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error);

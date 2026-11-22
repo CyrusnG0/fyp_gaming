@@ -59,6 +59,7 @@ namespace LuanShi.Engine
     public sealed class ReplaySummaryData
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string BalanceProfileKey;
         public bool ManualLookupEnabled;
@@ -90,6 +91,7 @@ namespace LuanShi.Engine
     public sealed class ReplayRequestRecord
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string Provider;
         public string Model;
@@ -116,6 +118,10 @@ namespace LuanShi.Engine
         public string InquiryTool;
         /// <summary>Recorded bounded inquiry result size; present when the runner wrote an inquiry result.</summary>
         public int? InquiryResultChars;
+        /// <summary>Recorded observation events included in the prompt (from context_report or completeness section).</summary>
+        public int? RecordedObservationEventsIncluded;
+        /// <summary>Recorded observation events available before truncation (from context_report or completeness section).</summary>
+        public int? RecordedObservationEventsAvailable;
         public string StateAfter;
         public string ErrorKind;
         public string ErrorDetail;
@@ -154,9 +160,13 @@ namespace LuanShi.Engine
     {
         public ReplaySummaryData Summary;
         public IReadOnlyList<ReplayRequestRecord> Requests;
+        public ReplayBootstrapData Bootstrap;
+        public string SetupSource;
+        public string MapSource;
         public string SummaryPath;
         public string JsonlPath;
         public string ExchangesPath;
+        public string BootstrapPath;
         public bool? BootstrapVisibleMarchRoutes;
         public bool? BootstrapStateRequireVisibleMarchRoutes;
     }
@@ -180,8 +190,11 @@ namespace LuanShi.Engine
     public sealed class ReplayComparisonReport
     {
         public string RunId;
+        public string ScenarioId;
         public int Seed;
         public string BalanceProfileKey;
+        public string SetupSource;
+        public string MapSource;
         public int SeasonsVerified;
         public int TotalRequests;
 
@@ -233,6 +246,10 @@ namespace LuanShi.Engine
 
         public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
+        public bool IsIncompleteRun;
+        public string StopReason;
+        public int FinalRecordedSeason;
+        public string FinalRecordedSeatId;
         public VisibleMarchRuleProvenance VisibleMarchRuleProvenance;
         public bool VisibleMarchRuleEstablished = true;
         public string VisibleMarchRuleNote;
@@ -250,6 +267,10 @@ namespace LuanShi.Engine
             sb.AppendLine("=== LUANSHI OFFLINE REPLAY COMPARISON REPORT ===");
             string sSeed = Seed != 0 ? Seed.ToString() : "unknown";
             sb.AppendLine($"Run ID: {RunId} | Seed: {sSeed} | Profile: {BalanceProfileKey}");
+            if (!string.IsNullOrEmpty(SetupSource) || !string.IsNullOrEmpty(MapSource))
+                sb.AppendLine($"Setup Source: {SetupSource ?? "unknown"} | Map Source: {MapSource ?? "unknown"}");
+            if (IsIncompleteRun)
+                sb.AppendLine($"Incomplete / Paused Run: stopped at Season {FinalRecordedSeason} ({FinalRecordedSeatId ?? "unknown"}), reason: {StopReason ?? "unknown"}");
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
             sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
             sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");

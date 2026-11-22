@@ -1856,6 +1856,16 @@ namespace LuanShi.Engine
             return rec;
         }
 
+        internal void RestoreInitialEvent(string gameId, int season, string phase, string actorSeatId,
+            string controllerType, string eventType, string visibility,
+            Dictionary<string, string> payload, string sourceActionId,
+            Dictionary<string, string> args = null, string text = null)
+        {
+            var rec = Log.Emit(gameId, season, phase, actorSeatId, controllerType, eventType,
+                               visibility, payload, sourceActionId, args, text);
+            EventPrivacy.Freeze(rec, State, (seat, x, z) => InSight(State, seat, x, z), null, null);
+        }
+
         private static Dictionary<string, string> P(params string[] kv)
         {
             var d = new Dictionary<string, string>();

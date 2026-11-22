@@ -5,8 +5,10 @@ using System.Text.RegularExpressions;
 
 namespace LuanShi.Engine
 {
-    public static class ReplayLoader
+    public static partial class ReplayLoader
     {
+        // Retained as a default fixture for the harness and demo scene. Any safe run ID with
+        // valid summary/jsonl/exchanges/bootstrap files may be loaded.
         public const string VerifiedDemoRunId = "run-20261109082434809-51b7ebd5";
 
         private sealed class ExchangeRecord
@@ -15,14 +17,18 @@ namespace LuanShi.Engine
             public string UserPrompt;
             public string ContentText;
             public string Explanation;
+            public bool HasResultEvent;
         }
 
         public static bool TryResolveRunFiles(string runId, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
-            => TryResolveRunFiles(runId, null, out summaryPath, out jsonlPath, out exchangesPath, out error);
+            => TryResolveRunFiles(runId, null, out summaryPath, out jsonlPath, out exchangesPath, out _, out error);
 
         public static bool TryResolveRunFiles(string runId, string searchRoot, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
+            => TryResolveRunFiles(runId, searchRoot, out summaryPath, out jsonlPath, out exchangesPath, out _, out error);
+
+        public static bool TryResolveRunFiles(string runId, string searchRoot, out string summaryPath, out string jsonlPath, out string exchangesPath, out string bootstrapPath, out string error)
         {
-            summaryPath = null; jsonlPath = null; exchangesPath = null; error = null;
+            summaryPath = null; jsonlPath = null; exchangesPath = null; bootstrapPath = null; error = null;
 
             if (string.IsNullOrWhiteSpace(runId))
             {
@@ -31,11 +37,12 @@ namespace LuanShi.Engine
             }
 
             string cleanRunId = runId.Trim();
-            if (!string.Equals(cleanRunId, VerifiedDemoRunId, StringComparison.Ordinal))
+            if (!IsSafeRunId(cleanRunId))
             {
-                error = $"Offline replay is restricted to verified demo run '{VerifiedDemoRunId}'; got '{cleanRunId}'.";
+                error = "Run ID contains unsupported filename characters.";
                 return false;
             }
+            bool isLegacyDemo = string.Equals(cleanRunId, VerifiedDemoRunId, StringComparison.Ordinal);
 
             var searchDirs = new List<string>();
             bool rootSpecified = !string.IsNullOrEmpty(searchRoot);
@@ -54,6 +61,11 @@ namespace LuanShi.Engine
                 searchDirs.Add(Path.Combine(cur, "..", "runs"));
                 searchDirs.Add(Path.Combine(cur, "..", "..", "runs"));
                 searchDirs.Add(Path.Combine(cur, "..", "..", "..", "runs"));
+                searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "demo-tactical-choice", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", ".kimi-code", "worktrees", "demo-tactical-choice", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", "..", ".kimi-code", "worktrees", "demo-tactical-choice", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", "..", "..", ".kimi-code", "worktrees", "demo-tactical-choice", "runs"));
+                searchDirs.Add(Path.Combine(cur, "..", "..", "..", "..", ".kimi-code", "worktrees", "demo-tactical-choice", "runs"));
                 searchDirs.Add(Path.Combine(cur, ".kimi-code", "worktrees", "offline-replay", "runs"));
                 searchDirs.Add(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs"));
             }
@@ -62,7 +74,7 @@ namespace LuanShi.Engine
             {
                 if (!Directory.Exists(dir)) continue;
 
-                string s = null, j = null, e = null;
+                string s = null, j = null, e = null, b = null;
                 string sum1 = Path.Combine(dir, $"pilot-{cleanRunId}-summary.json");
                 string sum2 = Path.Combine(dir, $"{cleanRunId}-summary.json");
                 if (File.Exists(sum1)) s = sum1;
@@ -74,47 +86,76 @@ namespace LuanShi.Engine
                 string exchFile = Path.Combine(dir, $"{cleanRunId}-exchanges.ndjson");
                 if (File.Exists(exchFile)) e = exchFile;
 
-                if (s != null && j != null && e != null)
+                string bootFile = Path.Combine(dir, $"{cleanRunId}-bootstrap.json");
+                if (File.Exists(bootFile)) b = bootFile;
+
+                if (s != null && j != null && e != null && (isLegacyDemo || b != null))
                 {
                     summaryPath = Path.GetFullPath(s);
                     jsonlPath = Path.GetFullPath(j);
                     exchangesPath = Path.GetFullPath(e);
+                    bootstrapPath = b != null ? Path.GetFullPath(b) : null;
                     return true;
                 }
 
-                if (s != null || j != null || e != null || rootSpecified)
+                if (s != null || j != null || e != null || b != null || rootSpecified)
                 {
                     var missing = new List<string>();
                     if (s == null) missing.Add("missing summary");
                     if (j == null) missing.Add("missing jsonl");
                     if (e == null) missing.Add("missing exchanges");
+                    if (!isLegacyDemo && b == null) missing.Add("missing bootstrap");
                     error = $"Directory '{dir}' has incomplete files for run '{cleanRunId}': {string.Join(", ", missing)}.";
                     return false;
                 }
             }
 
-            error = $"Could not resolve verified run files for '{cleanRunId}' in searched paths.";
+            error = $"Could not resolve run files for '{cleanRunId}' in searched paths.";
             return false;
+        }
+
+        private static bool IsSafeRunId(string runId)
+        {
+            if (string.IsNullOrWhiteSpace(runId)) return false;
+            for (int i = 0; i < runId.Length; i++)
+            {
+                char c = runId[i];
+                if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.')) return false;
+            }
+            return runId != "." && runId != "..";
         }
 
         public static ReplayBundle LoadByRunId(string runId, string searchRoot = null)
         {
-            if (!TryResolveRunFiles(runId, searchRoot, out string s, out string j, out string e, out string err))
+            if (!TryResolveRunFiles(runId, searchRoot, out string s, out string j, out string e, out string b, out string err))
                 throw new FileNotFoundException(err);
-            return Load(s, j, e, runId);
+            return Load(s, j, e, runId.Trim(), b);
         }
 
-        public static ReplayBundle Load(string summaryPath, string jsonlPath, string exchangesPath, string expectedRunId = VerifiedDemoRunId)
+        public static ReplayBundle Load(string summaryPath, string jsonlPath, string exchangesPath, string expectedRunId = null, string bootstrapPath = null)
         {
             if (!File.Exists(summaryPath)) throw new FileNotFoundException("summary file missing: " + summaryPath);
             if (!File.Exists(jsonlPath)) throw new FileNotFoundException("jsonl file missing: " + jsonlPath);
             if (!File.Exists(exchangesPath)) throw new FileNotFoundException("exchanges file missing: " + exchangesPath);
 
             var summary = LoadSummary(summaryPath);
-            if (string.IsNullOrEmpty(summary.RunId) || !string.Equals(summary.RunId, VerifiedDemoRunId, StringComparison.Ordinal))
-                throw new InvalidDataException($"Summary run_id '{summary.RunId}' does not match verified demo run '{VerifiedDemoRunId}'.");
+            if (string.IsNullOrEmpty(summary.RunId))
+                throw new InvalidDataException("Summary run_id is missing.");
+            if (!IsSafeRunId(summary.RunId))
+                throw new InvalidDataException($"Summary run_id '{summary.RunId}' contains unsupported filename characters.");
             if (expectedRunId != null && !string.Equals(summary.RunId, expectedRunId, StringComparison.Ordinal))
                 throw new InvalidDataException($"Summary run_id '{summary.RunId}' does not match expected run_id '{expectedRunId}'.");
+
+            bool isLegacyDemo = string.Equals(summary.RunId, VerifiedDemoRunId, StringComparison.Ordinal);
+            if (string.IsNullOrEmpty(bootstrapPath))
+                bootstrapPath = ResolveOptionalBootstrapPath(summaryPath, jsonlPath, summary.RunId);
+
+            LoadBootstrapOrRuleFlags(bootstrapPath, summary, isLegacyDemo,
+                out ReplayBootstrapData bootstrap,
+                out bool? bootstrapVisible,
+                out bool? bootstrapStateVisible,
+                out string setupSource,
+                out string mapSource);
 
             var exchanges = LoadExchanges(exchangesPath, summary.RunId);
             var requests = LoadRequests(jsonlPath, exchanges, summary.RunId, summary.Seed);
@@ -131,23 +172,27 @@ namespace LuanShi.Engine
                 string key = (req.RequestIndex > 0 && !string.IsNullOrEmpty(req.RunId) && !string.IsNullOrEmpty(req.SeatId) && req.Season > 0)
                     ? $"{req.RunId}:{req.SeatId}:{req.Season}:{req.RequestIndex}"
                     : null;
-                if (key == null || !exchanges.TryGetValue(key, out ExchangeRecord ex) || string.IsNullOrEmpty(ex.UserPrompt) || string.IsNullOrEmpty(ex.ContentText))
+                if (key == null || !exchanges.TryGetValue(key, out ExchangeRecord ex)
+                    || string.IsNullOrEmpty(ex.UserPrompt)
+                    || !ex.HasResultEvent
+                    || (req.ParseOk && string.IsNullOrEmpty(ex.ContentText)))
                     throw new InvalidDataException($"Missing or incomplete exchange record for request {key ?? "absent-request-index"}.");
             }
 
-            var bundle = new ReplayBundle {
-                Summary = summary, Requests = requests,
-                SummaryPath = summaryPath, JsonlPath = jsonlPath, ExchangesPath = exchangesPath
-            };
-
-            string bootstrapPath = ResolveOptionalBootstrapPath(summaryPath, jsonlPath, summary.RunId);
-            if (bootstrapPath != null)
+            return new ReplayBundle
             {
-                LoadBootstrapRuleFlags(bootstrapPath, summary, out bool? bootstrapVisible, out bool? bootstrapStateVisible);
-                bundle.BootstrapVisibleMarchRoutes = bootstrapVisible;
-                bundle.BootstrapStateRequireVisibleMarchRoutes = bootstrapStateVisible;
-            }
-            return bundle;
+                Summary = summary,
+                Requests = requests,
+                Bootstrap = bootstrap,
+                SetupSource = setupSource,
+                MapSource = mapSource,
+                SummaryPath = summaryPath,
+                JsonlPath = jsonlPath,
+                ExchangesPath = exchangesPath,
+                BootstrapPath = bootstrapPath,
+                BootstrapVisibleMarchRoutes = bootstrapVisible,
+                BootstrapStateRequireVisibleMarchRoutes = bootstrapStateVisible,
+            };
         }
 
         private static string ResolveOptionalBootstrapPath(string summaryPath, string jsonlPath, string runId)
@@ -157,31 +202,6 @@ namespace LuanShi.Engine
             if (string.IsNullOrEmpty(dir)) return null;
             string candidate = Path.Combine(dir, $"{runId}-bootstrap.json");
             return File.Exists(candidate) ? candidate : null;
-        }
-
-        private static void LoadBootstrapRuleFlags(string path, ReplaySummaryData summary,
-            out bool? featuresVisible, out bool? stateVisible)
-        {
-            featuresVisible = null;
-            stateVisible = null;
-            string text = File.ReadAllText(path);
-            if (!StrictJson.TryParseLenientNumbers(text, out JsonNode root, out string err) || !(root is JsonObject obj))
-                throw new InvalidDataException("Invalid bootstrap JSON: " + err);
-            if (obj.TryGet("features", out JsonNode fNode) && fNode is JsonObject fObj)
-                featuresVisible = GetNullableBool(fObj, "visible_march_routes");
-            if (obj.TryGet("initial_world", out JsonNode wNode) && wNode is JsonObject wObj)
-                stateVisible = GetNullableBool(wObj, "require_visible_march_routes");
-
-            if (featuresVisible.HasValue && stateVisible.HasValue && featuresVisible.Value != stateVisible.Value)
-                throw new InvalidDataException(
-                    $"Bootstrap rule divergence: features.visible_march_routes={featuresVisible.Value} != initial_world.require_visible_march_routes={stateVisible.Value}.");
-            if (summary != null && summary.VisibleMarchRoutesEnforced.HasValue)
-            {
-                bool? bootRule = stateVisible ?? featuresVisible;
-                if (bootRule.HasValue && bootRule.Value != summary.VisibleMarchRoutesEnforced.Value)
-                    throw new InvalidDataException(
-                        $"Summary/bootstrap rule divergence: summary.visible_march_routes_enforced={summary.VisibleMarchRoutesEnforced.Value} != bootstrap={bootRule.Value}.");
-            }
         }
 
         private static Dictionary<string, ExchangeRecord> LoadExchanges(string path, string expectedRunId)
@@ -221,6 +241,7 @@ namespace LuanShi.Engine
                         rec.UserPrompt = GetString(reqObj, "user");
                     else if (evt == "result" && obj.TryGet("response", out JsonNode resNode) && resNode is JsonObject resObj)
                     {
+                        rec.HasResultEvent = true;
                         string ct = GetString(resObj, "content_text");
                         rec.ContentText = ct;
                         if (!string.IsNullOrEmpty(ct) && StrictJson.TryParse(ct, out JsonNode ctNode, out _) && ctNode is JsonObject ctObj)
@@ -248,7 +269,7 @@ namespace LuanShi.Engine
                 throw new InvalidDataException("Invalid summary JSON: " + err);
 
             var data = new ReplaySummaryData {
-                RunId = GetString(obj, "run_id"), Seed = GetInt(obj, "seed"),
+                RunId = GetString(obj, "run_id"), ScenarioId = GetString(obj, "scenario_id", null), Seed = GetInt(obj, "seed"),
                 ManualLookupEnabled = GetBool(obj, "manual_lookup_enabled"),
                 SeasonsPlanned = GetInt(obj, "seasons_planned"), SeasonsPlayed = GetInt(obj, "seasons_played"),
                 StopReason = GetString(obj, "stop_reason"), State = GetString(obj, "state"),
@@ -359,11 +380,12 @@ namespace LuanShi.Engine
                     string raw = GetString(obj, "raw_model_text");
                     // The record's own identity decides whether the diplomacy orders were enabled, so
                     // this pre-read agrees with the parse below and with the record it feeds.
+                    string inquiryTool = GetString(obj, "inquiry_tool");
                     string promptVersion = GetString(obj, "prompt_version");
                     bool isEnd = false;
-                    if (parseOk && !string.IsNullOrEmpty(raw))
+                    if (parseOk && string.IsNullOrEmpty(inquiryTool) && !string.IsNullOrEmpty(raw))
                     {
-                        var p = LlmActionParser.Parse(raw, false, false,
+                        var p = LlmActionParser.Parse(raw, true, true,
                             PromptBuilder.IsDiplomacyPromptVersion(promptVersion),
                             PromptBuilder.IsGarrisonConversionPromptVersion(promptVersion));
                         isEnd = p.Ok && p.Action != null && p.Action.EndTurn;
@@ -380,21 +402,29 @@ namespace LuanShi.Engine
                     }
 
                     var rec = new ReplayRequestRecord {
-                        RunId = runId, Seed = seed, Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
+                        RunId = runId, ScenarioId = GetString(obj, "scenario_id", null), Seed = seed,
+                        Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
                         PromptVersion = promptVersion, SchemaHash = GetString(obj, "schema_hash"),
                         SeatId = GetString(obj, "seat_id"), ControllerType = controllerType,
                         TurnToken = GetInt(obj, "turn_token"), Season = GetInt(obj, "season"),
+                        LatencyMs = GetInt(obj, "latency_ms"),
                         ObservationHash = GetString(obj, "observation_hash"), ObservationJson = GetRawOrString(obj, "observation_json"),
                         RequestIndex = GetInt(obj, "request_index"), TotalRequests = GetInt(obj, "total_requests"),
                         RawModelText = raw, ParseOk = parseOk,
                         CommandJson = commandJson, ResultOk = resultOk,
-                        ResultRecorded = roNode is JsonBool, InquiryTool = GetString(obj, "inquiry_tool"),
+                        ResultRecorded = roNode is JsonBool, InquiryTool = inquiryTool,
                         InquiryResultChars = GetNullableInt(obj, "inquiry_result_chars"),
                         ResultError = GetString(obj, "result_error"), StateAfter = GetString(obj, "state_after"),
+                        ErrorKind = GetString(obj, "error_kind"), ErrorDetail = GetString(obj, "error_detail"),
                         FinishReason = GetString(obj, "finish_reason"), InputTokens = GetInt(obj, "input_tokens"),
                         OutputTokens = GetInt(obj, "output_tokens"), ReasoningTokens = GetInt(obj, "reasoning_tokens"),
-                        TotalTokens = GetInt(obj, "total_tokens"), ProviderRequestId = GetString(obj, "provider_request_id")
+                        TotalTokens = GetInt(obj, "total_tokens"), ProviderRequestId = GetString(obj, "provider_request_id"),
+                        HttpStatus = GetInt(obj, "http_status")
                     };
+
+                    ExtractRecordedEventCapFromContextReport(obj, out int? crInc, out int? crAvail);
+                    rec.RecordedObservationEventsIncluded = crInc;
+                    rec.RecordedObservationEventsAvailable = crAvail;
 
                     string key = (rec.RequestIndex > 0 && !string.IsNullOrEmpty(rec.RunId) && !string.IsNullOrEmpty(rec.SeatId) && rec.Season > 0)
                         ? $"{rec.RunId}:{rec.SeatId}:{rec.Season}:{rec.RequestIndex}"
@@ -403,13 +433,23 @@ namespace LuanShi.Engine
                     {
                         rec.ExchangeId = ex.ExchangeId; rec.UserPrompt = ex.UserPrompt;
                         rec.PromptExcerpt = ExtractPromptExcerpt(ex.UserPrompt);
-                        rec.ResponseContentText = ex.ContentText ?? rec.RawModelText;
-                        rec.RecordedExplanation = !string.IsNullOrEmpty(ex.Explanation) ? ex.Explanation : "unknown";
+                        if (!rec.RecordedObservationEventsIncluded.HasValue)
+                        {
+                            ExtractRecordedEventCapFromPrompt(ex.UserPrompt, out int? pInc, out int? pAvail);
+                            rec.RecordedObservationEventsIncluded = pInc;
+                            if (!rec.RecordedObservationEventsAvailable.HasValue)
+                                rec.RecordedObservationEventsAvailable = pAvail;
+                        }
+                        rec.ResponseContentText = !string.IsNullOrEmpty(ex.ContentText) ? ex.ContentText : rec.RawModelText;
+                        string expl = (!string.IsNullOrEmpty(ex.Explanation) && ex.Explanation != "unknown")
+                            ? ex.Explanation
+                            : ExtractExplanationFromJson(rec.CommandJson) ?? ExtractExplanationFromJson(rec.RawModelText);
+                        rec.RecordedExplanation = !string.IsNullOrEmpty(expl) ? expl : "unknown";
                     }
                     else
                     {
                         rec.ResponseContentText = rec.RawModelText;
-                        rec.RecordedExplanation = null;
+                        rec.RecordedExplanation = ExtractExplanationFromJson(rec.CommandJson) ?? ExtractExplanationFromJson(rec.RawModelText);
                     }
                     list.Add(rec);
                 }
@@ -427,6 +467,16 @@ namespace LuanShi.Engine
             string excerpt = sanitized.Substring(start, len).Trim();
             if (start + len < sanitized.Length) excerpt += " ...";
             return excerpt;
+        }
+
+        private static string ExtractExplanationFromJson(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            if (!StrictJson.TryParseLenientNumbers(json, out JsonNode n, out _) || !(n is JsonObject obj)) return null;
+            string summary = GetString(obj, "summary", null);
+            if (!string.IsNullOrEmpty(summary)) return summary;
+            string reason = GetString(obj, "reason", null);
+            return !string.IsNullOrEmpty(reason) ? reason : null;
         }
 
         private static string GetString(JsonObject obj, string key, string fallback = "") => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonString s ? s.Value : fallback;

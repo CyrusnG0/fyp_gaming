@@ -134,6 +134,7 @@ internal static partial class Harness
         RunCompactScenario();
         RunCombatMovementRehearsal();
         RunReplayBootstrap();
+        RunReplayPaidMatch();
         RunMarchPathCost();
 
         Console.WriteLine($"\n{passed} passed, {failed} failed");
