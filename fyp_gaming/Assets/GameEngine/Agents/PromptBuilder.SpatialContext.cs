@@ -48,6 +48,24 @@ namespace LuanShi.Engine
             return baseVer == PromptVersion ? SpatialContextPromptVersion : baseVer + "+spatial";
         }
 
+        /// <summary>
+        /// True when a recorded prompt version carries the opt-in spatial context feature, which
+        /// activates visible-only march routing at the LLM host (and in the shared engine on new builds).
+        /// </summary>
+        public static bool IsSpatialPromptVersion(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return false;
+            if (IsGarrisonConversionPromptVersion(version))
+                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
+                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            const string dipSuffix = "+diplomacy";
+            if (version.EndsWith(dipSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - dipSuffix.Length);
+            if (string.Equals(version, SpatialContextPromptVersion, StringComparison.Ordinal)) return true;
+            const string spatialSuffix = "+spatial";
+            return version.Length > spatialSuffix.Length && version.EndsWith(spatialSuffix, StringComparison.Ordinal);
+        }
+
         public static string CombinedSystemPromptFor(bool planning, bool inquiry, LlmPersona persona,
             bool attack, bool deliberation, bool rich, bool research, bool spatial)
         {

@@ -216,6 +216,8 @@ namespace LuanShi.Engine
             _seasonsPlanned = seasonsToPlay;
             _seed = seed;
             _recorder = recorder;
+            if (_engine?.State != null && _runner != null && _runner.RequireVisibleMarchRoutes)
+                _engine.State.RequireVisibleMarchRoutes = true;
             _playOrder = SeatRotation.PlayOrder(engine.State);
             _currentSeason = engine.State.Season;
             if (_playOrder.Count == 0)

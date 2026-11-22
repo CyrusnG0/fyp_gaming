@@ -217,6 +217,7 @@ namespace LuanShi
         {
             if (agentRunner == null) return;
             if (agentRecorder == null) throw new System.Exception("replay bootstrap unavailable: local run recorder missing");
+            SyncSharedMatchRules();
             string revision = System.Environment.GetEnvironmentVariable("LUANSHI_BUILD_REVISION");
             string path = agentRecorder.WriteReplayBootstrap(engine, randomSeed, agentConfig, revision,
                 spectatorMode ? "spectator" : "single_llm", spectatorMode ? spectatorSeasons : 0);

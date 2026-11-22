@@ -11,6 +11,14 @@ namespace LuanShi.Engine
         UnverifiedSceneSetup
     }
 
+    public enum VisibleMarchRuleProvenance
+    {
+        LegacyUnenforced,
+        SharedEngineEstablished,
+        LlmHostOnlyHistorical,
+        Unestablished
+    }
+
     public sealed class ReplayTurnSummary
     {
         public int Season;
@@ -73,6 +81,8 @@ namespace LuanShi.Engine
         public long InputTokens;
         public long OutputTokens;
         public int TotalInvalid;
+        public bool? VisibleMarchRoutesEnforced;
+        public string SpatialContextLevel;
         public IReadOnlyList<ReplaySeasonScoreboard> Scoreboards;
         public IReadOnlyList<ReplayTurnSummary> Turns;
     }
@@ -86,6 +96,7 @@ namespace LuanShi.Engine
         public string PromptVersion;
         public string SchemaHash;
         public string SeatId;
+        public string ControllerType;
         public int TurnToken;
         public int Season;
         public string ObservationHash;
@@ -146,6 +157,8 @@ namespace LuanShi.Engine
         public string SummaryPath;
         public string JsonlPath;
         public string ExchangesPath;
+        public bool? BootstrapVisibleMarchRoutes;
+        public bool? BootstrapStateRequireVisibleMarchRoutes;
     }
 
     public sealed class ReplayPositionCheck
@@ -220,6 +233,9 @@ namespace LuanShi.Engine
 
         public IReadOnlyList<string> ProposedFloatingPointNotes;
         public IReadOnlyList<string> DisclosedDependencies;
+        public VisibleMarchRuleProvenance VisibleMarchRuleProvenance;
+        public bool VisibleMarchRuleEstablished = true;
+        public string VisibleMarchRuleNote;
         public bool RawExactMatch;
         public bool ExactVerificationPassed => RawExactMatch;
 
@@ -292,6 +308,8 @@ namespace LuanShi.Engine
                 foreach (var dep in DisclosedDependencies)
                     sb.AppendLine("  * " + dep);
             }
+            if (!string.IsNullOrEmpty(VisibleMarchRuleNote))
+                sb.AppendLine("  * Visible March Rule: " + VisibleMarchRuleNote);
             sb.AppendLine();
             sb.AppendLine($"OVERALL RAW VERIFICATION: {(RawExactMatch ? "PASS" : "FAIL (RAW MISMATCHES REPORTED HONESTLY)")}");
             sb.AppendLine("================================================");

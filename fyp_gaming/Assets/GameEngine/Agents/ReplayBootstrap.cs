@@ -22,6 +22,12 @@ namespace LuanShi.Engine
             if (engine.State.Map == null) throw new InvalidOperationException("replay bootstrap unavailable: map missing");
             if (string.IsNullOrWhiteSpace(runId)) throw new InvalidOperationException("replay bootstrap unavailable: run id missing");
 
+            bool configVisible = config != null && config.EffectiveVisibleMarchRoutes;
+            bool engineVisible = engine.State.RequireVisibleMarchRoutes;
+            if (configVisible && !engineVisible)
+                throw new InvalidOperationException(
+                    "replay bootstrap unavailable: visible_march_routes config diverges from engine state rule");
+
             string world = WorldJson(engine);
             string map = MapJson(engine.State.Map);
             var sb = new StringBuilder(world.Length + map.Length + 1024);
@@ -45,7 +51,7 @@ namespace LuanShi.Engine
             sb.Append(",\"diplomacy\":").Append(B(config != null && config.EnableDiplomacy));
             sb.Append(",\"manual_lookup\":").Append(B(config != null && config.EnableManualLookup));
             sb.Append(",\"deliberation\":").Append(B(config != null && config.EnableDeliberation));
-            sb.Append(",\"visible_march_routes\":").Append(B(config != null && config.EffectiveVisibleMarchRoutes)).Append('}');
+            sb.Append(",\"visible_march_routes\":").Append(B(engineVisible || configVisible)).Append('}');
             sb.Append(",\"balance_profile\":").Append(engine.Balance.ToJson());
             sb.Append(",\"initial_map_sha256\":").Append(MiniJson.Str(Sha256(map)));
             sb.Append(",\"initial_world_sha256\":").Append(MiniJson.Str(Sha256(world)));
@@ -82,6 +88,7 @@ namespace LuanShi.Engine
 
             return "{\"game_id\":" + MiniJson.Str(s.GameId)
                 + ",\"scenario_id\":" + MiniJson.Str(s.ScenarioId)
+                + ",\"require_visible_march_routes\":" + B(s.RequireVisibleMarchRoutes)
                 + ",\"season\":" + MiniJson.Num(s.Season)
                 + ",\"phase\":" + MiniJson.Str(s.Phase)
                 + ",\"winner_seat_id\":" + MiniJson.Str(s.WinnerSeatId)

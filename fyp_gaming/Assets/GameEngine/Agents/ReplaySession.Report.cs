@@ -224,7 +224,8 @@ namespace LuanShi.Engine
             }
 
             bool rawExact = _observationHashMismatches == 0 && finalSeasonExact && allSeasonsExact
-                            && _actionOutcomeMismatches == 0 && directMatched == directCount && cmdMatched == cmdCount;
+                            && _actionOutcomeMismatches == 0 && directMatched == directCount && cmdMatched == cmdCount
+                            && _visibleMarchRuleEstablished;
 
             _finalReport = new ReplayComparisonReport
             {
@@ -285,6 +286,9 @@ namespace LuanShi.Engine
                     "Neutral city-south (12,2) and watch-tower-1 (6,2): never in fog-of-war sight in JSONL; positions come from scene setup.",
                     "Rejection category and validator reason comparison (parse_failure vs engine_validation_failure + ResultError) is implemented; run-20261109082434809-51b7ebd5 itself contains 0 rejected actions (42 accepted + 2 voluntary end_turns)."
                 },
+                VisibleMarchRuleProvenance = _visibleMarchRuleProvenance,
+                VisibleMarchRuleEstablished = _visibleMarchRuleEstablished,
+                VisibleMarchRuleNote = _visibleMarchRuleNote,
                 RawExactMatch = rawExact
             };
         }

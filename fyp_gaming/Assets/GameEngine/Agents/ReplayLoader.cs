@@ -125,6 +125,9 @@ namespace LuanShi.Engine
             for (int i = 0; i < requests.Count; i++)
             {
                 var req = requests[i];
+                bool requiresExchange = string.IsNullOrEmpty(req.ControllerType)
+                    || string.Equals(req.ControllerType, ControllerType.Llm, StringComparison.Ordinal);
+                if (!requiresExchange) continue;
                 string key = (req.RequestIndex > 0 && !string.IsNullOrEmpty(req.RunId) && !string.IsNullOrEmpty(req.SeatId) && req.Season > 0)
                     ? $"{req.RunId}:{req.SeatId}:{req.Season}:{req.RequestIndex}"
                     : null;
@@ -132,10 +135,53 @@ namespace LuanShi.Engine
                     throw new InvalidDataException($"Missing or incomplete exchange record for request {key ?? "absent-request-index"}.");
             }
 
-            return new ReplayBundle {
+            var bundle = new ReplayBundle {
                 Summary = summary, Requests = requests,
                 SummaryPath = summaryPath, JsonlPath = jsonlPath, ExchangesPath = exchangesPath
             };
+
+            string bootstrapPath = ResolveOptionalBootstrapPath(summaryPath, jsonlPath, summary.RunId);
+            if (bootstrapPath != null)
+            {
+                LoadBootstrapRuleFlags(bootstrapPath, summary, out bool? bootstrapVisible, out bool? bootstrapStateVisible);
+                bundle.BootstrapVisibleMarchRoutes = bootstrapVisible;
+                bundle.BootstrapStateRequireVisibleMarchRoutes = bootstrapStateVisible;
+            }
+            return bundle;
+        }
+
+        private static string ResolveOptionalBootstrapPath(string summaryPath, string jsonlPath, string runId)
+        {
+            if (string.IsNullOrEmpty(runId)) return null;
+            string dir = Path.GetDirectoryName(jsonlPath) ?? Path.GetDirectoryName(summaryPath);
+            if (string.IsNullOrEmpty(dir)) return null;
+            string candidate = Path.Combine(dir, $"{runId}-bootstrap.json");
+            return File.Exists(candidate) ? candidate : null;
+        }
+
+        private static void LoadBootstrapRuleFlags(string path, ReplaySummaryData summary,
+            out bool? featuresVisible, out bool? stateVisible)
+        {
+            featuresVisible = null;
+            stateVisible = null;
+            string text = File.ReadAllText(path);
+            if (!StrictJson.TryParseLenientNumbers(text, out JsonNode root, out string err) || !(root is JsonObject obj))
+                throw new InvalidDataException("Invalid bootstrap JSON: " + err);
+            if (obj.TryGet("features", out JsonNode fNode) && fNode is JsonObject fObj)
+                featuresVisible = GetNullableBool(fObj, "visible_march_routes");
+            if (obj.TryGet("initial_world", out JsonNode wNode) && wNode is JsonObject wObj)
+                stateVisible = GetNullableBool(wObj, "require_visible_march_routes");
+
+            if (featuresVisible.HasValue && stateVisible.HasValue && featuresVisible.Value != stateVisible.Value)
+                throw new InvalidDataException(
+                    $"Bootstrap rule divergence: features.visible_march_routes={featuresVisible.Value} != initial_world.require_visible_march_routes={stateVisible.Value}.");
+            if (summary != null && summary.VisibleMarchRoutesEnforced.HasValue)
+            {
+                bool? bootRule = stateVisible ?? featuresVisible;
+                if (bootRule.HasValue && bootRule.Value != summary.VisibleMarchRoutesEnforced.Value)
+                    throw new InvalidDataException(
+                        $"Summary/bootstrap rule divergence: summary.visible_march_routes_enforced={summary.VisibleMarchRoutesEnforced.Value} != bootstrap={bootRule.Value}.");
+            }
         }
 
         private static Dictionary<string, ExchangeRecord> LoadExchanges(string path, string expectedRunId)
@@ -211,7 +257,14 @@ namespace LuanShi.Engine
                 ConfigRedacted = GetString(obj, "config_redacted"), StartUtc = GetString(obj, "start_utc"),
                 EndUtc = GetString(obj, "end_utc"), TotalRequests = GetInt(obj, "requests"),
                 InputTokens = GetLong(obj, "input_tokens"), OutputTokens = GetLong(obj, "output_tokens"),
+                VisibleMarchRoutesEnforced = GetNullableBool(obj, "visible_march_routes_enforced"),
+                SpatialContextLevel = GetString(obj, "spatial_context_level", null),
             };
+            bool spatialActive = string.Equals(data.SpatialContextLevel, "standard", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(data.SpatialContextLevel, "rich", StringComparison.OrdinalIgnoreCase);
+            if (spatialActive && data.VisibleMarchRoutesEnforced == false)
+                throw new InvalidDataException(
+                    $"Summary rule divergence: spatial_context_level='{data.SpatialContextLevel}' with visible_march_routes_enforced=false.");
 
             if (obj.TryGet("balance_profile", out JsonNode bpNode))
             {
@@ -317,14 +370,24 @@ namespace LuanShi.Engine
                     }
                     bool resultOk = obj.TryGet("result_ok", out JsonNode roNode) && roNode is JsonBool rob ? rob.Value : (isEnd && parseOk);
 
+                    string commandJson = GetRawOrString(obj, "command_json");
+                    string controllerType = GetString(obj, "controller_type", null);
+                    if (string.IsNullOrEmpty(controllerType) && !string.IsNullOrEmpty(commandJson)
+                        && StrictJson.TryParseLenientNumbers(commandJson, out JsonNode cmdNode, out _)
+                        && cmdNode is JsonObject cmdObj)
+                    {
+                        controllerType = GetString(cmdObj, "controller_type", null);
+                    }
+
                     var rec = new ReplayRequestRecord {
                         RunId = runId, Seed = seed, Provider = GetString(obj, "provider"), Model = GetString(obj, "model"),
                         PromptVersion = promptVersion, SchemaHash = GetString(obj, "schema_hash"),
-                        SeatId = GetString(obj, "seat_id"), TurnToken = GetInt(obj, "turn_token"), Season = GetInt(obj, "season"),
+                        SeatId = GetString(obj, "seat_id"), ControllerType = controllerType,
+                        TurnToken = GetInt(obj, "turn_token"), Season = GetInt(obj, "season"),
                         ObservationHash = GetString(obj, "observation_hash"), ObservationJson = GetRawOrString(obj, "observation_json"),
                         RequestIndex = GetInt(obj, "request_index"), TotalRequests = GetInt(obj, "total_requests"),
                         RawModelText = raw, ParseOk = parseOk,
-                        CommandJson = GetRawOrString(obj, "command_json"), ResultOk = resultOk,
+                        CommandJson = commandJson, ResultOk = resultOk,
                         ResultRecorded = roNode is JsonBool, InquiryTool = GetString(obj, "inquiry_tool"),
                         InquiryResultChars = GetNullableInt(obj, "inquiry_result_chars"),
                         ResultError = GetString(obj, "result_error"), StateAfter = GetString(obj, "state_after"),
@@ -373,5 +436,6 @@ namespace LuanShi.Engine
             => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? (int?)i.Value : null;
         private static long GetLong(JsonObject obj, string key, long fallback = 0) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonInt i ? i.Value : fallback;
         private static bool GetBool(JsonObject obj, string key, bool fallback = false) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonBool b ? b.Value : fallback;
+        private static bool? GetNullableBool(JsonObject obj, string key) => obj != null && obj.TryGet(key, out JsonNode n) && n is JsonBool b ? (bool?)b.Value : null;
     }
 }

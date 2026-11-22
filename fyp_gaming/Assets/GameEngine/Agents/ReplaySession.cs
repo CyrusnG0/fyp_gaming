@@ -30,6 +30,10 @@ namespace LuanShi.Engine
         private int _rejectionReasonMismatches, _actionOutcomeMismatches;
         private readonly List<string> _actionDiscrepancies = new List<string>();
         private int _voluntaryEndTurnsReplayed;
+        private bool _llmVisibleMarchRoutes, _visibleMarchRuleEstablished;
+        private bool? _establishedSharedVisibleMarchRoutes;
+        private VisibleMarchRuleProvenance _visibleMarchRuleProvenance;
+        private string _visibleMarchRuleNote;
 
         private readonly List<ReplaySeasonScoreboard> _replayedScores = new List<ReplaySeasonScoreboard>();
         private readonly List<ReplayFeedEvent> _eventFeed = new List<ReplayFeedEvent>();
@@ -43,6 +47,12 @@ namespace LuanShi.Engine
         public float Speed => _speed;
         public bool IsPlaying => _state == ReplayState.Playing;
         public bool IsCompleted => _isCompleted;
+        public bool ReplayedVisibleMarchRoutes { get; private set; }
+        public bool ReplayedLlmVisibleMarchRoutes => _llmVisibleMarchRoutes;
+        public bool? EstablishedSharedVisibleMarchRoutes => _establishedSharedVisibleMarchRoutes;
+        public VisibleMarchRuleProvenance VisibleMarchRuleProvenance => _visibleMarchRuleProvenance;
+        public bool VisibleMarchRuleEstablished => _visibleMarchRuleEstablished;
+        public string VisibleMarchRuleNote => _visibleMarchRuleNote;
         public int TotalSeasons => _totalSeasons;
         public int TotalRequests => _totalRequests;
         public int CurrentRequestIndex => _currentRequestIndex;
@@ -125,6 +135,14 @@ namespace LuanShi.Engine
 
             string gameId = "match-20261109T082434772-7e66ac10ae8c46fcbc94eea45d66cb53";
             _engine = new GameEngine(seed, gameId, profile);
+            VisibleMarchRuleResolution rule = ResolveVisibleMarchRuleInfo(_bundle);
+            _engine.State.RequireVisibleMarchRoutes = rule.SharedEngineRule;
+            ReplayedVisibleMarchRoutes = _engine.State.RequireVisibleMarchRoutes;
+            _llmVisibleMarchRoutes = rule.LlmHostVisibleRoutes;
+            _establishedSharedVisibleMarchRoutes = rule.EstablishedSharedRule;
+            _visibleMarchRuleProvenance = rule.Provenance;
+            _visibleMarchRuleEstablished = rule.RuleEstablished;
+            _visibleMarchRuleNote = rule.Note;
             _engine.State.Map = _hostMap ?? BuildDefaultStaggeredHexMap(26, 17);
 
             _engine.State.Factions.Add(new FactionState { SeatId = "seat-0", Name = "Wei", Controller = ControllerType.Llm, Prestige = 50 });
@@ -203,13 +221,11 @@ namespace LuanShi.Engine
                 }
             }
 
-            // Never execute a reply the original runner rejected as invalid, even if a later
-            // parser accepts it. The recorded outcome, not today's parser, defines replay.
-            ParseResult parsed = !req.ParseOk
-                ? ParseResult.Failure(req.ResultError ?? "recorded invalid response")
-                : LlmActionParser.Parse(req.RawModelText, false, false, diplomacy,
-                    PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
-            bool isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
+            string reqController = EffectiveControllerType(req);
+            bool isLlmController = string.Equals(reqController, ControllerType.Llm, StringComparison.Ordinal);
+            ParseReplayRecordAction(req, diplomacy, isLlmController,
+                out ActionCommand parsedCmd, out bool isEndTurn, out bool replayedParseOk,
+                out string parseError, out string actType, out string actSummary);
             bool replayedOk = false;
 
             if (isEndTurn)
@@ -235,20 +251,29 @@ namespace LuanShi.Engine
             }
             else
             {
-                bool replayedParseOk = parsed.Ok && parsed.Action != null;
                 string replayedError = null;
-                if (!replayedParseOk)
+                if (!replayedParseOk || parsedCmd == null)
                 {
                     replayedOk = false;
-                    replayedError = parsed.Error ?? "parse_failure";
+                    replayedError = parseError ?? "parse_failure";
                 }
                 else
                 {
-                    ActionCommand cmd = LlmActionParser.ToCommand(parsed.Action);
-                    cmd.ControllerType = ControllerType.Llm;
-                    ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, cmd);
-                    replayedOk = res.Ok;
-                    if (!res.Ok) replayedError = res.Error ?? "validation_failure";
+                    FactionState fac = _engine.State.FindFaction(req.SeatId);
+                    if (fac != null) fac.Controller = reqController;
+                    parsedCmd.ControllerType = reqController;
+                    if (isLlmController && _llmVisibleMarchRoutes && !_engine.State.RequireVisibleMarchRoutes
+                        && !MovementPlanner.AllowsVisibleRoute(_engine, req.SeatId, parsedCmd))
+                    {
+                        replayedOk = false;
+                        replayedError = FeedbackPolicy.DestinationNotReachable;
+                    }
+                    else
+                    {
+                        ValidationResult res = _engine.SubmitAs(req.SeatId, _currentTurnToken, parsedCmd);
+                        replayedOk = res.Ok;
+                        if (!res.Ok) replayedError = res.Error ?? "validation_failure";
+                    }
                 }
 
                 if (req.ParseOk && req.ResultOk && replayedOk) _acceptedActionsReplayed++;
@@ -278,12 +303,6 @@ namespace LuanShi.Engine
                 }
             }
 
-            string actType = isEndTurn ? "end_turn" : (parsed.Ok && parsed.Action != null ? parsed.Action.Type : "unknown");
-            string actSummary = isEndTurn
-                ? "Voluntary end of turn"
-                : (parsed.Ok && parsed.Action != null
-                    ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
-                    : (!string.IsNullOrEmpty(req.RawModelText) ? req.RawModelText : "unknown"));
             string resText = isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected");
             string facName = "unknown";
             if (_engine?.State?.Factions != null)
@@ -383,6 +402,10 @@ namespace LuanShi.Engine
         private static bool IsEndTurnRecord(ReplayRequestRecord req)
         {
             if (req == null || !req.ParseOk) return false;
+            bool isLlm = !IsNonLlmRecord(req);
+            if (!isLlm && !string.IsNullOrEmpty(req.CommandJson))
+                return TryParseCommandJson(req.CommandJson, out ActionCommand cmd, out _)
+                    && string.Equals(cmd.Type, "end_turn", StringComparison.Ordinal);
             // Same feature flags as the replay step's own parse, derived from the record's identity, so
             // a diplomacy reply is classified exactly as it will be re-parsed.
             ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,

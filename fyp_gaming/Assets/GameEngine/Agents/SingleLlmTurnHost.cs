@@ -30,6 +30,8 @@ namespace LuanShi.Engine
             _observe = observe;
             _submit = submit;
             _endTurn = endTurn;
+            if (_engine?.State != null && _config != null && _config.EffectiveVisibleMarchRoutes)
+                _engine.State.RequireVisibleMarchRoutes = true;
         }
 
         public string FactionKey => _engine?.State?.FindFaction(_seatId)?.Name;

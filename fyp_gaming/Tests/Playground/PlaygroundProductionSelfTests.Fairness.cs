@@ -10,6 +10,7 @@ namespace LuanShi.Playground
             HandoverAndCrossSeatPrivacy(log);
             StaleEnemyIntelAndRouteAsymmetry(log);
             ActionCatalogueAndRuleParityChecks(log);
+            ReplayRuleConsistencyAndProvenanceTests(log);
         }
 
         private static void HandoverAndCrossSeatPrivacy(TestLog log)
@@ -282,18 +283,14 @@ namespace LuanShi.Playground
                 ParamB = 0,
             };
 
-            // (1) Reproduce legacy unshared host-only asymmetry
-            var legacyEngine = BuildCorridorRouteWorld(ProdSeed + 2, unseenBridgeWalkable: true, sharedVisibleRule: false);
-            int legacyTok = legacyEngine.BeginSeatTurn(PlaygroundScenario.SeatA);
-            var legacyHost = new SingleLlmTurnHost(
-                legacyEngine, routeConfig, PlaygroundScenario.SeatA,
-                () => legacyEngine.Observe(PlaygroundScenario.SeatA),
-                cmd => legacyEngine.SubmitAs(PlaygroundScenario.SeatA, legacyTok, cmd),
-                () => legacyEngine.EndSeatTurn(legacyTok));
-            bool gapUnseenBefore = !legacyEngine.InSight(PlaygroundScenario.SeatA, 4, 0)
-                                   && legacyEngine.InSight(PlaygroundScenario.SeatA, 5, 0);
-            ValidationResult legacyLlm = legacyHost.Submit(marchCmd);
-            ValidationResult legacyHuman = legacyEngine.SubmitAs(PlaygroundScenario.SeatA, legacyTok, new ActionCommand
+            // (1) Reproduce historical unshared host-only asymmetry (human submits on pre-sync engine
+            //     where RequireVisibleMarchRoutes=false, while SingleLlmTurnHost enforces visible routes
+            //     for LLM AND syncs the engine rule on construction in the fixed build).
+            var legacyHumanEngine = BuildCorridorRouteWorld(ProdSeed + 2, unseenBridgeWalkable: true, sharedVisibleRule: false);
+            bool gapUnseenBefore = !legacyHumanEngine.InSight(PlaygroundScenario.SeatA, 4, 0)
+                                   && legacyHumanEngine.InSight(PlaygroundScenario.SeatA, 5, 0);
+            int legacyHumanTok = legacyHumanEngine.BeginSeatTurn(PlaygroundScenario.SeatA);
+            ValidationResult legacyHuman = legacyHumanEngine.SubmitAs(PlaygroundScenario.SeatA, legacyHumanTok, new ActionCommand
             {
                 Type = ActionType.March,
                 ActorSeatId = PlaygroundScenario.SeatA,
@@ -302,11 +299,22 @@ namespace LuanShi.Playground
                 ParamA = 5,
                 ParamB = 0,
             });
-            legacyEngine.EndSeatTurn(legacyTok);
+            legacyHumanEngine.EndSeatTurn(legacyHumanTok);
+
+            var legacyLlmEngine = BuildCorridorRouteWorld(ProdSeed + 2, unseenBridgeWalkable: true, sharedVisibleRule: false);
+            int legacyLlmTok = legacyLlmEngine.BeginSeatTurn(PlaygroundScenario.SeatA);
+            var legacyHost = new SingleLlmTurnHost(
+                legacyLlmEngine, routeConfig, PlaygroundScenario.SeatA,
+                () => legacyLlmEngine.Observe(PlaygroundScenario.SeatA),
+                cmd => legacyLlmEngine.SubmitAs(PlaygroundScenario.SeatA, legacyLlmTok, cmd),
+                () => legacyLlmEngine.EndSeatTurn(legacyLlmTok));
+            ValidationResult legacyLlm = legacyHost.Submit(marchCmd);
+            legacyLlmEngine.EndSeatTurn(legacyLlmTok);
 
             log.Check(gapUnseenBefore
                       && !legacyLlm.Ok && legacyLlm.Error == FeedbackPolicy.DestinationNotReachable
-                      && legacyHuman.Ok,
+                      && legacyHuman.Ok
+                      && legacyLlmEngine.State.RequireVisibleMarchRoutes,
                 "fairness-repro: unshared host-only config reproduced LLM rejection vs human acceptance across unseen hex (4,0)",
                 $"gapBefore={gapUnseenBefore} llm={legacyLlm.Ok}/{legacyLlm.Error} human={legacyHuman.Ok}/{legacyHuman.Error}");
 
