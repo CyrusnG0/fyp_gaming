@@ -177,7 +177,10 @@ namespace LuanShi
                         var city = engine.State.CityAt(x, z);
                         if (city != null && !city.IsNeutral && city.OwnerSeatId != currentSeat
                             && obs != null && obs.FindCity(city.Id) != null) continue;
-                        if (engine.State.Map.PathCost(army.X, army.Z, x, z, budget) < 0) continue;
+                        int pathCost = engine.State.RequireVisibleMarchRoutes
+                            ? SpatialGeometry.VisiblePathCost(engine, currentSeat, engine.State.Map, army.X, army.Z, x, z, budget)
+                            : engine.State.Map.PathCost(army.X, army.Z, x, z, budget);
+                        if (pathCost < 0) continue;
 
                         var node = TBTK.GridManager.GetNode(x, z);
                         if (node != null) targets.Add(node);

@@ -62,6 +62,8 @@ namespace LuanShi.ControlledScenarios
                 Entry("[CS-N1] NullReplyTextIsUnknown", NullReplyTextIsUnknown),
                 Entry("[CS-T1] TacticalChoiceChecks", TacticalChoiceChecks),
                 Entry("[LONG] LongDemoChecks", LongDemoChecks),
+                Entry("[APPROACH] CityApproachChecks", CityApproachChecks),
+                Entry("[GARRISON] GarrisonChoiceChecks", GarrisonChoiceChecks),
             };
             foreach (KeyValuePair<string, Action<TestLog>> test in tests)
             {

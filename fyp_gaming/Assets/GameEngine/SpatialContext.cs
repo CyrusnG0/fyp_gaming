@@ -350,10 +350,18 @@ namespace LuanShi.Engine
         /// </summary>
         public static int VisiblePathCost(GameEngine engine, string seatId, MapData map,
             int fromX, int fromZ, int toX, int toZ, int maxCost)
+            => VisiblePathCost(engine?.State, seatId, map, fromX, fromZ, toX, toZ, maxCost);
+
+        /// <summary>
+        /// State-level <see cref="VisiblePathCost"/> shared by engine validation, movement
+        /// planning, scripted AI, and UI highlights so every controller follows the exact same rule.
+        /// </summary>
+        public static int VisiblePathCost(GameState state, string seatId, MapData map,
+            int fromX, int fromZ, int toX, int toZ, int maxCost)
         {
-            if (engine == null || map == null || !map.InBounds(fromX, fromZ) || !map.InBounds(toX, toZ))
+            if (state == null || map == null || !map.InBounds(fromX, fromZ) || !map.InBounds(toX, toZ))
                 return -1;
-            if (!engine.InSight(seatId, fromX, fromZ) || !engine.InSight(seatId, toX, toZ))
+            if (!GameEngine.InSight(state, seatId, fromX, fromZ) || !GameEngine.InSight(state, seatId, toX, toZ))
                 return -1;
             if (!map.IsWalkable(toX, toZ)) return -1;
             if (fromX == toX && fromZ == toZ) return 0;
@@ -383,7 +391,7 @@ namespace LuanShi.Engine
                     if (nb < 0 || nb >= n || done[nb]) continue;
                     int nx = nb % map.Width;
                     int nz = nb / map.Width;
-                    if (!engine.InSight(seatId, nx, nz)) continue;
+                    if (!GameEngine.InSight(state, seatId, nx, nz)) continue;
                     if (!map.IsWalkable(nx, nz)) continue;
                     int stepCost = map.Cost != null ? map.Cost[nb] : 1;
                     int nd = best + stepCost;

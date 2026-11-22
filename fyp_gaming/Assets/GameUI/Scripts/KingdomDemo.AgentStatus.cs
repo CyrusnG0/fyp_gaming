@@ -101,6 +101,18 @@ namespace LuanShi
 
         public void DebugCancelAgent() => CancelAgentTurn();
 
+        /// <summary>
+        /// Test-only opt-in hook: enables the offline fake recruit -&gt; convert_garrison -&gt; march
+        /// rehearsal for the live LLM seat (in memory only, never calls a real provider).
+        /// </summary>
+        public void DebugEnableFakeGarrisonRehearsal()
+        {
+            if (replayMode || spectatorMode) return;
+            fakeGarrisonRehearsal = true;
+            useFakeLlm = true;
+            if (ready && !agentTurnActive) RebuildAgentRunner();
+        }
+
         static string AgentField(string value)
         {
             if (string.IsNullOrEmpty(value)) return "-";

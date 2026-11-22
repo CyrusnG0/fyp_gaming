@@ -93,8 +93,11 @@ namespace LuanShi
             }
             else
             {
+                string publicAction = !string.IsNullOrEmpty(agentLastActionType) && ActionType.IsOwnerOnlyLog(agentLastActionType)
+                    ? "private order"
+                    : AgentShort(agentLastActionType, 64);
                 GUI.Label(new Rect(x, area.y + AgentDecisionRowY, width, AgentRowHeight),
-                          EllipsizeToWidth(uiSmall, "Action: " + AgentShort(agentLastActionType, 64), width), uiSmall);
+                          EllipsizeToWidth(uiSmall, "Action: " + publicAction, width), uiSmall);
                 GUI.Label(new Rect(x, area.y + AgentResultRowY, width, AgentRowHeight),
                           EllipsizeToWidth(uiSmall, "Result: " + AgentPublicResultLabel(), width), uiSmall);
             }

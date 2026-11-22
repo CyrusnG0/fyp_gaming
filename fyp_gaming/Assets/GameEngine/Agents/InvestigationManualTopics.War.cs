@@ -295,7 +295,7 @@ namespace LuanShi.Engine
                 "A destination beyond sight is rejected before any hidden fact is revealed."));
             facts.Add(Fact("path_cost",
                 "Dijkstra over per-hex terrain costs",
-                "The whole path must fit that march's budget; a path out of reach is rejected."));
+                "The whole path must fit that march's budget; when visible-only march routing is active, paths may traverse currently visible walkable cells only."));
             facts.Add(Fact("capture_on_march",
                 "a neutral city or any watchtower not already yours is captured on arrival", null));
             facts.Add(Fact("enemy_city",

@@ -69,6 +69,7 @@ namespace LuanShi.ControlledScenarios
         public string OpponentSeat = "seat-1";
         public int Seasons = 1;
         public bool EnableAttack;
+        public bool EnableGarrisonConversion;
         public bool EnableResearch;
         public bool EnableDiplomacy;
         public bool StageIncomingDiplomacy;
@@ -149,6 +150,7 @@ namespace LuanShi.ControlledScenarios
                 Towers = Setup?.Towers ?? new List<CsTowerSetup>(),
                 ResearchPoints = Setup?.ResearchPoints ?? 0,
                 EnableAttack = Staged?.Features?.Attack ?? false,
+                EnableGarrisonConversion = Staged?.Features?.GarrisonConversion ?? false,
                 EnableResearch = Staged?.Features?.Research ?? false,
                 EnableDiplomacy = Staged?.Features?.Diplomacy ?? false,
                 StageIncomingDiplomacy = Setup?.StageIncomingDiplomacy ?? false,
@@ -180,6 +182,7 @@ namespace LuanShi.ControlledScenarios
                     Features = new CsFeatureBlock
                     {
                         Attack = spec.EnableAttack, Research = spec.EnableResearch,
+                        GarrisonConversion = spec.EnableGarrisonConversion,
                         Diplomacy = spec.EnableDiplomacy,
                         ManualLookup = spec.EnableManualLookup, Deliberation = spec.EnableDeliberation,
                         Spatial = spec.EnableSpatial,
@@ -210,6 +213,7 @@ namespace LuanShi.ControlledScenarios
     public sealed class CsFeatureBlock
     {
         [JsonPropertyName("attack")] public bool Attack { get; set; }
+        [JsonPropertyName("garrison_conversion")] public bool GarrisonConversion { get; set; }
         [JsonPropertyName("research")] public bool Research { get; set; }
         [JsonPropertyName("diplomacy")] public bool Diplomacy { get; set; }
         [JsonPropertyName("manual_lookup")] public bool ManualLookup { get; set; }

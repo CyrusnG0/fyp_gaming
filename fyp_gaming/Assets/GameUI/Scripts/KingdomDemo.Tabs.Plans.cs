@@ -50,15 +50,8 @@ namespace LuanShi
                 y += WrappedLabel(wrap,
                     "No foreign city is in sight — march an army closer, then send an agent.",
                     p.x + 36, y, 744, 20) + 2;
-            int shown = 0;
             foreach (var city in targets)
             {
-                if (shown == 2)
-                {
-                    y += WrappedLabel(wrap, "... (remaining cities omitted)", p.x + 36, y, 744, 20) + 2;
-                    break;
-                }
-                shown++;
                 var report = obs.FindScoutedCity(city.Id);
                 string cityLine =
                     $"{city.Name} ({OwnerName(city)})  garrison {city.Garrison}, morale {city.Morale}" +
@@ -84,7 +77,7 @@ namespace LuanShi
                 foreach (var report in obs.ScoutedCities)
                 {
                     string detail = report.Accuracy == "exact"
-                        ? $"exact · garrison {report.Garrison}, food {report.Food}, morale {report.Morale}"
+                        ? $"exact · garrison {report.Garrison}, food {report.Food}, gold {report.Gold}, pop {report.Population}, morale {report.Morale}, def {report.Defense}, train {report.Training}, reclaim {report.ReclaimPct}%"
                         : $"band · troops {report.GarrisonBand}, food {report.FoodBand}";
                     string reportLine =
                         $"{report.Name} ({SeatShort(report.OwnerSeatId)})  {detail}  ·  to season {report.UntilSeason}";
@@ -113,7 +106,6 @@ namespace LuanShi
             {
                 for (int j = i + 1; j < others.Count; j++)
                 {
-                    if (pairs == 2) break;
                     pairs++;
                     string pairHint = OrderButton(new Rect(p.x + 36, y, 300, 24), ActionType.SowDistrust, others[i],
                         $"{SeatShort(others[i])} ↔ {SeatShort(others[j])}",
@@ -122,12 +114,9 @@ namespace LuanShi
                     y += 28;
                     if (pairHint != null) y += WrappedLabel(uiReasonWrap, pairHint, p.x + 36, y, 744, 18);
                 }
-                if (pairs == 2) break;
             }
             if (pairs == 0)
                 y += WrappedLabel(wrap, "No other seat is known yet.", p.x + 36, y, 744, 20);
-            else if (others.Count > 2)
-                WrappedLabel(wrap, "... (remaining pairs omitted)", p.x + 348, y - 26, 420, 20);
             return y;
         }
 

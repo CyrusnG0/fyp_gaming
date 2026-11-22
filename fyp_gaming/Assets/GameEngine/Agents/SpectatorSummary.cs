@@ -76,6 +76,8 @@ namespace LuanShi.Engine
             sb.Append(",\"deliberation_enabled\":").Append(config != null && config.EnableDeliberation ? "true" : "false");
             sb.Append(",\"attack_enabled\":").Append(config != null && config.EnableAttack ? "true" : "false");
             sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
+            if (config != null && config.EnableGarrisonConversion)
+                sb.Append(",\"garrison_conversion_enabled\":true");
             sb.Append(",\"diplomacy_enabled\":")
               .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
@@ -104,13 +106,18 @@ namespace LuanShi.Engine
             bool research = config != null && config.EnableResearch;
             bool spatial = config != null && config.SpatialContext != null && config.SpatialContext.IsEnabled;
             bool diplomacy = config != null && config.EnableDiplomacy;
+            bool conversion = config != null && config.EnableGarrisonConversion;
             LlmPersona versionPersona = personas ? new LlmPersona("summary", "summary", "", "", false) : null;
+            string version = PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial, diplomacy);
+            string system = PromptBuilder.CombinedSystemPromptFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy);
+            if (conversion) { version += PromptBuilder.GarrisonConversionVersionSuffix; system += PromptBuilder.GarrisonConversionAddendum; }
             Field(sb, "prompt_version",
-                PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial, diplomacy),
+                version,
                 config, true);
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
+                    : conversion ? PromptBuilder.GarrisonConversionHash(system)
                     : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);
@@ -120,6 +127,25 @@ namespace LuanShi.Engine
             sb.Append(",\"input_tokens\":").Append(NullableLong(input));
             sb.Append(",\"output_tokens\":").Append(NullableLong(output));
             sb.Append(",\"cost_usd\":").Append(Cost(cost));
+            // The totals above are null once any request lacked usage. These keep the honest part:
+            // what the provider reported (a lower bound) and how many requests it did not report.
+            sb.Append(",\"usage_unknown_requests\":")
+              .Append(runner.UnknownUsageRequests.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"input_tokens_reported\":")
+              .Append(runner.ReportedInputTokens.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"output_tokens_reported\":")
+              .Append(runner.ReportedOutputTokens.ToString(CultureInfo.InvariantCulture));
+            // How many unreported network/timeout failures the explicit allowance let the match pass.
+            // Those requests may have been billed; the token ceilings saw reported usage only.
+            sb.Append(",\"unknown_transport_tolerated\":")
+              .Append(runner.UnknownTransportRequests.ToString(CultureInfo.InvariantCulture));
+            // "actual_usage" only when every request reported usage and no unknown-usage allowance is on:
+            // then the token ceilings compared real provider totals. Otherwise they saw reported usage only,
+            // which is a lower bound on what was billed, not a strict cap.
+            bool strictBasis = runner.UnknownUsageRequests == 0
+                && (config == null || config.MaxUnknownTransportRequests == 0);
+            sb.Append(",\"token_ceiling_basis\":\"")
+              .Append(strictBasis ? "actual_usage" : "reported_usage_only").Append('"');
 
             sb.Append(",\"totals\":{");
             sb.Append("\"requests\":").Append(runner.TotalRequests.ToString(CultureInfo.InvariantCulture));

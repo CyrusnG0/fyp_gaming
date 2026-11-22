@@ -71,6 +71,39 @@ namespace LuanShi.Engine
             return null;
         }
 
+        /// <summary>
+        /// Reads one args value. Every value is a string on the wire, with one narrow exception: a JSON
+        /// integer for propose_treaty's args.duration, which the live run run-20261122140759713-c8b0fcfc
+        /// showed models send. It is carried as its decimal string and then goes through the same
+        /// <see cref="DiplomacyArgError"/> shape and range check as a quoted "8", so a bare integer is
+        /// never wider than the string form; every other key and type stays strictly a string.
+        /// </summary>
+        private static bool TryArgValue(string type, string key, JsonNode node, out string value, out string error)
+        {
+            if (type == ActionType.ProposeTreaty && key == "duration" && node is JsonInt number)
+            {
+                value = number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                error = null;
+                return true;
+            }
+            if (TryString(node, out value, out error)) return true;
+            error = ArgTypeMessage(type, key, error);
+            return false;
+        }
+
+        /// <summary>
+        /// Names the args key whose JSON value had the wrong type, so the model's repair request can
+        /// say what to change. The key is already on the order's allow-list and the message carries
+        /// only schema text, never a game fact.
+        /// </summary>
+        private static string ArgTypeMessage(string type, string key, string error)
+        {
+            if (error != "invalid field type") return error;
+            if (type == ActionType.ProposeTreaty && key == "duration")
+                return "invalid field type: args.duration must be a whole number of seasons such as 8 or \"8\"";
+            return "invalid field type: args." + key + " must be a quoted string";
+        }
+
         /// <summary>The one required argument for a diplomacy order, or null when it is present.</summary>
         private static string DiplomacyRequiredArgument(string type, Dictionary<string, string> args)
         {

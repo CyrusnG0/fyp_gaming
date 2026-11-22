@@ -39,6 +39,10 @@ internal static partial class Harness
             + (text == null ? "" : ",\"text\":\"" + text + "\"") + "}";
     }
 
+    private static string DipProposeRaw(string durationLiteral, string seat = "seat-1")
+        => "{\"type\":\"propose_treaty\",\"target_id\":\"" + seat + "\",\"args\":{\"treaty_type\":\"nap\","
+         + "\"duration\":" + durationLiteral + "},\"text\":\"peace\"}";
+
     private static string DipRespond(string seat, string response)
         => "{\"type\":\"respond_treaty\",\"target_id\":\"" + seat
          + "\",\"args\":{\"response\":\"" + response + "\"}}";
@@ -58,6 +62,19 @@ internal static partial class Harness
            && propose.Action.Args != null && propose.Action.Args["treaty_type"] == TreatyType.Nap
            && propose.Action.Args["duration"] == "4" && propose.Action.Text == "four quiet seasons",
             "a propose_treaty carries treaty_type, an optional duration and an optional note");
+
+        // Recorded live failure (run-20261122140759713-c8b0fcfc requests 8-10): a bare integer duration.
+        // It is accepted as the same whole-season value a quoted string carries, and nothing else.
+        foreach (string literal in new[] { "8", "12", "1", "999" })
+        {
+            ParseResult number = LlmActionParser.Parse(DipProposeRaw(literal), false, false, true);
+            ParseResult quoted = LlmActionParser.Parse(DipPropose("seat-1", TreatyType.Nap, literal, "peace"),
+                false, false, true);
+            DipCheck(number.Ok && quoted.Ok && number.Action.Args["duration"] == literal
+               && number.Action.Args["duration"] == quoted.Action.Args["duration"]
+               && number.Action.Text == "peace",
+                "an integer duration " + literal + " parses to the same args as the quoted string");
+        }
 
         ParseResult bare = LlmActionParser.Parse(
             DipPropose("seat-1", TreatyType.Truce), false, false, true);
@@ -145,6 +162,22 @@ internal static partial class Harness
             Case(DipPropose("seat-1", "NAP"), "unsupported treaty type"),
             Case(DipPropose("seat-1", TreatyType.Nap, "six"), "duration must be a number of seasons"),
             Case(DipPropose("seat-1", TreatyType.Nap, "0"), "duration must be a number of seasons"),
+            // Only args.duration may be a bare integer; its bounds match the quoted form exactly.
+            Case(DipProposeRaw("0"), "duration must be a number of seasons"),
+            Case(DipProposeRaw("-3"), "duration must be a number of seasons"),
+            Case(DipProposeRaw("1000"), "duration must be a number of seasons"),
+            Case(DipProposeRaw("99999999999999999999"), "number too large"),
+            Case(DipProposeRaw("8.5"), "invalid number"),
+            Case(DipProposeRaw("true"), "invalid field type: args.duration must be a whole number of seasons such as 8 or \"8\""),
+            Case(DipProposeRaw("null"), "invalid field type: args.duration must be a whole number of seasons such as 8 or \"8\""),
+            Case(DipProposeRaw("[8]"), "invalid field type: args.duration must be a whole number of seasons such as 8 or \"8\""),
+            // No other key is coerced: a bare integer is still wrong for treaty_type and response.
+            Case("{\"type\":\"propose_treaty\",\"target_id\":\"seat-1\",\"args\":{\"treaty_type\":7}}",
+                "invalid field type: args.treaty_type must be a quoted string"),
+            Case("{\"type\":\"respond_treaty\",\"target_id\":\"seat-1\",\"args\":{\"response\":1}}",
+                "invalid field type: args.response must be a quoted string"),
+            Case("{\"type\":\"recruit\",\"target_id\":\"city-a\",\"param_a\":1,\"args\":{\"unit_type\":5}}",
+                "invalid field type: args.unit_type must be a quoted string"),
             Case("{\"type\":\"propose_treaty\",\"target_id\":\"seat-1\",\"args\":{\"treaty_type\":\"nap\","
                 + "\"response\":\"accept\"}}", "unsupported argument"),
             Case("{\"type\":\"propose_treaty\",\"target_id\":\"seat-1\",\"args\":{\"treaty_type\":\"nap\"},"
@@ -354,6 +387,9 @@ internal static partial class Harness
            && onSystem.Contains("send_message") && onSystem.Contains("propose_treaty")
            && onSystem.Contains("respond_treaty"),
             "the enabled addendum is appended after the existing blocks");
+        DipCheck(onSystem.Contains("whole number of seasons, for example \"" + BalanceConfig.TreatyDurationSeasons + "\"")
+           && !onSystem.Contains("\"duration\":\"<seasons>\""),
+            "the addendum shows duration as a whole number of seasons with a concrete example");
         DipCheck(onSystem.Contains("NOT available in this build")
            && onSystem.Contains("declare_war") && onSystem.Contains("break_treaty")
            && onSystem.Contains("counteroffers"),

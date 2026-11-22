@@ -8,7 +8,7 @@ namespace LuanShi.Engine
     /// the UI enqueues: the march coordinates are copied from the seat's advertised movement options
     /// and are never invented. Every action carries a "FAKE rehearsal" summary.
     /// </summary>
-    public static class FakeTurnPlan
+    public static partial class FakeTurnPlan
     {
         public const string Label = "FAKE rehearsal";
 
@@ -48,8 +48,7 @@ namespace LuanShi.Engine
                 actions.Add("{\"type\":\"levy_tax\",\"target_id\":" + MiniJson.Str(cityId)
                     + ",\"summary\":\"" + MiniJson.Escape(Label + ": levy tax") + "\"}");
 
-            actions.Add("{\"type\":\"end_turn\",\"summary\":\""
-                + MiniJson.Escape(Label + ": end turn") + "\"}");
+            actions.Add(EndTurnJson());
             return actions;
         }
 
@@ -127,5 +126,9 @@ namespace LuanShi.Engine
                 + ",\"summary\":\"" + MiniJson.Escape(
                     Label + ": march " + (armyId ?? "?") + " to (" + x + "," + z + ")") + "\"}";
         }
+
+        private static string EndTurnJson()
+            => "{\"type\":\"end_turn\",\"summary\":\""
+               + MiniJson.Escape(Label + ": end turn") + "\"}";
     }
 }

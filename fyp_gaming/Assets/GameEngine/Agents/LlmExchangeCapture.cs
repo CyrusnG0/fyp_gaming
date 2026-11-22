@@ -73,6 +73,10 @@ namespace LuanShi.Engine
     {
         private ILlmExchangeRecorder ExchangeRecorder => _recorder as ILlmExchangeRecorder;
 
+        // The explanation the model wrote in its reply (summary, else reason) for the response being
+        // handled; null when the reply was not a parsed action. It is a statement, not private reasoning.
+        private string _captureExplanation;
+
         private void CaptureExchangeRequest(int requestIndex, int season, LlmRequest request,
             string promptVersion, string schemaHash, SpatialTruncationReport spatialTruncation = null)
         {
@@ -119,6 +123,8 @@ namespace LuanShi.Engine
                     nullableBool("result_ok", resultOk),
                     Str("result_error", CaptureText(resultError)),
                 };
+                if (_captureExplanation != null)
+                    outcome.Add(Str("model_stated_reason", CaptureText(_captureExplanation)));
                 if (!string.IsNullOrEmpty(inquiryTool))
                 {
                     outcome.Add(Str("inquiry_tool", inquiryTool));
@@ -167,12 +173,18 @@ namespace LuanShi.Engine
             }
         }
 
+        // request_index restarts every turn, so the id also carries the turn token (unique per seat
+        // turn in a run). Without it ids collide across turns and cannot join a prompt to its result.
+        private string ExchangeIdFor(int requestIndex)
+            => _runId + ":" + _turnToken.ToString(CultureInfo.InvariantCulture)
+               + ":" + requestIndex.ToString(CultureInfo.InvariantCulture);
+
         private void AddExchangePrefix(List<string> parts, string eventName, int requestIndex,
             int season, string promptVersion, string schemaHash)
         {
             parts.Add(Str("record_type", "llm_exchange"));
             parts.Add(Str("exchange_event", eventName));
-            parts.Add(Str("exchange_id", _runId + ":" + requestIndex.ToString(CultureInfo.InvariantCulture)));
+            parts.Add(Str("exchange_id", ExchangeIdFor(requestIndex)));
             parts.Add(Str("run_id", _runId));
             parts.Add(Num("request_index", requestIndex));
             parts.Add(Num("turn_token", _turnToken));
@@ -200,6 +212,10 @@ namespace LuanShi.Engine
             parts.Add(nullableInt("reasoning_tokens", response.ReasoningTokens));
             parts.Add(nullableInt("total_tokens", response.TotalTokens));
             parts.Add(nullableInt("reasoning_content_chars", response.ReasoningContentChars));
+            // The provider's own reasoning stream (private chain of thought) can ride inside raw_body.
+            // It is not the explanation the model wrote; that is outcome.model_stated_reason.
+            parts.Add(Bool("raw_body_may_contain_private_reasoning",
+                response.ReasoningContentChars.HasValue && response.ReasoningContentChars.Value > 0));
             parts.Add(Num("content_chars", response.Text == null ? 0 : response.Text.Length));
             parts.Add(Bool("content_trimmed_empty",
                 response.Text != null && response.Text.Trim().Length == 0));

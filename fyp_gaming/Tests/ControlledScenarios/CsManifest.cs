@@ -281,6 +281,7 @@ namespace LuanShi.ControlledScenarios
                 Provider = "fake",
                 Model = string.IsNullOrWhiteSpace(model) ? "fake-model" : model,
                 EnableAttack = spec.EnableAttack,
+                EnableGarrisonConversion = spec.EnableGarrisonConversion,
                 EnableResearch = spec.EnableResearch,
                 EnableDiplomacy = spec.EnableDiplomacy,
                 EnableManualLookup = spec.EnableManualLookup,
@@ -310,6 +311,7 @@ namespace LuanShi.ControlledScenarios
             config.Provider = "openai-compatible";
             config.Model = string.IsNullOrWhiteSpace(model) ? "from-env" : model;
             config.EnableAttack = spec.EnableAttack;
+            config.EnableGarrisonConversion = spec.EnableGarrisonConversion;
             config.EnableResearch = spec.EnableResearch;
             config.EnableDiplomacy = spec.EnableDiplomacy;
             config.EnableManualLookup = spec.EnableManualLookup;
@@ -357,6 +359,7 @@ namespace LuanShi.ControlledScenarios
                 { "scenario_wall_seconds", spec.MaxWallSeconds },
                 { "prompt_limit", PromptLimit(config) },
             };
+            if (config.EnableGarrisonConversion) canonical.Add("garrison_conversion", true);
             return CsWorld.Sha256(JsonSerializer.Serialize(canonical, CsJson.Compact));
         }
 
@@ -393,6 +396,7 @@ namespace LuanShi.ControlledScenarios
                 { "scenario_wall_seconds", spec.MaxWallSeconds },
                 { "prompt_limit", PromptLimit(config) },
             };
+            if (config.EnableGarrisonConversion) canonical.Add("garrison_conversion", true);
             return CsWorld.Sha256(JsonSerializer.Serialize(canonical, CsJson.Compact));
         }
 

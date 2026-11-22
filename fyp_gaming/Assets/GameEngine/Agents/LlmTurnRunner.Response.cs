@@ -103,6 +103,7 @@ namespace LuanShi.Engine
             string commandJson = null;
             bool? resultOk = null;
             string resultError = null;
+            _captureExplanation = null;
 
             // Terminal stop: a winner declared while this request was in flight makes the response
             // stale. Discard it (never parse or execute it) and stop before any new dispatch.
@@ -159,7 +160,7 @@ namespace LuanShi.Engine
             }
 
             ParseResult parsed = LlmActionParser.Parse(response.Text, AttackActive,
-                _config.EnableResearch, _config.EnableDiplomacy);
+                _config.EnableResearch, _config.EnableDiplomacy, _config.EnableGarrisonConversion);
             if (!parsed.Ok)
             {
                 InvalidThisTurn++;
@@ -208,6 +209,7 @@ namespace LuanShi.Engine
 
             LlmAction action = parsed.Action;
             LastSummary = Limit(Redact(!string.IsNullOrEmpty(action.Summary) ? action.Summary : action.Reason), 200);
+            _captureExplanation = LastSummary;
             AddActivity("decision", string.IsNullOrEmpty(LastSummary)
                 ? "(no explanation provided)" : LastSummary);
             AddActivity("command", ActivityCommandText(action));

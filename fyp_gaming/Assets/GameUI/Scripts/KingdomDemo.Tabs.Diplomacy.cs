@@ -14,7 +14,6 @@ namespace LuanShi
             var wrap = new GUIStyle(body) { wordWrap = true };
             var me = engine.State.FindFaction(currentSeat);
             var btn = new GUIStyle(uiButton) { fontSize = 14 };
-            const int shownFactions = 3;      // placeholder layout: the rest are summarised
 
             float y = p.y + 52;
             y += WrappedLabel(wrap,
@@ -57,18 +56,13 @@ namespace LuanShi
                 y += 36;
             }
 
-            // Relations and the actions available against each other seat.
-            int drawn = 0;
-            foreach (var other in engine.State.Factions)
+            // Relations and the actions available against each other seat (scrollable up to 8 seats).
+            if (obs != null)
+            foreach (var other in obs.Factions)
             {
-                if (other.SeatId == currentSeat) continue;
-                if (drawn == shownFactions)
-                {
-                    WrappedLabel(wrap, "... (remaining factions omitted)", p.x + 36, y, 744, 20);
-                    break;
-                }
+                if (other == null || other.SeatId == currentSeat) continue;
 
-                var relation = obs != null ? obs.Relation(other.SeatId) : null;
+                var relation = obs.Relation(other.SeatId);
                 int myTrust = relation != null ? relation.MyTrust : 0;
                 int theirTrust = relation != null ? relation.TheirTrust : 0;
                 bool atWar = relation != null && relation.AtWar;
@@ -110,7 +104,6 @@ namespace LuanShi
                 if (hint != null)
                     y += WrappedLabel(uiReasonWrap, hint, p.x + 20, y, 760, 20) + 2;
                 y += 4;
-                drawn++;
             }
             return y;
         }

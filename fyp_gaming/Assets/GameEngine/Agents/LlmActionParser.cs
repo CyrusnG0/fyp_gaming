@@ -30,6 +30,7 @@ namespace LuanShi.Engine
         public const int MaxTextLength = 200;
 
         private const int MaxStringLength = MaxTextLength;
+        private const int MaxExplanationInputLength = 8192;
         private const string EndTurnType = "end_turn";
 
         private static readonly string[] Vocabulary =
@@ -96,6 +97,10 @@ namespace LuanShi.Engine
         /// </summary>
         public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch,
             bool allowDiplomacy)
+            => Parse(modelText, allowAttack, allowResearch, allowDiplomacy, false);
+
+        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch,
+            bool allowDiplomacy, bool allowGarrisonConversion)
         {
             if (!UnwrapFence(modelText, out string json, out string error))
                 return ParseResult.Failure(error);
@@ -144,10 +149,14 @@ namespace LuanShi.Engine
                         if (argsNode == null) return ParseResult.Failure("invalid field type");
                         break;
                     case "reason":
-                        if (!TryString(field.Value, out reason, out error)) return ParseResult.Failure(error);
+                        if (!(allowGarrisonConversion
+                            ? TryExplanation(field.Value, out reason, out error)
+                            : TryString(field.Value, out reason, out error))) return ParseResult.Failure(error);
                         break;
                     case "summary":
-                        if (!TryString(field.Value, out summary, out error)) return ParseResult.Failure(error);
+                        if (!(allowGarrisonConversion
+                            ? TryExplanation(field.Value, out summary, out error)
+                            : TryString(field.Value, out summary, out error))) return ParseResult.Failure(error);
                         break;
                     case "text":
                         // While the diplomacy orders are disabled this field is unknown, exactly as it
@@ -180,7 +189,8 @@ namespace LuanShi.Engine
             bool researchType = type == ActionType.Research;
             bool diplomacyType = DiplomacySet.Contains(type);
             if (!VocabularySet.Contains(type) && !(allowAttack && attackType)
-                && !(allowResearch && researchType) && !(allowDiplomacy && diplomacyType))
+                && !(allowResearch && researchType) && !(allowDiplomacy && diplomacyType)
+                && !(allowGarrisonConversion && type == ActionType.ConvertGarrison))
                 return ParseResult.Failure("unsupported action type");
 
             bool endTurn = type == EndTurnType;
@@ -219,6 +229,9 @@ namespace LuanShi.Engine
             // A diplomacy order names a seat, never a hex, so a coordinate field is equally invalid.
             if (diplomacyType && (hasParamA || hasParamB))
                 return ParseResult.Failure("invalid field");
+            if (type == ActionType.ConvertGarrison && (!hasParamA || paramA <= 0 || (hasParamB && paramB != 0)
+                || (argsNode != null && argsNode.Items.Count != 0)))
+                return ParseResult.Failure("invalid conversion amount");
 
             // A message must actually say something; a proposal note stays optional.
             if (type == ActionType.SendMessage && string.IsNullOrEmpty(text))
@@ -236,7 +249,7 @@ namespace LuanShi.Engine
                 {
                     if (!ArgKeyAllowed(type, arg.Key))
                         return ParseResult.Failure("unsupported argument");
-                    if (!TryString(arg.Value, out string argValue, out error))
+                    if (!TryArgValue(type, arg.Key, arg.Value, out string argValue, out error))
                         return ParseResult.Failure(error);
                     if (type == ActionType.Recruit && argValue != UnitTypes.Infantry)
                         return ParseResult.Failure("unsupported unit type");
@@ -298,6 +311,26 @@ namespace LuanShi.Engine
             if (type == ActionType.Recruit) return key == "unit_type";
             if (type == ActionType.Research) return key == "line";
             return DiplomacyArgKeyAllowed(type, key);
+        }
+
+        // Explanations are presentation data, not command fields. Keep the stored value bounded,
+        // but do not discard an otherwise legal order for exceeding 200 characters. Validate the
+        // whole input so control characters cannot be hidden beyond the retained prefix. Raw model
+        // output remains in the normal request log. Other strings keep their strict existing limit.
+        private static bool TryExplanation(JsonNode node, out string value, out string error)
+        {
+            value = null;
+            error = null;
+            var text = node as JsonString;
+            if (text == null) { error = "invalid field type"; return false; }
+            if (text.Value.Length > MaxExplanationInputLength) { error = "string too long"; return false; }
+            for (int i = 0; i < text.Value.Length; i++)
+                if (char.IsControl(text.Value[i])) { error = "invalid character"; return false; }
+            bool truncated = text.Value.Length > MaxStringLength;
+            int length = truncated ? MaxStringLength - 1 : text.Value.Length;
+            if (truncated && length > 0 && char.IsHighSurrogate(text.Value[length - 1])) length--;
+            value = text.Value.Substring(0, length) + (truncated ? "…" : "");
+            return true;
         }
 
         private static bool TryString(JsonNode node, out string value, out string error)

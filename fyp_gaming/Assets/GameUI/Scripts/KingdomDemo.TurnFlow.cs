@@ -79,7 +79,7 @@ namespace LuanShi
         /// </summary>
         bool CanRunLlmSeat(string seatId)
             => !replayMode && !spectatorMode && agentRunner != null
-               && (useFakeLlm || string.IsNullOrEmpty(agentUnavailableReason));
+               && (FakeTransportRequested || string.IsNullOrEmpty(agentUnavailableReason));
 
         bool RosterHasPlayableSeat()
             => engine != null

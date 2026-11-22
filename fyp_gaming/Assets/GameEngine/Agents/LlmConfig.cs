@@ -42,6 +42,8 @@ namespace LuanShi.Engine
         /// </summary>
         public bool EnableAttack;
         public bool EnableResearch;
+        /// <summary>Opt-in conversion of owned city garrisons to field armies.</summary>
+        public bool EnableGarrisonConversion;
 
         /// <summary>
         /// Opt-in diplomacy orders, default OFF. When true the prompt appends the first-slice rules
@@ -181,7 +183,8 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
-        /// enable_personas, enable_attack, enable_research, enable_diplomacy, personas, and the
+        /// enable_personas, enable_attack, enable_research, enable_garrison_conversion,
+        /// enable_diplomacy, personas, and the
         /// deliberation-only keys
         /// enable_deliberation, max_inquiries_per_turn, max_inquiries_per_session,
         /// max_accepted_actions_per_session, max_note_chars, max_retained_inquiry_results,
@@ -240,6 +243,7 @@ namespace LuanShi.Engine
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
+            if (EnableGarrisonConversion) sb.Append("; garrison_conversion=true");
             if (EnableDiplomacy) sb.Append("; diplomacy=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
@@ -297,6 +301,8 @@ namespace LuanShi.Engine
                         RequireVisibleMarchRoutes = Bool(field.Value, RequireVisibleMarchRoutes); break;
                     case "enable_research":
                         EnableResearch = Bool(field.Value, EnableResearch); break;
+                    case "enable_garrison_conversion":
+                        EnableGarrisonConversion = Bool(field.Value, EnableGarrisonConversion); break;
                     case "enable_diplomacy":
                         EnableDiplomacy = Bool(field.Value, EnableDiplomacy); break;
                     case "spatial_level":

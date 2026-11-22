@@ -184,6 +184,7 @@ namespace LuanShi
             {
                 InitGame();
                 InitializeAgent();
+                SyncSharedMatchRules();
                 InitializeSpectator();
                 InitializeReplay();
                 ready = true;
@@ -195,6 +196,16 @@ namespace LuanShi
                 initError = e.Message;
                 Debug.LogError("[KingdomDemo] init failed: " + e);
             }
+        }
+
+        /// <summary>
+        /// Aligns the engine's shared movement rule with the active match configuration so Human and
+        /// LLM seats share identical route legality and never probe unseen terrain.
+        /// </summary>
+        void SyncSharedMatchRules()
+        {
+            if (replayMode || engine == null || agentConfig == null) return;
+            engine.State.RequireVisibleMarchRoutes = agentConfig.EffectiveVisibleMarchRoutes;
         }
 
         /// <summary>

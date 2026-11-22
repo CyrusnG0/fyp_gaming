@@ -100,6 +100,10 @@ namespace LuanShi.Engine
         private long _matchInput;
         private long _matchOutput;
         private bool _matchUsageUnknown;
+        // Match-scoped transport failures (network or timeout, no HTTP status) whose provider usage was
+        // never reported. They may or may not have been billed and a late reply is discarded, so this
+        // is a count, not a token figure: each one is allowed only up to MaxUnknownTransportRequests.
+        private int _matchUnknownTransport;
 
         private void EnterTokenMatch(string gameId)
         {
@@ -107,6 +111,7 @@ namespace LuanShi.Engine
             _tokenMatchId = gameId;
             _matchInput = 0;
             _matchOutput = 0;
+            _matchUnknownTransport = 0;
             _matchUsageUnknown = false;
         }
 
@@ -115,6 +120,7 @@ namespace LuanShi.Engine
             _tokenMatchId = null;
             _matchInput = 0;
             _matchOutput = 0;
+            _matchUnknownTransport = 0;
             _matchUsageUnknown = false;
             _inquiryLog.Clear();
             _inquiryLogDropped.Clear();
@@ -163,7 +169,9 @@ namespace LuanShi.Engine
         /// <summary>
         /// Provider ceilings, checked before every dispatch. Output is strict (the next reply's own
         /// output bound must still fit); input can only be checked against usage already reported,
-        /// so one reply may overshoot an input ceiling. Missing usage fails closed.
+        /// so one reply may overshoot an input ceiling. Missing usage fails closed, except up to the
+        /// explicit MaxUnknownTransportRequests allowance (default 0) for failures that returned no reply;
+        /// those are counted, never converted into a token figure, and the ceilings then see reported usage only.
         /// </summary>
         private bool TokenCeilingHit(out string failure, out string ceiling)
         {
@@ -266,8 +274,8 @@ namespace LuanShi.Engine
             a.SecondsLeftSession = _config.MaxSessionSeconds > 0 && _sessionStartMillis >= 0
                 ? (int)Math.Max(0, (_config.MaxSessionSeconds * 1000L - (SessionNowMillis() - _sessionStartMillis)) / 1000)
                 : -1;
-            a.InputTokensLeftSession = TokensLeft(_config.MaxSessionInputTokens, _matchInput, _matchUsageUnknown);
-            a.OutputTokensLeftSession = TokensLeft(_config.MaxSessionOutputTokens, _matchOutput, _matchUsageUnknown);
+            a.InputTokensLeftSession = TokensLeft(_config.MaxSessionInputTokens, _matchInput, _matchUsageUnknown || _matchUnknownTransport > 0);
+            a.OutputTokensLeftSession = TokensLeft(_config.MaxSessionOutputTokens, _matchOutput, _matchUsageUnknown || _matchUnknownTransport > 0);
             return a;
         }
 

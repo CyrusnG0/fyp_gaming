@@ -344,6 +344,13 @@ namespace LuanShi.Engine
             string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
                 deliberation, rich, research, spatialOn, diplomacy);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research, diplomacy);
+            if (_config.EnableGarrisonConversion)
+            {
+                system += PromptBuilder.GarrisonConversionAddendum;
+                promptVersion += PromptBuilder.GarrisonConversionVersionSuffix;
+                schemaHash = PromptBuilder.GarrisonConversionHash(system);
+                ActionCatalogue.AppendGarrisonConversions(options, observation);
+            }
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
             int requestsLeft = RemainingRequests();
@@ -369,7 +376,14 @@ namespace LuanShi.Engine
             else
             {
                 SpatialTruncationReport spatialReport = null;
-                user = planning || deliberation
+                user = _config.EnableGarrisonConversion
+                    ? PromptBuilder.UserPromptWithFinalBudget(observation, options, _history,
+                        requestsLeft, actionsLeft, movement, spatialOn ? movement.SpatialContext : null,
+                        spatialOn ? spatialOpts : null, promptLimit, promptVersion, system.Length,
+                        diplomacySection == null ? 0 : diplomacySection.Length,
+                        relevantMemories, inquiryResult, persona, attackOn, attacks,
+                        strategicNote, earlierResults, out spatialReport)
+                    : planning || deliberation
                     ? (spatialOn
                         ? PromptBuilder.UserPromptWithSpatial(observation, options, _history,
                             requestsLeft, actionsLeft, movement, movement.SpatialContext, spatialOpts,
@@ -391,7 +405,14 @@ namespace LuanShi.Engine
             // fails closed on the size check below. The version line is then aligned with the system
             // prompt and the run record, because the shared builders carry no diplomacy flag.
             if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
-            if (diplomacy) user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
+            if (diplomacy || _config.EnableGarrisonConversion)
+                user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
+            if (_config.EnableGarrisonConversion && LastSpatialTruncation != null)
+            {
+                LastSpatialTruncation.SystemChars = system.Length;
+                LastSpatialTruncation.UserChars = user.Length;
+                LastSpatialTruncation.TotalChars = system.Length + user.Length;
+            }
             if (system.Length + user.Length > promptLimit)
             {
                 RecordPromptSizeFinalCheck(system.Length, user.Length, promptLimit, diplomacySection);

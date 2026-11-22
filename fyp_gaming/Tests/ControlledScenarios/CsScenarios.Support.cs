@@ -16,7 +16,7 @@ namespace LuanShi.ControlledScenarios
             "cs-research-purchase-v1", "cs-inquiry-manual-v1", "cs-memory-note-followup-v1",
             "cs-strong-threat-fight-or-retreat-v1",
             "cs-diplomacy-voluntary-response-v1",
-            RouteChoiceId, RouteSeasonsId, TacticalChoiceId, CombatChoiceId, LongDemoId,
+            RouteChoiceId, RouteSeasonsId, TacticalChoiceId, CombatChoiceId, LongDemoId, AssaultMemoryId, GarrisonChoiceId, CityApproachId,
         };
 
         public static IReadOnlyList<string> Keys { get; } = Array.AsReadOnly(AllIds);
@@ -39,6 +39,9 @@ namespace LuanShi.ControlledScenarios
                 case TacticalChoiceId: spec = TacticalChoice(seed); return true;
                 case CombatChoiceId: spec = CombatChoice(seed); return true;
                 case LongDemoId: spec = LongDemo(seed); return true;
+                case AssaultMemoryId: spec = AssaultMemory(seed); return true;
+                case GarrisonChoiceId: spec = GarrisonChoice(seed); return true;
+                case CityApproachId: spec = CityApproach(seed); return true;
                 default: spec = null; return false;
             }
         }

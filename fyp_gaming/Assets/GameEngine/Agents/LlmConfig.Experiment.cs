@@ -32,6 +32,7 @@ namespace LuanShi.Engine
         public const int ExperimentHardMaxPromptChars = 300000;
         public const int ExperimentHardMaxSessionTokens = 2000000000;
         public const int ExperimentHardMaxContextItems = 500;
+        public const int ExperimentHardMaxUnknownTransportRequests = 3;
         public const int ExperimentHardMaxContextChars = 200000;
 
         /// <summary>Empty/null = experiment off. Only <see cref="RichDeliberationProfile"/> is recognised.</summary>
@@ -51,6 +52,17 @@ namespace LuanShi.Engine
         /// </summary>
         public int MaxSessionInputTokens;
         public int MaxSessionOutputTokens;
+
+        /// <summary>
+        /// Explicit allowance for provider requests that returned no reply at all (network failure or
+        /// timeout) and so reported no usage. Default 0 keeps the fail-closed rule above: the first one
+        /// stops the match under a token ceiling. When N is set, up to N such requests are tolerated per
+        /// match; each is counted and reported as unknown usage and is NOT turned into a token estimate,
+        /// because the provider may have billed it (and a late reply is discarded). The ceilings then
+        /// see reported usage only, so totals are lower bounds. A reply that lacks usage, an HTTP error
+        /// and a configured MaxUsd still fail closed.
+        /// </summary>
+        public int MaxUnknownTransportRequests;
 
         // ---- context bounds (separate from request/action/inquiry/output bounds) ------------
         /// <summary>Whole-prompt character ceiling (system + user). Zero = the historical default.</summary>
@@ -157,6 +169,8 @@ namespace LuanShi.Engine
             Bound(errors, "max_session_input_tokens", MaxSessionInputTokens, ExperimentHardMaxSessionTokens);
             Bound(errors, "max_session_output_tokens", MaxSessionOutputTokens, ExperimentHardMaxSessionTokens);
             Bound(errors, "max_prompt_chars", MaxPromptChars, ExperimentHardMaxPromptChars);
+            Optional(errors, "max_unknown_transport_requests", MaxUnknownTransportRequests,
+                ExperimentHardMaxUnknownTransportRequests);
             // Context knobs may stay at their historical default (zero) but never exceed a maximum.
             Optional(errors, "context_history_items", ContextHistoryItems, ExperimentHardMaxContextItems);
             Optional(errors, "context_event_items", ContextEventItems, ExperimentHardMaxContextItems);
@@ -195,6 +209,8 @@ namespace LuanShi.Engine
                 case "max_session_input_tokens": MaxSessionInputTokens = Int(value, MaxSessionInputTokens); return true;
                 case "max_session_output_tokens": MaxSessionOutputTokens = Int(value, MaxSessionOutputTokens); return true;
                 case "max_prompt_chars": MaxPromptChars = Int(value, MaxPromptChars); return true;
+                case "max_unknown_transport_requests":
+                    MaxUnknownTransportRequests = Int(value, MaxUnknownTransportRequests); return true;
                 case "context_history_items": ContextHistoryItems = Int(value, ContextHistoryItems); return true;
                 case "context_memory_chars": ContextMemoryChars = Int(value, ContextMemoryChars); return true;
                 case "context_event_items": ContextEventItems = Int(value, ContextEventItems); return true;
@@ -214,6 +230,8 @@ namespace LuanShi.Engine
             sb.Append("; session_input_tokens=").Append(Inv(MaxSessionInputTokens));
             sb.Append("; session_output_tokens=").Append(Inv(MaxSessionOutputTokens));
             sb.Append("; max_prompt_chars=").Append(Inv(MaxPromptChars));
+            if (MaxUnknownTransportRequests > 0)
+                sb.Append("; unknown_transport_allowance=").Append(Inv(MaxUnknownTransportRequests));
             sb.Append("; context_history=").Append(Inv(ContextHistoryItems));
             sb.Append("; context_memory_chars=").Append(Inv(ContextMemoryChars));
             sb.Append("; context_events=").Append(Inv(ContextEventItems));
@@ -255,6 +273,9 @@ namespace LuanShi.Engine
             AppendInt(sb, "max_retained_inquiry_results", MaxRetainedInquiryResults);
             AppendInt(sb, "inquiry_max_response_chars", InquiryMaxResponseChars);
             AppendInt(sb, "max_note_chars", MaxNoteChars);
+            // Written only when opted in, so every existing run record stays byte-identical.
+            if (MaxUnknownTransportRequests > 0)
+                AppendInt(sb, "max_unknown_transport_requests", MaxUnknownTransportRequests);
             sb.Append(",\"token_budget_enforced_by\":\"runner_provider_ceiling\"");
             sb.Append('}');
             return sb.ToString();

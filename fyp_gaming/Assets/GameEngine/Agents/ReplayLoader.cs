@@ -311,7 +311,8 @@ namespace LuanShi.Engine
                     if (parseOk && !string.IsNullOrEmpty(raw))
                     {
                         var p = LlmActionParser.Parse(raw, false, false,
-                            PromptBuilder.IsDiplomacyPromptVersion(promptVersion));
+                            PromptBuilder.IsDiplomacyPromptVersion(promptVersion),
+                            PromptBuilder.IsGarrisonConversionPromptVersion(promptVersion));
                         isEnd = p.Ok && p.Action != null && p.Action.EndTurn;
                     }
                     bool resultOk = obj.TryGet("result_ok", out JsonNode roNode) && roNode is JsonBool rob ? rob.Value : (isEnd && parseOk);

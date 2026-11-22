@@ -27,6 +27,7 @@ internal static partial class Harness
         DipRunnerInquiryProjection();
         DipRunnerRecordAndReplay();
         DipRunnerSpectatorSummary();
+        DipRunnerIntegerDuration();
     }
 
     private static void DipRunnerCheck(bool ok, string name) => Check(ok, "[DIP-2] " + name);

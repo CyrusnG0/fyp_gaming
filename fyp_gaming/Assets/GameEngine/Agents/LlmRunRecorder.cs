@@ -150,6 +150,37 @@ namespace LuanShi.Engine
     // LlmTurnRunner's main-thread turn implementation and use only already-captured values.
     public sealed partial class LlmTurnRunner
     {
+        private int _unknownUsageRequests;
+        private long _reportedInput;
+        private long _reportedOutput;
+
+        /// <summary>Requests whose provider usage was missing; their cost is not in any total.</summary>
+        public int UnknownUsageRequests => _unknownUsageRequests;
+
+        /// <summary>Sum of usage the provider did report. A lower bound when requests are unknown.</summary>
+        public long ReportedInputTokens => _reportedInput;
+
+        /// <summary>Sum of usage the provider did report. A lower bound when requests are unknown.</summary>
+        public long ReportedOutputTokens => _reportedOutput;
+
+        /// <summary>Unreported transport failures tolerated in the current match under the allowance.</summary>
+        public int UnknownTransportRequests => _matchUnknownTransport;
+
+        /// <summary>
+        /// A transport failure or timeout with no HTTP status produced no reply to read usage from. It
+        /// may still have been billed by the provider. No token figure is invented for it: it is only
+        /// counted, and tolerated while the explicit allowance lasts.
+        /// </summary>
+        private bool TolerateUnknownTransport(LlmResponse response)
+        {
+            if (response.Ok || response.HttpStatus.HasValue) return false;
+            if (response.Error != LlmErrorKind.Network && response.Error != LlmErrorKind.Timeout)
+                return false;
+            if (_matchUnknownTransport >= _config.MaxUnknownTransportRequests) return false;
+            _matchUnknownTransport++;
+            return true;
+        }
+
         private void TrackUsage(LlmResponse response)
         {
             if (response == null) return;
@@ -157,10 +188,15 @@ namespace LuanShi.Engine
             {
                 _inputUnknown = true;
                 _outputUnknown = true;
-                _matchUsageUnknown = true;
                 _costKnown = false;
+                _unknownUsageRequests++;
+                // Totals and cost stay unknown either way. Any missing usage fails closed under a
+                // ceiling unless it is a no-reply transport failure within the explicit allowance.
+                if (!TolerateUnknownTransport(response)) _matchUsageUnknown = true;
                 return;
             }
+            _reportedInput += response.InputTokens.Value;
+            _reportedOutput += response.OutputTokens.Value;
 
             _totalInput = (_totalInput ?? 0) + response.InputTokens.Value;
             _totalOutput = (_totalOutput ?? 0) + response.OutputTokens.Value;
@@ -287,6 +323,8 @@ namespace LuanShi.Engine
                 if (_recorder is LlmRunRecorder fileRecorder && fileRecorder.ReplayBootstrapPath != null)
                     parts.Add(Str("replay_bootstrap_path", "runs/" + Path.GetFileName(fileRecorder.ReplayBootstrapPath)));
                 parts.Add(Num("request_index", flight.RequestIndex));
+                // The same id the exchange sidecar carries, so a run row joins its prompt directly.
+                parts.Add(Str("exchange_id", ExchangeIdFor(flight.RequestIndex)));
                 parts.Add(Num("latency_ms", response == null ? 0 : response.LatencyMs));
                 parts.Add(nullableInt("input_tokens", response?.InputTokens));
                 parts.Add(nullableInt("output_tokens", response?.OutputTokens));

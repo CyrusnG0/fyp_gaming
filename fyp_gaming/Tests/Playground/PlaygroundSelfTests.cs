@@ -53,7 +53,9 @@ namespace LuanShi.Playground
             // Actual production LlmTurnRunner deliberation path (fake provider).
             ProductionDeliberationLoop(log);
             ProductionMemoryPersistsAndRecallsForOneSeat(log);
+            ProductionGarrisonConversion(log);
             ProductionDeliberationInquiriesAreReadOnly(log);
+            ProductionFairnessAndHandover(log);
             ProductionDeliberationNoteIsPrivate(log);
             ProductionDeliberationBudgetLimits(log);
             ProductionDeliberationDispatchAndCancellation(log);

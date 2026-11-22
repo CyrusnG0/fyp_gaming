@@ -58,6 +58,9 @@ internal static partial class Harness
     {
         if (!TryApplyPromptVersionSwitch(args, out int promptExit)) return promptExit;
 
+        if (args != null && Array.IndexOf(args, "--prompt-budget-probe") >= 0)
+            return RunGarrisonPromptBudgetProbe();
+
         // The live smoke is opt-in and must never run as part of the normal suite.
         if (args != null)
         {

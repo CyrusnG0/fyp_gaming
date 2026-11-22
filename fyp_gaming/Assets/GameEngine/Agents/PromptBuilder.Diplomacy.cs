@@ -67,8 +67,9 @@ namespace LuanShi.Engine
                    maxText + " characters, and is public news: every faction may read it.\n" +
                    "- propose_treaty offers a treaty to another faction. It is exactly " +
                    "{\"type\":\"propose_treaty\",\"target_id\":\"<other seat id>\",\"args\":" +
-                   "{\"treaty_type\":\"nap|alliance|truce\"}} and may add \"duration\":\"<seasons>\" " +
-                   "inside args and an optional \"text\" note. The term defaults to " + term +
+                   "{\"treaty_type\":\"nap|alliance|truce\"}} and may add \"duration\" " +
+                   "inside args as a whole number of seasons, for example \"" + term + "\", plus an " +
+                   "optional \"text\" note. The term defaults to " + term +
                    " seasons and is clamped to " + min + ".." + max + ". Only the two parties see the " +
                    "offer and its note; it is not public.\n" +
                    "- respond_treaty answers an offer addressed to you. It is exactly " +
@@ -100,6 +101,9 @@ namespace LuanShi.Engine
         public static bool IsDiplomacyPromptVersion(string version)
         {
             if (string.IsNullOrEmpty(version)) return false;
+            if (IsGarrisonConversionPromptVersion(version))
+                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
+                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
             if (string.Equals(version, DiplomacyPromptVersion, StringComparison.Ordinal)) return true;
             const string suffix = "+diplomacy";
             return version.Length > suffix.Length

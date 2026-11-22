@@ -178,7 +178,9 @@ namespace LuanShi.Engine
                         if (!c.IsNeutral) continue;
                         if (!GameEngine.InSight(state, seatId, c.X, c.Z)) continue;  // never plan a refused march
                         if (state.ArmyAt(c.X, c.Z) != null) continue;      // occupied hexes are refused by M1
-                        int cost = state.Map.PathCost(best.X, best.Z, c.X, c.Z, budget);
+                        int cost = state.RequireVisibleMarchRoutes
+                            ? SpatialGeometry.VisiblePathCost(state, seatId, state.Map, best.X, best.Z, c.X, c.Z, budget)
+                            : state.Map.PathCost(best.X, best.Z, c.X, c.Z, budget);
                         if (cost >= 0 && cost < bestCost) { bestCost = cost; target = c; }
                     }
                     if (target != null)

@@ -17,6 +17,11 @@ namespace LuanShi
                  "leave this off for the real, API-backed demo.")]
         public bool useFakeLlm;
 
+        [Tooltip("Test-only, opt-in rehearsal flag for the live LLM seat. Forces fake provider and " +
+                 "runs one scripted recruit -> convert_garrison -> march -> end_turn sequence through " +
+                 "AgentTurnHost without ever calling a real provider or changing default matches.")]
+        public bool fakeGarrisonRehearsal;
+
         [Header("LLM agent (demo transparency)")]
         [Tooltip("When true the agent panel and command feed show the LLM's full executed command JSON " +
                  "for the demo; set false for a fair human-vs-LLM game where only the public action " +
@@ -25,6 +30,7 @@ namespace LuanShi
 
         private const string AgentNoKey = "No API key configured (llm.local.json)";
         private const string AgentCancelFeed = "[LLM] cancelled by user";
+        private LlmConfig agentLoadedConfig;
         private LlmConfig agentConfig;
         private ILlmTransport agentTransport;
         private LlmRunRecorder agentRecorder;
@@ -36,6 +42,7 @@ namespace LuanShi
         private string agentRecorderShort;
         private bool agentHasSeat;
         private bool agentFakeMode;
+        private bool agentGarrisonRehearsalActive;
         private bool agentTurnActive;
         private bool agentResumePending;
         private bool agentResumeAfterInterrupt;   // disabled mid-turn; first tick after enable resumes once
@@ -98,17 +105,20 @@ namespace LuanShi
             LoadAgentConfig();
             RebuildAgentRunner();
         }
+        bool FakeTransportRequested => useFakeLlm || fakeGarrisonRehearsal;
+
         void LoadAgentConfig()
         {
             try
             {
                 string path = Path.Combine(Application.dataPath, "..", "llm.local.json");
-                agentConfig = LlmConfig.LoadFromFile(path);
-                if (!string.IsNullOrEmpty(agentConfig.LoadWarning))
-                    Debug.LogWarning("[KingdomDemo] " + agentConfig.LoadWarning);
-                Debug.Log("[KingdomDemo] agent config: " + agentConfig.Redacted());
+                agentLoadedConfig = LlmConfig.LoadFromFile(path);
+                if (!string.IsNullOrEmpty(agentLoadedConfig.LoadWarning))
+                    Debug.LogWarning("[KingdomDemo] " + agentLoadedConfig.LoadWarning);
+                Debug.Log("[KingdomDemo] agent config: " + agentLoadedConfig.Redacted());
             }
-            catch (Exception) { agentConfig = new LlmConfig(); }
+            catch (Exception) { agentLoadedConfig = new LlmConfig(); }
+            agentConfig = agentLoadedConfig;
         }
         void RebuildAgentRunner()
         {
@@ -118,15 +128,20 @@ namespace LuanShi
             agentRecorderShort = null;
             try
             {
+                LlmConfig baseConfig = agentLoadedConfig ?? agentConfig ?? new LlmConfig();
+                agentConfig = fakeGarrisonRehearsal
+                    ? FakeTurnPlan.GarrisonRehearsalConfig(baseConfig)
+                    : baseConfig;
+                agentGarrisonRehearsalActive = fakeGarrisonRehearsal;
                 string runsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "runs"));
                 agentRecorder = new LlmRunRecorder(runsDir);
                 var agentMemoryStore = new LocalLlmMemoryStore(Path.Combine(runsDir, "memory"));
-                if (useFakeLlm)
+                if (FakeTransportRequested)
                 {
                     agentFake = new FakeLlmTransport();
                     agentTransport = agentFake;
                     agentFakeMode = true;
-                    agentUnavailableReason = agentConfig != null && agentConfig.HasApiKey ? null : AgentNoKey;
+                    agentUnavailableReason = baseConfig.HasApiKey ? null : AgentNoKey;
                 }
                 else
                 {
@@ -145,7 +160,8 @@ namespace LuanShi
             }
             catch (Exception)
             {
-                agentRunner = null; agentTransport = null; agentFake = null; agentFakeMode = false;
+                agentRunner = null; agentTransport = null; agentFake = null;
+                agentFakeMode = false; agentGarrisonRehearsalActive = false;
                 agentUnavailableReason = "Agent setup failed";
             }
         }
@@ -245,7 +261,9 @@ namespace LuanShi
             // agent turn. The runner gets the model's private world only through AgentTurnHost.Observe.
             // Spectator mode keeps its existing active-seat view.
             if (!spectatorMode) activeTab = "map";
-            if (useFakeLlm != agentFakeMode) RebuildAgentRunner();
+            if (FakeTransportRequested != agentFakeMode
+                || fakeGarrisonRehearsal != agentGarrisonRehearsalActive)
+                RebuildAgentRunner();
             int token;
             try { token = engine.BeginSeatTurn(seatId); }
             catch (Exception)
@@ -256,7 +274,10 @@ namespace LuanShi
             }
             agentSeatToken = token; agentTurnActive = true; agentResumePending = false;
             agentTurnStartedAt = Time.unscaledTime; agentLastElapsed = 0f;
-            if (agentRunner == null || (!useFakeLlm && !string.IsNullOrEmpty(agentUnavailableReason)))
+            if (agentRunner == null
+                || (!FakeTransportRequested && !string.IsNullOrEmpty(agentUnavailableReason))
+                || (fakeGarrisonRehearsal && (agentFake == null || !agentFakeMode
+                    || agentConfig == null || !agentConfig.EnableGarrisonConversion)))
             {
                 // No silent scripted fallback: close the gate, tell the player, pass the seat.
                 agentUnavailableReason = string.IsNullOrEmpty(agentUnavailableReason)
@@ -270,8 +291,9 @@ namespace LuanShi
             }
             uiInputLocked = true;
             uiLockReason = $"{agentFactionName} (LLM) is playing...";
-            if (agentFake != null) EnqueueFakeTurn(seatId, seatObs);
-            try { agentRunner.Begin(new AgentTurnHost(this, seatId), token, seatId, randomSeed); }
+            var host = new AgentTurnHost(this, seatId);
+            if (agentFake != null) EnqueueFakeTurn(seatId, seatObs, host);
+            try { agentRunner.Begin(host, token, seatId, randomSeed); }
             catch (Exception)
             {
                 agentRunner.Cancel("agent turn could not start");
@@ -354,6 +376,13 @@ namespace LuanShi
                 SyncBattleVisuals();
                 RefreshObservation();
             }
+            else if (result.Ok && cmd != null && cmd.Type == ActionType.ConvertGarrison)
+            {
+                var city = engine.State.FindCity(cmd.TargetId);
+                var convertedArmy = city != null ? engine.State.ArmyAt(city.X, city.Z) : null;
+                if (convertedArmy != null) EnsureArmyVisual(convertedArmy);
+                RefreshObservation();
+            }
             else if (result.Ok && cmd != null && cmd.Type == ActionType.March)
             {
                 SafeClearArmyMoveTargets();
@@ -381,9 +410,15 @@ namespace LuanShi
         /// advertises one, else its first option; then one affordable order and end_turn. The plan is
         /// built by the pure-C# FakeTurnPlan helper so the harness can assert its choices.
         /// </summary>
-        void EnqueueFakeTurn(string seatId, Observation seatObs)
+        void EnqueueFakeTurn(string seatId, Observation seatObs, AgentTurnHost host)
         {
             if (agentFake == null) return;
+            if (fakeGarrisonRehearsal)
+            {
+                FakeTurnPlan.EnqueueGarrisonRehearsal(agentFake, host, seatId,
+                    agentConfig != null ? agentConfig.SpatialContext : null, delayMs: 200);
+                return;
+            }
             agentFake.Reset();
             bool spatialOn = agentConfig != null && agentConfig.SpatialContext != null
                 && agentConfig.SpatialContext.IsEnabled;

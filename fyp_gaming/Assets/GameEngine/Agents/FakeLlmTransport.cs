@@ -14,6 +14,7 @@ namespace LuanShi.Engine
         private sealed class Scripted
         {
             public string Text;
+            public Func<LlmRequest, string> Responder;
             public LlmErrorKind Error;
             public string Detail;
             public int DelayMs;
@@ -46,6 +47,25 @@ namespace LuanShi.Engine
                 _queue.Enqueue(new Scripted
                 {
                     Text = text, DelayMs = delayMs, InputTokens = inputTokens,
+                    OutputTokens = outputTokens, RequestId = requestId,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Queue one dynamic scripted reply computed synchronously when <see cref="SendAsync"/> is
+        /// entered (before any async delay), so multi-step offline rehearsals can read the updated
+        /// host state without hitting a real provider or racing background threads.
+        /// </summary>
+        public void EnqueueDynamic(Func<LlmRequest, string> responder, int delayMs = 0,
+            int? inputTokens = null, int? outputTokens = null, string requestId = null)
+        {
+            if (responder == null) throw new ArgumentNullException(nameof(responder));
+            lock (_gate)
+            {
+                _queue.Enqueue(new Scripted
+                {
+                    Responder = responder, DelayMs = delayMs, InputTokens = inputTokens,
                     OutputTokens = outputTokens, RequestId = requestId,
                 });
             }
@@ -106,6 +126,8 @@ namespace LuanShi.Engine
                 return deferred ?? LlmResponse.Failure(LlmErrorKind.Network, "fake deferred response was null");
             }
 
+            string text = item.Responder != null ? item.Responder(req) : item.Text;
+
             if (item.DelayMs > 0)
                 await Task.Delay(item.DelayMs, ct);
             ct.ThrowIfCancellationRequested();
@@ -113,7 +135,7 @@ namespace LuanShi.Engine
             if (item.Error != LlmErrorKind.None)
                 return LlmResponse.Failure(item.Error, item.Detail, item.DelayMs);
 
-            return LlmResponse.Success(item.Text, item.DelayMs, item.InputTokens,
+            return LlmResponse.Success(text, item.DelayMs, item.InputTokens,
                 item.OutputTokens, item.RequestId);
         }
 

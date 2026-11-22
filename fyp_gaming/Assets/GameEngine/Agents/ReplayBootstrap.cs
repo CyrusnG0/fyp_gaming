@@ -40,6 +40,8 @@ namespace LuanShi.Engine
             sb.Append(",\"planned_seasons\":").Append(MiniJson.Num(Math.Max(0, plannedSeasons)));
             sb.Append(",\"features\":{\"attack\":").Append(B(config != null && config.EnableAttack));
             sb.Append(",\"research\":").Append(B(config != null && config.EnableResearch));
+            if (config != null && config.EnableGarrisonConversion)
+                sb.Append(",\"garrison_conversion\":true");
             sb.Append(",\"diplomacy\":").Append(B(config != null && config.EnableDiplomacy));
             sb.Append(",\"manual_lookup\":").Append(B(config != null && config.EnableManualLookup));
             sb.Append(",\"deliberation\":").Append(B(config != null && config.EnableDeliberation));

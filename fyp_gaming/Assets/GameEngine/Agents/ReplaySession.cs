@@ -203,7 +203,12 @@ namespace LuanShi.Engine
                 }
             }
 
-            ParseResult parsed = LlmActionParser.Parse(req.RawModelText, false, false, diplomacy);
+            // Never execute a reply the original runner rejected as invalid, even if a later
+            // parser accepts it. The recorded outcome, not today's parser, defines replay.
+            ParseResult parsed = !req.ParseOk
+                ? ParseResult.Failure(req.ResultError ?? "recorded invalid response")
+                : LlmActionParser.Parse(req.RawModelText, false, false, diplomacy,
+                    PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
             bool isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
             bool replayedOk = false;
 
@@ -377,11 +382,12 @@ namespace LuanShi.Engine
 
         private static bool IsEndTurnRecord(ReplayRequestRecord req)
         {
-            if (req == null) return false;
+            if (req == null || !req.ParseOk) return false;
             // Same feature flags as the replay step's own parse, derived from the record's identity, so
             // a diplomacy reply is classified exactly as it will be re-parsed.
             ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,
-                PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion));
+                PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion),
+                PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
             return p.Ok && p.Action != null && p.Action.EndTurn;
         }
 
