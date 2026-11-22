@@ -11,13 +11,18 @@ namespace LuanShi.Engine
         public bool Diplomacy;
         public bool Garrison;
 
+        /// <summary>The runner's per-turn caps. A scripted turn must stay inside them.</summary>
+        public int MaxActionsPerTurn = 5;
+        public int MaxRequestsPerTurn = 6;
+
         /// <summary>
-        /// Most orders (end_turn excluded) one scripted turn may hold. The runner ends a turn as a limit
-        /// when its accepted-action cap is reached, without reading another reply, so a longer script would
-        /// leak its last replies into the next seat's turn. Derive it from the config:
-        /// min(MaxActionsPerTurn, MaxRequestsPerTurn - 1).
+        /// Most orders (end_turn excluded) one scripted turn holds, so the turn still closes on its own
+        /// end_turn: each order is a request and an action, and end_turn needs one more of each.
         /// </summary>
-        public int MaxOrdersPerTurn = 4;
+        public int OrderCap => Math.Max(0, Math.Min(MaxActionsPerTurn, MaxRequestsPerTurn) - 1);
+
+        /// <summary>False when the caps let the runner send no request at all, so nothing may be queued.</summary>
+        public bool CanPlay => MaxActionsPerTurn > 0 && MaxRequestsPerTurn > 0;
     }
 
     /// <summary>
@@ -52,40 +57,11 @@ namespace LuanShi.Engine
 
             // end_turn stays last so the turn still closes through the model's own end signal.
             plan.InsertRange(plan.Count - 1, Extras(seatId, playOrder, openingSeason, options, ordersLeft,
-                options.MaxOrdersPerTurn - (plan.Count - 1)));
+                options.OrderCap - (plan.Count - 1)));
             return plan;
         }
 
-        /// <summary>
-        /// Queues one seat's whole scripted turn. With the garrison switch on it is recruit, convert_garrison
-        /// and march (resolved at dispatch time, see <see cref="FakeTurnPlan.EnqueueSpectatorGarrisonSteps"/>),
-        /// then the treaty and research orders, then end_turn. Otherwise it is <see cref="Build"/>.
-        /// </summary>
-        public static void EnqueueSeatTurn(FakeLlmTransport fake, GameEngine engine, string seatId,
-            IReadOnlyList<string> playOrder, bool openingSeason, FakeRehearsalOptions options,
-            Func<MovementView> movement, int delayMs = 0)
-        {
-            if (fake == null) throw new ArgumentNullException(nameof(fake));
-            options = options ?? new FakeRehearsalOptions();
-            Observation observation = engine.Observe(seatId);
-            if (!options.Garrison)
-            {
-                foreach (string line in Build(movement == null ? null : movement(), observation, seatId, playOrder,
-                             openingSeason, options))
-                    fake.EnqueueSuccess(line, delayMs, 120, 20);
-                return;
-            }
-
-            FakeTurnPlan.EnqueueSpectatorGarrisonSteps(fake, engine, seatId, movement, delayMs);
-            int ordersLeft = (observation == null ? 0 : observation.CommandPoints) - FakeTurnPlan.GarrisonStepsCommandPoints;
-            foreach (string line in Extras(seatId, playOrder, openingSeason, options, ordersLeft,
-                         options.MaxOrdersPerTurn - 3))
-                fake.EnqueueSuccess(line, delayMs, 120, 20);
-            fake.EnqueueSuccess("{\"type\":\"end_turn\",\"summary\":\""
-                + MiniJson.Escape(FakeTurnPlan.Label + ": end turn") + "\"}", delayMs, 120, 20);
-        }
-
-        private static List<string> Extras(string seatId, IReadOnlyList<string> playOrder, bool openingSeason,
+        internal static List<string> Extras(string seatId, IReadOnlyList<string> playOrder, bool openingSeason,
             FakeRehearsalOptions options, int ordersLeft, int room)
         {
             // Priority when the turn is full: the treaty exchange first, then research.

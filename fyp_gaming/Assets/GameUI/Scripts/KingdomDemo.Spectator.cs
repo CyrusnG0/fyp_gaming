@@ -19,6 +19,7 @@ namespace LuanShi
         private const string SpectatorLockReason = "Spectating LLM-vs-LLM pilot";
 
         private SpectatorSession spectatorSession;
+        private FakeRehearsalDirector fakeDirector;
         private string spectatorLastActiveSeat;
         private string spectatorSummaryPath;
         private string spectatorSetupError;
@@ -173,7 +174,7 @@ namespace LuanShi
         /// conductor opens the next seat inside Tick(); a per-frame queue would arrive too late.
         /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn),
         /// plus scripted research, an opening treaty offer/answer and recruit -> convert_garrison -> march
-        /// when those switches are on.
+        /// when those switches are on (see EnsureFakeDirector).
         /// Every summary is labelled FAKE; the deliberation rehearsal is unchanged.
         /// </summary>
         void EnqueueFakeSeatTurn(string seatId, bool openingSeason, bool firstFaction)
@@ -187,34 +188,50 @@ namespace LuanShi
                 return;
             }
 
+            FakeRehearsalDirector director = EnsureFakeDirector();
+            if (director != null) director.EnqueueSeatTurn(agentFake, 200);
+        }
+
+        /// <summary>
+        /// One director per queued run. Its slots are interchangeable: each is resolved when it is dispatched,
+        /// for the seat that is acting then, so a turn that ends early (a cap, a rejected order, end_turn)
+        /// can never leave replies that the next seat reads as its own. Orders are scripted only when their
+        /// config switch is on; the march options come from the same planner the real runner uses.
+        /// </summary>
+        FakeRehearsalDirector EnsureFakeDirector()
+        {
+            if (fakeDirector != null) return fakeDirector;
+            if (engine == null) return null;
             bool spatialOn = agentConfig != null && agentConfig.SpatialContext != null
                 && agentConfig.SpatialContext.IsEnabled;
             bool visibleRoutes = (agentConfig != null && agentConfig.RequireVisibleMarchRoutes) || spatialOn;
-            // Orders are scripted only when their config switch is on. Garrison steps and their march are
-            // resolved at dispatch time, so the movement view is built then, from the same planner the
-            // real runner uses.
-            FakeRehearsalScript.EnqueueSeatTurn(agentFake, engine, seatId, SeatRotation.PlayOrder(engine.State),
-                openingSeason, new FakeRehearsalOptions
-                {
-                    ManualLookup = agentConfig != null && agentConfig.EnableManualLookup,
-                    Research = agentConfig != null && agentConfig.EnableResearch,
-                    Diplomacy = agentConfig != null && agentConfig.EnableDiplomacy,
-                    Garrison = agentConfig != null && agentConfig.EnableGarrisonConversion,
-                    // a longer script would hit the runner's per-turn caps and leak replies into the next seat
-                    MaxOrdersPerTurn = agentConfig == null ? 4
-                        : Mathf.Max(1, Mathf.Min(agentConfig.MaxActionsPerTurn, agentConfig.MaxRequestsPerTurn - 1)),
-                },
-                () => visibleRoutes
-                    ? MovementPlanner.BuildDiversified(engine, seatId,
-                        MovementPlanner.DefaultMaxOptionsPerArmy, null, agentConfig.SpatialContext)
-                    : MovementPlanner.Build(engine, seatId),
-                200);
+            var options = new FakeRehearsalOptions
+            {
+                ManualLookup = agentConfig != null && agentConfig.EnableManualLookup,
+                Research = agentConfig != null && agentConfig.EnableResearch,
+                Diplomacy = agentConfig != null && agentConfig.EnableDiplomacy,
+                Garrison = agentConfig != null && agentConfig.EnableGarrisonConversion,
+            };
+            if (agentConfig != null)
+            {
+                options.MaxActionsPerTurn = agentConfig.MaxActionsPerTurn;
+                options.MaxRequestsPerTurn = agentConfig.MaxRequestsPerTurn;
+            }
+            fakeDirector = new FakeRehearsalDirector(engine,
+                () => spectatorSession != null ? spectatorSession.ActiveSeatId : null, options,
+                seat => visibleRoutes
+                    ? MovementPlanner.BuildDiversified(engine, seat, MovementPlanner.DefaultMaxOptionsPerArmy, null,
+                        agentConfig.SpatialContext)
+                    : MovementPlanner.Build(engine, seat),
+                engine.State.Season == 1 ? 1 : 0);
+            return fakeDirector;
         }
 
         void ResetFakeSpectatorQueue(string firstSeatId, int seasons)
         {
             if (agentFake == null) return;
             agentFake.Reset();
+            fakeDirector = null;
             AppendFakeSpectatorPlan(firstSeatId, seasons);
         }
 

@@ -11,24 +11,16 @@ namespace LuanShi.Engine
              + BalanceConfig.CommandPointCost(ActionType.ConvertGarrison)
              + BalanceConfig.CommandPointCost(ActionType.March);
 
-        /// <summary>
-        /// Queues three dynamic FAKE replies for one spectator seat turn: recruit, convert_garrison, march.
-        /// The spectator queues a whole run before it starts, so each reply is resolved when it is
-        /// dispatched, from the seat's own filtered observation, never from raw state. A step whose
-        /// precondition fails is replaced by a labelled levy_tax, never by end_turn: an early end_turn
-        /// would leave the remaining queued replies to be consumed by the next seat's turn.
-        /// </summary>
-        public static void EnqueueSpectatorGarrisonSteps(FakeLlmTransport fake, GameEngine engine, string seatId,
-            Func<MovementView> movement, int delayMs = 0)
-        {
-            if (fake == null) throw new ArgumentNullException(nameof(fake));
-            if (engine == null) throw new ArgumentNullException(nameof(engine));
-            var steps = new SpectatorGarrisonSteps(engine, seatId, movement);
-            for (int i = 0; i < 3; i++)
-                fake.EnqueueDynamic(_ => steps.NextReply(), delayMs, 120, 20);
-        }
+        /// <summary>Orders the garrison sequence holds: recruit, convert_garrison, march.</summary>
+        public const int GarrisonStepCount = 3;
 
-        private sealed class SpectatorGarrisonSteps
+        /// <summary>
+        /// The three FAKE garrison replies of one seat turn, resolved one call at a time from the seat's own
+        /// filtered observation, never from raw state. A step whose precondition fails becomes a labelled
+        /// levy_tax; with no owned city it becomes end_turn, which is safe because the replies are handed out
+        /// by <see cref="FakeRehearsalDirector"/> for whichever seat is acting, not queued per seat.
+        /// </summary>
+        public sealed class SpectatorGarrisonSteps
         {
             private readonly GameEngine _engine;
             private readonly string _seatId;
