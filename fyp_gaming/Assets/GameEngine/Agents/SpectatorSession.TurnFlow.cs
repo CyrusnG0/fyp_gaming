@@ -267,7 +267,10 @@ namespace LuanShi.Engine
                 case "session_output_tokens":
                 case "session_usage_unknown":
                 case "session_input_tokens_exhausted":
-                case "session_output_tokens_exhausted": return true;
+                case "session_output_tokens_exhausted":
+                // A configuration that cannot run safely applies to every seat; skipping seats on it
+                // reported an empty match as Completed.
+                case "experiment_configuration": return true;
                 default: return false;
             }
         }

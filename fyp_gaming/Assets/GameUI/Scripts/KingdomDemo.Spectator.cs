@@ -171,8 +171,9 @@ namespace LuanShi
         /// <summary>
         /// FAKE rehearsal script. Responses are queued for the whole run in turn order because the
         /// conductor opens the next seat inside Tick(); a per-frame queue would arrive too late.
-        /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn)
-        /// and every summary is labelled FAKE.
+        /// Every turn uses the shared FakeTurnPlan (capture march when advertised, levy, end_turn),
+        /// plus scripted research and an opening treaty offer/answer when those switches are on.
+        /// Every summary is labelled FAKE; the deliberation rehearsal is unchanged.
         /// </summary>
         void EnqueueFakeSeatTurn(string seatId, bool openingSeason, bool firstFaction)
         {
@@ -189,7 +190,14 @@ namespace LuanShi
                     ? MovementPlanner.BuildDiversified(engine, seatId,
                         MovementPlanner.DefaultMaxOptionsPerArmy, null, agentConfig.SpatialContext)
                     : MovementPlanner.Build(engine, seatId);
-                plan = FakeTurnPlan.Build(movement, seatObs, seatId, agentConfig != null && agentConfig.EnableManualLookup);
+                // Research and the opening treaty exchange are scripted only when their config switch is on.
+                plan = FakeRehearsalScript.Build(movement, seatObs, seatId, SeatRotation.PlayOrder(engine.State),
+                    openingSeason, new FakeRehearsalOptions
+                    {
+                        ManualLookup = agentConfig != null && agentConfig.EnableManualLookup,
+                        Research = agentConfig != null && agentConfig.EnableResearch,
+                        Diplomacy = agentConfig != null && agentConfig.EnableDiplomacy,
+                    });
             }
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 200, 120, 20);

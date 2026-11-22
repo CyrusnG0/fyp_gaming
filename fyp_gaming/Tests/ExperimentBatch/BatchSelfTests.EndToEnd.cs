@@ -71,8 +71,10 @@ namespace LuanShi.ExperimentBatch
                 log.Check(o.Requests == 7 && o.Captures.Count == 7 && o.Audit.Ok,
                     "a session request ceiling of 7 stops the match at exactly 7 requests and the audit stays clean",
                     "requests=" + o.Requests + " " + string.Join("; ", o.Audit.Mismatches));
-                log.Check(o.Status != "completed" && o.TurnEndings.Any(t => t.Contains("SessionRequestLimit")),
-                    "the stop is retained as an outcome, not reported as a clean completion", o.Status + " " + o.StopReason + " " + string.Join(" / ", o.TurnEndings));
+                log.Check(o.Status == "stopped" && Match(r, "seed4242-treatment").Status == "stopped",
+                    "a session request ceiling stops both matches early (status='stopped'), not as completed or completed_with_stops", o.Status);
+                log.Check(o.SeasonsPlayed < m.Seasons && !r.Pairs[0].Complete && !r.MatchedBatchComplete && r.IncompletePairs.Count == 1,
+                    "a session request stop keeps the stopped pair incomplete", o.SeasonsPlayed + " / " + string.Join("; ", r.IncompletePairs));
                 log.Check(o.TurnEndings.Any(t => t.Contains("SessionRequestLimit") && t.Contains("[ceiling: session_requests_exhausted]")),
                     "the turn ending names the ceiling that stopped it", string.Join(" / ", o.TurnEndings));
                 log.Check(File.Exists(Path.Combine(MatchDir(root, m, o), "match.json")) && Match(r, "seed4242-treatment").Requests == 7,
@@ -87,6 +89,10 @@ namespace LuanShi.ExperimentBatch
                 MatchOutcome o = Match(r, "seed4242-control");
                 log.Check(o.TurnEndings[0].Contains("RequestLimit") && o.TurnEndings[0].Contains("[ceiling: turn_requests_exhausted]") && o.Audit.Ok,
                     "a per-turn request ceiling ends the turn after 3 requests and names itself", o.TurnEndings[0]);
+                log.Check(o.Status == "completed_with_stops" && o.SeasonsPlayed == m.Seasons && o.SessionState == "Completed"
+                          && r.Pairs[0].Complete && r.MatchedBatchComplete,
+                    "a match that finishes all planned seasons after a per-turn ceiling stop is completed_with_stops and completes the pair",
+                    o.Status + " seasons=" + o.SeasonsPlayed + " state=" + o.SessionState);
             }
             finally { Cleanup(root); }
         }
@@ -110,8 +116,13 @@ namespace LuanShi.ExperimentBatch
                 log.Check(MatchAuditor.Str(third, "error_kind") == "Server" && MatchAuditor.Num(third, "http_status") == 500 && MatchAuditor.Bool(third, "parse_ok") == false,
                     "the run record keeps the failed request with its error kind and http status");
                 log.Check(o.TurnEndings[0].Contains("ProviderError"), "the turn ends as a provider error, not a model decision", o.TurnEndings[0]);
-                log.Check(o.Status == "completed_with_stops" && Match(r, "seed4242-treatment").Status == "completed_with_stops",
-                    "both matches are retained as completed-with-stops, not as clean completions", o.Status);
+                log.Check(o.Status == "failed" && Match(r, "seed4242-treatment").Status == "failed"
+                          && o.SessionState == "Paused" && o.SeasonsPlayed < m.Seasons,
+                    "both matches paused by provider failure are classified as failed (seasons did not finish)", o.Status + " " + o.SessionState);
+                log.Check(!r.Pairs[0].Complete && !r.MatchedBatchComplete && r.IncompletePairs.Count == 1
+                          && r.StatusCounts.TryGetValue("failed", out int failedCount) && failedCount == 2
+                          && BatchReport.Text(r).Contains("not a completed experiment"),
+                    "a pair failed by provider errors stays incomplete in pair, batch and report", string.Join("; ", r.IncompletePairs));
                 log.Check(r.BatchCeilingsHit.Count == 0 && r.InputTokensTotal == null && BatchReport.Text(r).Contains("input tokens unknown"),
                     "under continue_on_unknown both arms run and the batch token total is reported as unknown");
                 log.Check(o.Audit.Ok && Match(r, "seed4242-treatment").Audit.Ok && r.AllAuditsOk,
@@ -119,6 +130,9 @@ namespace LuanShi.ExperimentBatch
                 log.Check(r.Pairs[0].SettingsCheck.Ok, "the fault is a setting present in both arms, so the pair stays matched");
                 log.Check(File.ReadAllText(Path.Combine(MatchDir(root, m, o), o.Files["prompts"].Path)).Contains("\"fault\":\"provider_error\""),
                     "the prompt capture marks the faulted request");
+                log.Check(new[] { "settings", "prompts", "run_jsonl", "exchanges", "summary", "match" }
+                          .All(k => o.Files.ContainsKey(k) && File.Exists(Path.Combine(MatchDir(root, m, o), o.Files[k].Path))),
+                    "all retained evidence files for the failed match exist on disk");
             }
             finally { Cleanup(root); }
         }
@@ -136,6 +150,8 @@ namespace LuanShi.ExperimentBatch
                 log.Check(o.Audit.Ok, "unknown usage is consistent across records, runner and summary", string.Join("; ", o.Audit.Mismatches));
                 log.Check(o.TurnEndings[0].Contains("[ceiling: session_usage_unknown]"),
                     "with token ceilings set the runner stops on unknown usage rather than assuming zero", o.TurnEndings[0]);
+                log.Check(o.Status == "failed" && o.SessionState == "Paused" && !r.MatchedBatchComplete && !r.Pairs[0].Complete,
+                    "missing usage that pauses a match classifies as failed and leaves the pair incomplete", o.Status);
                 log.Check(r.InputTokensTotal == null && r.MatchesWithUnknownUsage >= 1 && BatchReport.Text(r).Contains("input tokens unknown"),
                     "the batch total is unknown, and the report prints 'unknown'");
                 log.Check(r.BatchCeilingsHit.Contains("usage_unknown") && r.StatusCounts.TryGetValue("skipped", out int skipped) && skipped >= 1,

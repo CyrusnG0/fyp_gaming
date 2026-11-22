@@ -39,9 +39,10 @@ hash), `<run>.jsonl` (per-request records), `<run>-exchanges.ndjson` (recorder's
 `pilot-<run>-summary.json`, `match.json` (outcome, file hashes, audit). Completed, stopped, failed,
 errored and **skipped** matches are all kept; an existing non-empty output directory is refused.
 
-Status words: `completed` = every turn ended by the model's own end_turn; `completed_with_stops` = the
-seasons finished but some turn was cut by a ceiling or provider error; `stopped` = a match or batch wall-clock limit ended it mid-match;
-`failed` = the session did not complete; `error` = the harness threw; `skipped` = a batch ceiling forbade it.
+Status words: `completed` = every turn ended by the model's own end_turn (or game_over); `completed_with_stops` = the
+seasons finished (or game_over reached) while some individual turn was cut by a per-turn ceiling or recoverable turn stop;
+`stopped` = a wall-clock limit or an intentional session ceiling (requests, input/output tokens, session seconds, actions, USD cap) ended the match early;
+`failed` = a provider error, missing usage under a token ceiling, invalid configuration, or session failure paused/prevented completion; `error` = the harness threw; `skipped` = a batch ceiling forbade it.
 
 ## Records consistent is not batch complete
 

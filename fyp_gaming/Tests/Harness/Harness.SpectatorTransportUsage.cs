@@ -72,6 +72,7 @@ internal static partial class Harness
         Section("Spectator: unreported transport failures are counted, capped and never estimated");
         RunExchangeIdJoin();
         RunExchangeEvidence();
+        RunFakeRehearsalScript();
 
         // 1. Default (allowance 0): the first unreported transport failure stops the match, as before.
         var fake = new FakeLlmTransport();
@@ -142,6 +143,23 @@ internal static partial class Harness
             "enabling the allowance reports reported usage only, even when no failure happened");
         Check(CeilingBasis(0, true) == "reported_usage_only",
             "a request without usage reports reported usage only");
+
+        // 8. An invalid experiment configuration is a match-wide stop, never an empty "Completed" match.
+        fake = new FakeLlmTransport();
+        SpectatorQueueSeason(fake, 2);
+        LlmConfig invalid = TransportUsageConfig(1000000, 0);
+        invalid.MaxOutputTokens = 0;   // an unset output bound is refused by ValidateExperiment
+        Check(invalid.ValidateExperiment().Count > 0, "the invalid fixture really fails experiment validation");
+        runner = SpectatorRunner(fake, invalid);
+        session = SpectatorNew(SpectatorEngine(), runner, 2);
+        session.Start();
+        SpectatorDrain(session);
+        Check(session.State == SpectatorState.Paused && fake.CallCount == 0
+              && runner.StopCeiling == "experiment_configuration"
+              && session.StopReason != null && session.StopReason.StartsWith("experiment configuration invalid"),
+            "an invalid experiment configuration pauses the spectator with its reason and sends no request");
+        Check(session.TurnRecords.Count == 1,
+            "the invalid configuration stops at the first seat instead of skipping every seat");
     }
 
     private static string CeilingBasis(int allowance, bool unreportedFailure)

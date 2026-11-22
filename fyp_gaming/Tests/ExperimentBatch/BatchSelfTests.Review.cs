@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using LuanShi.Engine;
 
 namespace LuanShi.ExperimentBatch
 {
@@ -141,12 +142,104 @@ namespace LuanShi.ExperimentBatch
                     caps.Count + " requests, input " + total + ", before the last " + beforeLast);
                 log.Check(total - 6000 < (caps[caps.Count - 1].InputTokens ?? 0),
                     "the overshoot is smaller than the final request's own input (" + (total - 6000) + " tokens over 6000)");
-                log.Check(o.TurnEndings.Any(t => t.Contains("[ceiling: session_input_tokens]")) && o.Status == "completed_with_stops",
-                    "later turns end on the named session_input_tokens ceiling and the match is completed-with-stops", string.Join(" | ", o.TurnEndings));
+                log.Check(o.TurnEndings.Any(t => t.Contains("[ceiling: session_input_tokens]"))
+                          && o.Status == "stopped" && Match(r, "seed4242-treatment").Status == "stopped"
+                          && o.SessionState == "Paused" && o.SeasonsPlayed < m.Seasons,
+                    "later turns end on the named session_input_tokens ceiling and the interrupted match is stopped", o.Status + " / " + string.Join(" | ", o.TurnEndings));
+                log.Check(!r.Pairs[0].Complete && !r.MatchedBatchComplete && r.IncompletePairs.Count == 1
+                          && r.StatusCounts.TryGetValue("stopped", out int stoppedCount) && stoppedCount == 2
+                          && BatchReport.Text(r).Contains("not a completed experiment"),
+                    "a session_input_tokens stop keeps the pair incomplete and marks the batch incomplete", string.Join("; ", r.IncompletePairs));
                 log.Check(o.Audit.Ok && o.InputTokens == total, "records, runner and summary agree on the overshoot total", string.Join("; ", o.Audit.Mismatches));
                 log.Check(BatchReport.Text(r).Contains("one request can overshoot"), "the report describes the overshoot");
+                log.Check(new[] { "settings", "prompts", "run_jsonl", "exchanges", "summary", "match" }
+                          .All(k => o.Files.TryGetValue(k, out FileRef refFile)
+                                    && File.Exists(Path.Combine(MatchDir(root, m, o), refFile.Path))
+                                    && BatchPlan.Sha256(File.ReadAllBytes(Path.Combine(MatchDir(root, m, o), refFile.Path))) == refFile.Sha256),
+                    "retained evidence files for the input-token stopped match exist and match their recorded hashes");
             }
             finally { Cleanup(root); }
+        }
+
+        private static void ProviderPauseAndInvalidConfigurationStatus(TestLog log)
+        {
+            // 1. Direct provider pause (rate limit / auth failure -> Paused without session_usage_unknown) must be "failed".
+            string root = TempDir();
+            try
+            {
+                BatchManifest m = Example();
+                GameEngine engine = BatchWorld.Create(m, "direct-provider-pause", 4242);
+                var transport = new DirectFailureTransport(LlmErrorKind.RateLimited, "rate limited 429");
+                var recorder = new LlmRunRecorder(root);
+                var config = new LlmConfig
+                {
+                    Provider = "fake",
+                    Model = "fake-direct-failure",
+                    EnableDeliberation = true,
+                    EnableAttack = true,
+                    EnableResearch = true,
+                    MaxRequestsPerTurn = 6,
+                    MaxTotalRequests = 20,
+                    MaxActionsPerTurn = 3,
+                    MaxAcceptedActionsPerSession = 20,
+                };
+                var runner = new LlmTurnRunner(transport, config, recorder, null, new MemoryLlmStrategicNoteStore());
+                var session = new SpectatorSession(engine, runner, m.Seasons, 4242, recorder);
+                session.Start();
+                while (session.State == SpectatorState.Running) session.Tick();
+
+                string status = BatchRunner.ClassifyStatus(false, session, runner, config, null, out string detail);
+                log.Check(session.State == SpectatorState.Paused && runner.EndReason == EndReason.ProviderError
+                          && status == "failed" && !string.IsNullOrEmpty(detail),
+                    "a provider rate-limit pause is classified as failed, never stopped or completed_with_stops",
+                    status + " state=" + session.State + " detail=" + detail);
+            }
+            finally { Cleanup(root); }
+
+            // 2. BatchDriver refuses an invalid configuration cleanly before creating partial batch evidence.
+            BatchManifest badManifest = Example(x => x.Ceilings.MaxOutputTokens = 0);
+            string refusedDir = TempDir();
+            bool driverRefused = false;
+            try { BatchDriver.Run(badManifest, badManifest.ToJson(), refusedDir); }
+            catch (InvalidOperationException ex) { driverRefused = ex.Message.Contains("manifest invalid") && ex.Message.Contains("max_output_tokens"); }
+            finally { Cleanup(refusedDir); }
+            log.Check(driverRefused, "BatchDriver refuses an invalid configuration manifest before starting any match");
+
+            // 3. If BatchRunner.RunMatch is invoked directly with an invalid LlmConfig (1-season or 2-season),
+            //    it sends zero provider requests, classifies as "failed" (never completed/completed_with_stops),
+            //    and retains auditable evidence (settings, summary, prompts, match.json).
+            foreach (int seasons in new[] { 1, 2 })
+            {
+                BatchManifest directBad = Example(x => { x.Seasons = seasons; x.Ceilings.MaxOutputTokens = 0; });
+                List<MatchSpec> specs = BatchPlan.Build(directBad);
+                root = TempDir();
+                try
+                {
+                    string matchDir = Path.Combine(root, specs[0].MatchId);
+                    MatchOutcome o = BatchRunner.RunMatch(specs[0], matchDir, "invalid-cfg-check");
+                    log.Check(o.Status == "failed" && o.Requests == 0 && o.Captures.Count == 0
+                              && o.Detail != null && o.Detail.Contains("experiment configuration invalid"),
+                        $"invalid configuration (seasons={seasons}) sends 0 requests and is classified as failed",
+                        $"status={o.Status} req={o.Requests} detail={o.Detail}");
+                    log.Check(o.Audit != null && o.Audit.Ok
+                              && new[] { "settings", "prompts", "summary", "match" }
+                                  .All(k => o.Files.TryGetValue(k, out FileRef f) && File.Exists(Path.Combine(matchDir, f.Path))),
+                        $"invalid configuration (seasons={seasons}) retains auditable evidence and audits clean",
+                        o.Audit == null ? "null audit" : string.Join("; ", o.Audit.Mismatches));
+                }
+                finally { Cleanup(root); }
+            }
+        }
+
+        private sealed class DirectFailureTransport : ILlmTransport
+        {
+            private readonly LlmErrorKind _kind;
+            private readonly string _detail;
+            public DirectFailureTransport(LlmErrorKind kind, string detail) { _kind = kind; _detail = detail; }
+            public string Provider => "fake";
+            public string Model => "fake-direct-failure";
+            public System.Threading.Tasks.Task<LlmResponse> SendAsync(LlmRequest req, System.Threading.CancellationToken ct)
+                => System.Threading.Tasks.Task.FromResult(LlmResponse.Failure(_kind, _detail, 5, null, 429));
         }
     }
 }

@@ -315,6 +315,30 @@ class AuditChecks(unittest.TestCase):
         self.assertTrue(any("mid-turn" in n for n in notes), notes)
         self.assertTrue(any("stopped" in i for i in incomplete), incomplete)
 
+    def test_input_token_ceiling_and_provider_error_audit_and_leave_batch_incomplete(self):
+        token_batch = self.run_batch(lambda m: m["ceilings"].update({"max_session_input_tokens": 6000}))
+        problems, _, incomplete = tool.audit_batch(token_batch)
+        self.assertEqual(problems, [], problems)
+        self.assertEqual(len(incomplete), 1, incomplete)
+        self.assertIn("control stopped, treatment stopped", incomplete[0])
+        self.assertEqual(quiet(tool.command_audit, __import__("argparse").Namespace(batch_dir=token_batch)), 3)
+
+        failed_batch = self.run_batch(lambda m: (
+            m["provider"]["faults"].append({"seat": "seat-0", "seat_request": 3, "kind": "provider_error"}),
+            m["batch_ceilings"].update({"unknown_usage_policy": "continue_on_unknown"}),
+        ))
+        problems, notes, incomplete = tool.audit_batch(failed_batch)
+        self.assertEqual(problems, [], problems)
+        self.assertEqual(len(incomplete), 1, incomplete)
+        self.assertIn("control failed, treatment failed", incomplete[0])
+        self.assertTrue(any("usage unknown" in n for n in notes), notes)
+        self.assertEqual(quiet(tool.command_audit, __import__("argparse").Namespace(batch_dir=failed_batch)), 3)
+
+        turn_stop_batch = self.run_batch(lambda m: m["ceilings"].update({"max_requests_per_turn": 3}))
+        problems, _, incomplete = tool.audit_batch(turn_stop_batch)
+        self.assertEqual((problems, incomplete), ([], []))
+        self.assertEqual(quiet(tool.command_audit, __import__("argparse").Namespace(batch_dir=turn_stop_batch)), 0)
+
 
 class PinManifest(unittest.TestCase):
     def test_pin_writes_a_copy_and_leaves_the_source_alone(self):

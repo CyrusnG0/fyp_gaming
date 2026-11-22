@@ -25,7 +25,7 @@ namespace LuanShi.ExperimentBatch
         [JsonPropertyName("arm")] public string Arm { get; set; }
         [JsonPropertyName("seed")] public int Seed { get; set; }
         [JsonPropertyName("settings_hash")] public string SettingsHash { get; set; }
-        /// <summary>completed | stopped | failed | error | skipped</summary>
+        /// <summary>completed | completed_with_stops | stopped | failed | error | skipped</summary>
         [JsonPropertyName("status")] public string Status { get; set; }
         [JsonPropertyName("detail")] public string Detail { get; set; }
         [JsonPropertyName("session_state")] public string SessionState { get; set; }
@@ -143,14 +143,8 @@ namespace LuanShi.ExperimentBatch
             foreach (SpectatorTurnRecord t in session.TurnRecords)
                 outcome.TurnEndings.Add("s" + t.Season + " " + t.SeatId + ": " + t.EndReason + " " + t.EndReasonText);
             outcome.FinalState = BatchWorld.FinalState(engine);
-            bool clean = true;
-            foreach (SpectatorTurnRecord t in session.TurnRecords)
-                clean &= t.EndReason == EndReason.ModelEndedTurn || t.EndReason == EndReason.GameOver;
-            // "completed" means every turn ended by the model's own end_turn (or game over); a session that
-            // finished its seasons while some turns were cut by a ceiling or a provider error is not clean.
-            outcome.Status = wallHit ? "stopped" : session.State != SpectatorState.Completed ? "failed"
-                : clean ? "completed" : "completed_with_stops";
-            outcome.Detail = wallHit ? outcome.WallLimit + " reached during the match (checked between ticks)" : session.PauseReason;
+            outcome.Status = ClassifyStatus(wallHit, session, runner, config, outcome.WallLimit, out string detail);
+            outcome.Detail = detail;
 
             WriteText(outcome, matchDir, "prompts", "prompts.ndjson", PromptLines(outcome.Captures));
             string summaryPath = SpectatorSummary.Write(matchDir, session, config, transport, runner);
@@ -191,6 +185,93 @@ namespace LuanShi.ExperimentBatch
             {
                 Path = Path.GetFileName(path), Bytes = bytes.LongLength, Sha256 = BatchPlan.Sha256(bytes),
             };
+        }
+
+        internal static string ClassifyStatus(bool wallHit, SpectatorSession session, LlmTurnRunner runner,
+            LlmConfig config, string wallLimit, out string detail)
+        {
+            if (wallHit)
+            {
+                detail = wallLimit + " reached during the match (checked between ticks)";
+                return "stopped";
+            }
+
+            if (HasConfigurationFailure(config, runner, session, out string configDetail))
+            {
+                detail = !string.IsNullOrEmpty(session?.PauseReason) ? session.PauseReason : configDetail;
+                return "failed";
+            }
+
+            if (session == null || session.State != SpectatorState.Completed)
+            {
+                detail = session?.PauseReason ?? session?.StopReason;
+                return IsIntentionalSessionCeiling(runner) ? "stopped" : "failed";
+            }
+
+            bool clean = true;
+            foreach (SpectatorTurnRecord t in session.TurnRecords)
+                clean &= t.EndReason == EndReason.ModelEndedTurn || t.EndReason == EndReason.GameOver;
+            detail = session.PauseReason;
+            return clean ? "completed" : "completed_with_stops";
+        }
+
+        private static bool HasConfigurationFailure(LlmConfig config, LlmTurnRunner runner,
+            SpectatorSession session, out string configDetail)
+        {
+            if (runner != null && runner.StopCeiling == "experiment_configuration")
+            {
+                configDetail = runner.FailureReason ?? "experiment configuration invalid";
+                return true;
+            }
+            if (session != null)
+            {
+                foreach (SpectatorTurnRecord t in session.TurnRecords)
+                {
+                    if (t.EndReason == EndReason.DeliberationLimit
+                        && ((t.EndedBy != null && t.EndedBy.IndexOf("experiment configuration invalid", StringComparison.Ordinal) >= 0)
+                            || (t.EndReasonText != null && t.EndReasonText.IndexOf("experiment configuration invalid", StringComparison.Ordinal) >= 0)))
+                    {
+                        configDetail = t.EndReasonText ?? t.EndedBy;
+                        return true;
+                    }
+                }
+            }
+            if (config != null)
+            {
+                IReadOnlyList<string> errors = config.ValidateExperiment();
+                if (errors != null && errors.Count > 0)
+                {
+                    configDetail = "experiment configuration invalid: " + string.Join(",", errors);
+                    return true;
+                }
+            }
+            configDetail = null;
+            return false;
+        }
+
+        internal static bool IsIntentionalSessionCeiling(LlmTurnRunner runner)
+        {
+            if (runner == null) return false;
+            if (runner.EndReason == EndReason.SessionRequestLimit
+                || runner.EndReason == EndReason.UsdBudgetLimit)
+                return true;
+            // Only configured spend/request/action/time ceilings are intentional stops. Missing usage
+            // ("session_usage_unknown"), provider errors and configuration errors are failures ("failed").
+            switch (runner.StopCeiling)
+            {
+                case "session_requests":
+                case "session_requests_exhausted":
+                case "session_actions_exhausted":
+                case "session_seconds":
+                case "session_wall_time_exhausted":
+                case "session_input_tokens":
+                case "session_output_tokens":
+                case "session_input_tokens_exhausted":
+                case "session_output_tokens_exhausted":
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 }

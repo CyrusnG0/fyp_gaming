@@ -199,12 +199,12 @@ def audit_match(match_dir, problems, notes):
             problems.append("%s: prompt %d differs between the batch capture and the recorder's exchange" % (label, index))
 
     unknown = sum(1 for r in records if r.get("input_tokens") is None or r.get("output_tokens") is None)
-    want_in = None if unknown else sum(r["input_tokens"] for r in records)
-    want_out = None if unknown else sum(r["output_tokens"] for r in records)
+    want_in = None if (unknown or n == 0) else sum(r["input_tokens"] for r in records)
+    want_out = None if (unknown or n == 0) else sum(r["output_tokens"] for r in records)
     for name, want in (("input_tokens", want_in), ("output_tokens", want_out)):
         if totals[name] != want or summary[name] != want:
             problems.append("%s: summary %s is %s/%s but the records give %s" % (label, name, summary[name], totals[name], want))
-    match["_usage_unknown"] = bool(unknown)
+    match["_usage_unknown"] = bool(unknown or n == 0)
     if unknown:
         notes.append("%s: usage unknown for %d of %d requests (totals unknown, not zero)" % (label, unknown, n))
 

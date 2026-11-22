@@ -109,7 +109,8 @@ namespace LuanShi.ExperimentBatch
                 if (!i.HasValue || !p.HasValue) { unknown++; continue; }
                 input += i.Value; output += p.Value;
             }
-            long? inputTotal = unknown == 0 ? input : (long?)null, outputTotal = unknown == 0 ? output : (long?)null;
+            long? inputTotal = records.Count > 0 && unknown == 0 ? input : (long?)null,
+                outputTotal = records.Count > 0 && unknown == 0 ? output : (long?)null;
             a.Counts["records_without_usage"] = unknown;
             a.Counts["input_tokens_from_records"] = inputTotal;
             a.Counts["output_tokens_from_records"] = outputTotal;
