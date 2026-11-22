@@ -13,6 +13,7 @@ internal static partial class Harness
         FakeRehearsalPlanShape();
         FakeRehearsalOptInOrdersOnly();
         FakeRehearsalReachesEngineAndLogs();
+        RunFakeRehearsalGarrison();
     }
 
     private static readonly FakeRehearsalOptions FakeRehearsalAll =

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace LuanShi.Engine
@@ -8,6 +9,15 @@ namespace LuanShi.Engine
         public bool ManualLookup;
         public bool Research;
         public bool Diplomacy;
+        public bool Garrison;
+
+        /// <summary>
+        /// Most orders (end_turn excluded) one scripted turn may hold. The runner ends a turn as a limit
+        /// when its accepted-action cap is reached, without reading another reply, so a longer script would
+        /// leak its last replies into the next seat's turn. Derive it from the config:
+        /// min(MaxActionsPerTurn, MaxRequestsPerTurn - 1).
+        /// </summary>
+        public int MaxOrdersPerTurn = 4;
     }
 
     /// <summary>
@@ -40,18 +50,54 @@ namespace LuanShi.Engine
                     ordersLeft -= BalanceConfig.CommandPointCost(ActionType.LevyTax);
             }
 
+            // end_turn stays last so the turn still closes through the model's own end signal.
+            plan.InsertRange(plan.Count - 1, Extras(seatId, playOrder, openingSeason, options, ordersLeft,
+                options.MaxOrdersPerTurn - (plan.Count - 1)));
+            return plan;
+        }
+
+        /// <summary>
+        /// Queues one seat's whole scripted turn. With the garrison switch on it is recruit, convert_garrison
+        /// and march (resolved at dispatch time, see <see cref="FakeTurnPlan.EnqueueSpectatorGarrisonSteps"/>),
+        /// then the treaty and research orders, then end_turn. Otherwise it is <see cref="Build"/>.
+        /// </summary>
+        public static void EnqueueSeatTurn(FakeLlmTransport fake, GameEngine engine, string seatId,
+            IReadOnlyList<string> playOrder, bool openingSeason, FakeRehearsalOptions options,
+            Func<MovementView> movement, int delayMs = 0)
+        {
+            if (fake == null) throw new ArgumentNullException(nameof(fake));
+            options = options ?? new FakeRehearsalOptions();
+            Observation observation = engine.Observe(seatId);
+            if (!options.Garrison)
+            {
+                foreach (string line in Build(movement == null ? null : movement(), observation, seatId, playOrder,
+                             openingSeason, options))
+                    fake.EnqueueSuccess(line, delayMs, 120, 20);
+                return;
+            }
+
+            FakeTurnPlan.EnqueueSpectatorGarrisonSteps(fake, engine, seatId, movement, delayMs);
+            int ordersLeft = (observation == null ? 0 : observation.CommandPoints) - FakeTurnPlan.GarrisonStepsCommandPoints;
+            foreach (string line in Extras(seatId, playOrder, openingSeason, options, ordersLeft,
+                         options.MaxOrdersPerTurn - 3))
+                fake.EnqueueSuccess(line, delayMs, 120, 20);
+            fake.EnqueueSuccess("{\"type\":\"end_turn\",\"summary\":\""
+                + MiniJson.Escape(FakeTurnPlan.Label + ": end turn") + "\"}", delayMs, 120, 20);
+        }
+
+        private static List<string> Extras(string seatId, IReadOnlyList<string> playOrder, bool openingSeason,
+            FakeRehearsalOptions options, int ordersLeft, int room)
+        {
+            // Priority when the turn is full: the treaty exchange first, then research.
             var extra = new List<string>();
             if (options.Diplomacy && openingSeason && playOrder != null && playOrder.Count >= 2)
             {
-                if (seatId == playOrder[0]) extra.Add(Propose(playOrder[1]));
-                else if (seatId == playOrder[1]) extra.Add(Respond(playOrder[0]));
+                if (room > extra.Count && seatId == playOrder[0]) extra.Add(Propose(playOrder[1]));
+                else if (room > extra.Count && seatId == playOrder[1]) extra.Add(Respond(playOrder[0]));
             }
-            if (options.Research && ordersLeft >= BalanceConfig.CommandPointCost(ActionType.Research))
+            if (options.Research && room > extra.Count && ordersLeft >= BalanceConfig.CommandPointCost(ActionType.Research))
                 extra.Add(Research());
-
-            // end_turn stays last so the turn still closes through the model's own end signal.
-            plan.InsertRange(plan.Count - 1, extra);
-            return plan;
+            return extra;
         }
 
         private static string Research()
