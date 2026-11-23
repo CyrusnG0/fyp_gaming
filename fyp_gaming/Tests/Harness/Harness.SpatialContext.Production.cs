@@ -32,20 +32,15 @@ internal static partial class Harness
         CompactScenario.CompactContact.Apply(engine);
         if (variant)
         {
+            // Only non-public state may differ between the twins: terrain, hidden armies. City and
+            // watchtower positions are public map data, so moving them legitimately changes the
+            // prompt and would defeat the leak check.
             ArmyState weiVanguard = engine.State.FindArmy("army-wei-1");
             weiVanguard.X = 7; weiVanguard.Z = 7;
-            CityState weiSecond = engine.State.FindCity("city-wei-2");
-            weiSecond.X = 3; weiSecond.Z = 10;
-            CityState neutral = engine.State.FindCity("city-neutral");
-            neutral.X = 11; neutral.Z = 9;
             engine.State.Armies.Add(new ArmyState
             {
                 Id = "army-wei-hidden", Name = "Wei Hidden Flank", OwnerSeatId = "seat-0",
                 X = 4, Z = 6, Troops = 1400, UnitType = UnitTypes.Cavalry,
-            });
-            engine.State.WatchTowers.Add(new WatchTowerState
-            {
-                Id = "tower-hidden", Name = "Western Tower", X = 2, Z = 2, OwnerSeatId = null,
             });
         }
         engine.BeginSeason();
@@ -54,8 +49,7 @@ internal static partial class Harness
         {
             int[][] unseenCoords =
             {
-                new[] { 10, 8 }, new[] { 12, 8 }, new[] { 9, 7 }, new[] { 7, 7 },
-                new[] { 3, 10 }, new[] { 11, 9 }, new[] { 4, 6 }, new[] { 2, 2 },
+                new[] { 10, 8 }, new[] { 12, 8 }, new[] { 9, 7 }, new[] { 7, 7 }, new[] { 4, 6 },
             };
             foreach (int[] c in unseenCoords)
                 Check(!engine.InSight("seat-1", c[0], c[1]),
@@ -87,15 +81,34 @@ internal static partial class Harness
 
     private static void AssertNoHiddenCompactLeaks(string prompt, string label)
     {
+        // City/tower positions and names are public map data by design. What must never leak is
+        // hidden force identity and unseen terrain; internal statistics are checked separately on
+        // the public-map block, because the observation legitimately carries the seat's own stats.
         string[] forbidden =
         {
-            "Luoyang", "Xuchang", "Wancheng", "Central Watchtower", "Wei Hidden Flank",
-            "Western Tower", "army-wei", "city-wei", "city-neutral", "tower-mid",
-            "unexplored", "\"cost\"",
+            "Wei Hidden Flank", "army-wei", "unexplored", "\"cost\"",
         };
         foreach (string token in forbidden)
             Check(!prompt.Contains(token, StringComparison.Ordinal),
                 label + " omits unseen token: " + token);
+    }
+
+    /// <summary>The public map exposes positions and owners only; city internals stay fogged.</summary>
+    private static void AssertPublicMapHasNoCityStats(string prompt, string label)
+    {
+        int begin = prompt.IndexOf("<<<BEGIN_PUBLIC_MAP>>>", StringComparison.Ordinal);
+        int end = prompt.IndexOf("<<<END_PUBLIC_MAP>>>", StringComparison.Ordinal);
+        string block = begin >= 0 && end > begin
+            ? prompt.Substring(begin, end - begin)
+            : string.Empty;
+        Check(block.Contains("\"name\":\"Luoyang\"", StringComparison.Ordinal)
+              && block.Contains("\"id\":\"city-wei\"", StringComparison.Ordinal)
+              && block.Contains("\"capitals\":{", StringComparison.Ordinal),
+            label + " public map lists enemy city positions and capitals");
+        string[] stats = { "population", "food", "gold", "garrison", "morale", "defense", "training" };
+        foreach (string stat in stats)
+            Check(!block.Contains(stat, StringComparison.Ordinal),
+                label + " public map omits internal city stat: " + stat);
     }
 
     private static void SpatialProductionHiddenWorldAndTerrainInvariance()
@@ -109,6 +122,7 @@ internal static partial class Harness
                   && string.Equals(twinA.Requests[1].User, twinB.Requests[1].User, StringComparison.Ordinal),
                 $"prod runner ({level}): Shu prompt is byte-identical across hidden enemy and unseen terrain worlds");
             AssertNoHiddenCompactLeaks(twinA.Requests[1].User, $"prod runner ({level})");
+            AssertPublicMapHasNoCityStats(twinA.Requests[1].User, $"prod runner ({level})");
         }
     }
 
@@ -155,9 +169,9 @@ internal static partial class Harness
               && contactUser.Contains("[visible] watch_tower id=tower-mid name=\"Central Watchtower\" owner=neutral allegiance=neutral pos=12,8", StringComparison.Ordinal)
               && contactUser.Contains("from_own=army-shu-1:2@W", StringComparison.Ordinal)
               && contactUser.Contains("army=army-shu-1 -> [visible] neutral_city city-neutral at 13,8 dist=1 dir=W (dx=-1,dz=0)", StringComparison.Ordinal)
-              && !contactUser.Contains("army-wei", StringComparison.Ordinal)
-              && !contactUser.Contains("Luoyang", StringComparison.Ordinal),
+              && !contactUser.Contains("army-wei", StringComparison.Ordinal),
             "prod Shu contact prompt accurately labels visible objectives with bearings and edge_dist while Wei stays hidden");
+        AssertPublicMapHasNoCityStats(contactUser, "prod Shu contact");
     }
 
     private static void SpatialProductionNormalRunnerDispatchAndFeatureOff()
@@ -304,10 +318,12 @@ internal static partial class Harness
               && midReport.VisibleCellRangesDropped > 0,
             $"Rich with {midBudget} ProviderCharLimit drops visible rows ({midReport?.VisibleCellRangesDropped}) while keeping all legal moves (dropped={midReport?.MoveOptionsDropped})");
 
+        // 10500 no longer clears even the minimum Rich prompt in the current balance profile;
+        // 11500 still forces truncation while leaving headroom for it.
         var provOptsCfg = new SpatialContextOptions
         {
             Level = SpatialDetailLevel.Rich,
-            ProviderCharLimit = 10500,
+            ProviderCharLimit = 11500,
         };
         GameEngine provEngine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31);
         MovementView provMove = MovementPlanner.BuildDiversified(provEngine, "seat-1",
@@ -317,9 +333,9 @@ internal static partial class Harness
         string provUser = PromptBuilder.UserPromptWithSpatial(provObs, provOpts, new List<string>(),
             6, 3, provMove, provMove.SpatialContext, provOptsCfg, out SpatialTruncationReport provReport);
         Check(provReport != null && provReport.Truncated && provReport.Reason == "provider_char_limit"
-              && provReport.TotalChars <= 10500 && provReport.MoveOptionsDropped > 0
+              && provReport.TotalChars <= 11500 && provReport.MoveOptionsDropped > 0
               && provUser.Contains("reason=provider_char_limit", StringComparison.Ordinal),
-            $"Rich with tight ProviderCharLimit fits 10500 chars (got {provReport?.TotalChars}, dropped={provReport?.MoveOptionsDropped}) and records provider_char_limit");
+            $"Rich with tight ProviderCharLimit fits 11500 chars (got {provReport?.TotalChars}, dropped={provReport?.MoveOptionsDropped}) and records provider_char_limit");
 
         var crowdRun = RunOneCompactSeasonAsEndTurnWithRunner(BuildCrowdedRichOverflowWorld(), true, 909,
             new SpatialContextOptions { Level = SpatialDetailLevel.Rich });

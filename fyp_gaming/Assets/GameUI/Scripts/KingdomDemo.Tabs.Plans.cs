@@ -231,7 +231,7 @@ namespace LuanShi
                     {
                         case 1: return $"Drill — training cap +{BalanceConfig.ResearchMilTrainingCapBonus} (now {BalanceConfig.TrainingCap(1)})";
                         case 2: return "Cavalry unlock — Cavalry units can be recruited (300 gold/1,000, 8 move, double upkeep)";
-                        case 3: return "Siege engines unlock — Siege units can be recruited (500 gold/1,000, waives the 3:1 assault)";
+                        case 3: return "Siege engines unlock — Siege units can be recruited (500 gold/1,000)";
                         case 4: return $"Art of war — combat power ×{1f + BalanceConfig.ResearchMilCombatBonus:F2}";
                         case 5: return "Command — general coefficient +0.2 (deferred: no generals)";
                     }

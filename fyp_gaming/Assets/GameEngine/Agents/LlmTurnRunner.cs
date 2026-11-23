@@ -19,6 +19,12 @@ namespace LuanShi.Engine
         void EndTurn();
     }
 
+    /// <summary>Opt-in provider of public, fog-independent map layout data for prompts.</summary>
+    public interface IStaticMapProvider
+    {
+        PublicMapInfo GetPublicMapInfo();
+    }
+
     /// <summary>
     /// Main-thread, bounded one-seat LLM turn state machine. Provider I/O is the only background
     /// work. Every terminal path calls EndTurn once, except a host cancellation (the host then owns
@@ -337,12 +343,18 @@ namespace LuanShi.Engine
             int promptLimit = rich ? _config.EffectiveMaxPromptChars : MaxPromptChars;
             if (spatialOn && spatialOpts.ProviderCharLimit > 0)
                 promptLimit = Math.Min(promptLimit, spatialOpts.ProviderCharLimit);
+            // The public map is inserted after the prompt builders, so every prompt assembler must
+            // reserve room for it; otherwise a provider-capped prompt fits its budget and then
+            // fails the size check below with nothing sent.
+            string publicMapSection = PromptBuilder.PublicMapSection((_host as IStaticMapProvider)?.GetPublicMapInfo());
+            int publicMapReserve = string.IsNullOrEmpty(publicMapSection) ? 0 : publicMapSection.Length + 1;
+            bool actionReference = _config.EnableActionReference;
             string system = PromptBuilder.CombinedSystemPromptFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn, diplomacy);
+                deliberation, rich, research, spatialOn, diplomacy, actionReference);
             string promptVersion = PromptBuilder.CombinedVersionFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn, diplomacy);
+                deliberation, rich, research, spatialOn, diplomacy, actionReference);
             string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
-                deliberation, rich, research, spatialOn, diplomacy);
+                deliberation, rich, research, spatialOn, diplomacy, actionReference);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research, diplomacy);
             IReadOnlyList<LlmMemory> relevantMemories = LlmMemoryRetriever.Select(
                 _memories, observation, options);
@@ -360,7 +372,7 @@ namespace LuanShi.Engine
                 // Experiment: one seat-filtered, size-reported prompt. The recorded observation JSON
                 // is exactly the JSON this prompt carries, including its configured event cap.
                 if (!TryBuildRichPrompt(observation, options, movement, attacks, persona, inquiryResult,
-                        promptVersion, system.Length, requestsLeft, actionsLeft,
+                        promptVersion, system.Length, requestsLeft, actionsLeft, publicMapReserve,
                         out user, out string richObservation))
                     return;
                 observationJson = richObservation;
@@ -374,7 +386,7 @@ namespace LuanShi.Engine
                             requestsLeft, actionsLeft, movement, movement.SpatialContext, spatialOpts,
                             out spatialReport, promptLimit, relevantMemories, inquiryResult, inquiry,
                             persona, attackOn, attacks, strategicNote, earlierResults, deliberation,
-                            research)
+                            research, actionReference, publicMapReserve)
                         : PromptBuilder.UserPrompt(observation, options, _history,
                             requestsLeft, actionsLeft, movement, relevantMemories,
                             inquiryResult, inquiry, persona, attackOn, attacks, strategicNote,
@@ -390,7 +402,18 @@ namespace LuanShi.Engine
             // fails closed on the size check below. The version line is then aligned with the system
             // prompt and the run record, because the shared builders carry no diplomacy flag.
             if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
-            if (diplomacy) user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
+            // The shared builders carry no feature flags, so the identity line is aligned with the
+            // system prompt and the run record whenever an identity-winning opt-in is active.
+            if (diplomacy || actionReference)
+                user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
+
+            if (!string.IsNullOrEmpty(publicMapSection))
+            {
+                int idx = user.IndexOf(PromptBuilder.ObservationSectionMarker, StringComparison.Ordinal);
+                if (idx >= 0)
+                    user = user.Insert(idx, "\n" + publicMapSection);
+            }
+
             if (system.Length + user.Length > promptLimit)
             { FinishFailed("prompt too large", EndReason.PromptTooLarge); return; }
 

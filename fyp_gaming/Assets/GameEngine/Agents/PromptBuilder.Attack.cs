@@ -14,7 +14,7 @@ namespace LuanShi.Engine
     public static partial class PromptBuilder
     {
         /// <summary>Distinct identity for the opt-in attack loop (planning prompt + attack rules).</summary>
-        public const string AttackPromptVersion = "demo-slice-6-attack-1";
+        public const string AttackPromptVersion = "demo-slice-6-attack-2";
 
         /// <summary>
         /// Appended to the planning system prompt when attacks are enabled. The numbers come from
@@ -25,16 +25,15 @@ namespace LuanShi.Engine
         {
             string field = BalanceConfig.CommandPointCost(ActionType.AttackArmy).ToString(CultureInfo.InvariantCulture);
             string city = BalanceConfig.CommandPointCost(ActionType.AttackCity).ToString(CultureInfo.InvariantCulture);
-            string ratio = BalanceConfig.AssaultTroopRatio.ToString(CultureInfo.InvariantCulture);
             string archer = BalanceConfig.ArcherAttackRange.ToString(CultureInfo.InvariantCulture);
             return "\n\nATTACK AND CAPTURE (opt-in; the engine is authoritative):\n" +
                    "- attack_army starts a field battle. target_id is your own army id; param_a and param_b are the x and z of an enemy army listed in CANDIDATE OPTIONS. It costs " + field + " command point(s). The target must be adjacent to the attacking army (archers reach " + archer + " hexes).\n" +
-                   "- attack_city assaults an adjacent enemy city, resolved within the same season. target_id is your own army id; param_a and param_b are the x and z of a city listed in CANDIDATE OPTIONS. It costs " + city + " command points and needs at least " + ratio + " times the defending troops unless the army is a siege army.\n" +
+                   "- attack_city assaults an adjacent enemy city, resolved within the same season. target_id is your own army id; param_a and param_b are the x and z of a city listed in CANDIDATE OPTIONS. It costs " + city + " command points.\n" +
                    "- Neutral cities and unowned watch towers are captured by march, not by attack_city. An enemy city cannot be entered by march.\n" +
                    "- Only attack a target that appears as an attack_army or attack_city option, with its listed coordinates. Do not invent a target.\n" +
                    "- The engine decides every battle. Results are not guaranteed: your army can lose troops and morale, be routed or be destroyed, and a routed army cannot attack. Compare troop numbers before attacking.\n" +
                    "- Attacking a faction you hold a treaty with breaks the treaty and costs trust and prestige.\n" +
-                   "- A rejected attack may be reported as \"" + FeedbackPolicy.ArmyMoraleBroken + "\" or \"" + FeedbackPolicy.AssaultRatioTooLow + "\". Other rejections may receive another safe category or a generic response.\n" +
+                   "- A rejected attack may be reported as \"" + FeedbackPolicy.ArmyMoraleBroken + "\". Other rejections may receive another safe category or a generic response.\n" +
                    "- For attack_army and attack_city, param_a and param_b are required integers copied from a listed option.";
         }
 

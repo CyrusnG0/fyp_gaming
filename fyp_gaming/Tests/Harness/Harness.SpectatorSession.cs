@@ -498,12 +498,14 @@ internal static partial class Harness
         string prompts = string.Join("\n", fake.Requests.Select(r => r.User));
         string aPrompts = string.Join("\n", fake.Requests.Take(2).Select(r => r.User));
         string bPrompts = string.Join("\n", fake.Requests.Skip(2).Take(2).Select(r => r.User));
-        Check(aPrompts.Contains("city-a") && !aPrompts.Contains("city-b")
+        // City positions/owners are public map data; what must never cross seats is the other
+        // side's internal numbers (population here).
+        Check(aPrompts.Contains("city-a") && aPrompts.Contains("city-b")
               && !aPrompts.Contains("54321"),
-            "[DEMO-E1] seat-a's prompt has only seat-a's cities/numbers");
-        Check(bPrompts.Contains("city-b") && !bPrompts.Contains("city-a")
+            "[DEMO-E1] seat-a's prompt has public city positions but no seat-b numbers");
+        Check(bPrompts.Contains("city-b") && bPrompts.Contains("city-a")
               && !bPrompts.Contains("43210"),
-            "[DEMO-E1] seat-b's prompt has only seat-b's cities/numbers");
+            "[DEMO-E1] seat-b's prompt has public city positions but no seat-a numbers");
         Check(prompts.Contains("43210") || prompts.Contains("54321"),
             "[DEMO-E1] fixture: each seat's own population does appear in its own prompt");
     }

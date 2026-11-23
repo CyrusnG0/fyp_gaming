@@ -396,7 +396,7 @@ namespace LuanShi
             foreach (string command in plan)
                 agentFake.EnqueueSuccess(command, 300, 120, 20);
         }
-        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
+        private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost, IStaticMapProvider
         {
             private readonly SingleLlmTurnHost _inner;
             public AgentTurnHost(KingdomDemo owner, string seatId)
@@ -411,6 +411,7 @@ namespace LuanShi
             }
             public string FactionKey => _inner.FactionKey;
             public Observation Observe() => _inner.Observe();
+            public PublicMapInfo GetPublicMapInfo() => _inner.GetPublicMapInfo();
             public ValidationResult Submit(ActionCommand cmd) => _inner.Submit(cmd);
             public void EndTurn() => _inner.EndTurn();
             /// <summary>Read-only, seat-filtered candidates for this agent seat.</summary>

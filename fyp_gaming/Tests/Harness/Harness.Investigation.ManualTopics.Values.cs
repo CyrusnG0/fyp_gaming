@@ -82,9 +82,8 @@ internal static partial class Harness
         Check(InvestigationFact(assault, "command_point_cost")
               == InvestigationInvariant(BalanceConfig.CommandPointCost(ActionType.AttackCity)),
             "[LS-018] city assault cost matches BalanceConfig");
-        Check(InvestigationFact(assault, "assault_ratio")
-              == InvestigationInvariant(BalanceConfig.AssaultTroopRatio) + ":1",
-            "[LS-018] assault ratio matches BalanceConfig");
+        Check(InvestigationFact(assault, "assault_ratio") == null,
+            "[LS-018] city assault publishes no troop-ratio requirement");
         Check(InvestigationFact(assault, "adjacency") == "the target city's hex or one hex away",
             "[LS-018] assault adjacency includes the same hex");
         Check(InvestigationFactNote(assault, "adjacency")

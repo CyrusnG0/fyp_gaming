@@ -169,7 +169,6 @@ namespace LuanShi.EditorTools
                     case 1: if (Mode == "spectator") StepSpectator(live); else StepAgentTurn(live); break;
                     case 11: StepAgentTurnWait(live); break;
                     case 2: StepFieldBattle(live); break;
-                    case 3: StepAssaultRejected(live); break;
                     case 4: StepAssaultCaptured(live); break;
                     case 9: Finish(0, "rehearsal complete"); break;
                     default: Finish(0, "rehearsal complete"); break;
@@ -322,44 +321,18 @@ namespace LuanShi.EditorTools
             LogLines();
             Record(demo, "field-battle", accepted && battle != null);
             Capture("03-field-battle");
-            Next(3, 6);
-        }
-
-        // ---- step 3: the 3:1 rule refuses an assault ----------------------------
-
-        private static void StepAssaultRejected(KingdomDemo demo)
-        {
-            DismissModals(demo);
-            var engine = Engine(demo);
-            var city = engine.State.FindCity("city-shu");
-            city.Garrison = 1000;   // 3:1 needs 3,000; the host has 2,000
-            var host = EnsureRehearsalArmy(demo, "army-wei-9", "Wei Siege Host", "seat-0", 19, 8, 2000);
-            CallByName(demo, "RefreshObservation");
-            CallByName(demo, "TintCity", city.Id);
-            _log.Add("[assault-reject] fixture: " + city.Id + " garrison 1000 at (" + city.X + "," + city.Z
-                + "), host " + host.Id + " adjacent=" + engine.State.Map.AreAdjacent(host.X, host.Z, city.X, city.Z));
-
-            string json = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-9\",\"param_a\":" + city.X
-                 + ",\"param_b\":" + city.Z + "}";
-            SubmitThroughDemoJson(demo, json, out bool accepted, out string error);
-            var siege = LatestEvent(engine, "battle_siege");
-            _log.Add("[assault-reject] accepted=" + accepted + " error=" + (error ?? "-")
-                + " battleEvent=" + (siege == null ? "none" : siege.Payload["outcome"]));
-            _log.Add("[assault-reject] status=\"" + (string)Field(demo, "statusMsg") + "\"");
-            LogLines();
-            Record(demo, "assault-rejected", !accepted && siege == null);
-            Capture("04-assault-rejected");
             Next(4, 6);
         }
 
-        // ---- step 4: a legal assault captures the capital ----------------------
+        // ---- step 4: an assault captures the capital ---------------------------
 
         private static void StepAssaultCaptured(KingdomDemo demo)
         {
             DismissModals(demo);
             var engine = Engine(demo);
             var city = engine.State.FindCity("city-shu");
-            city.Garrison = 500;    // 3:1 needs 1,500; the host qualifies
+            city.Garrison = 500;
+            EnsureRehearsalArmy(demo, "army-wei-9", "Wei Siege Host", "seat-0", 19, 8, 2000);
             CallByName(demo, "RefreshObservation");
             string beforeTint = TintOf(demo, "city-shu");
 
@@ -379,7 +352,7 @@ namespace LuanShi.EditorTools
             _log.Add("[assault] scenario=" + (engine.State.ScenarioId ?? "none") + " profile=" + engine.Balance.Key);
             LogLines();
             Record(demo, "assault-captured", accepted && engine.State.FindCity("city-shu").OwnerSeatId == "seat-0");
-            Capture("05-assault-captured");
+            Capture("04-assault-captured");
             Next(9, 15);
         }
 

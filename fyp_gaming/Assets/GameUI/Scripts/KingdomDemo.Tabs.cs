@@ -200,7 +200,7 @@ namespace LuanShi
             y += 10;
             string footer =
                 $"Select one of our cities, then issue orders from its selection panel; unavailable buttons are grey and state their reason.\n" +
-                $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}, requiring a {BalanceConfig.AssaultTroopRatio}:1 troop ratio).";
+                $"Select one of our armies to start a field battle against an adjacent enemy ({OrderCost(ActionType.AttackArmy)}), or assault an enemy city ({OrderCost(ActionType.AttackCity)}).";
             return y + WrappedLabel(wrap, footer, p.x + 20, y, 760, 44);
         }
 

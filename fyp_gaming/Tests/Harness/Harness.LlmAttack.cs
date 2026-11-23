@@ -104,11 +104,11 @@ internal static partial class Harness
            && first.Contains("type=attack_army target_id=army-a-1 param_a=2 param_b=1 cost=1")
            && first.Contains("type=attack_city target_id=army-a-1 param_a=1 param_b=2 cost=2"),
             "the first prompt carries the attack rules, version and both engine-computed candidates");
-        RunnerAtkCheck(first.Contains("Prompt version: demo-slice-6-attack-1\n")
-           && !first.Contains("Prompt version: demo-slice-6-attack\n")
+        RunnerAtkCheck(first.Contains("Prompt version: demo-slice-6-attack-2\n")
+           && !first.Contains("Prompt version: demo-slice-6-attack-1\n")
            && fake.Requests[0].System.Contains("army morale broken")
-           && fake.Requests[0].System.Contains("assault ratio too low"),
-            "the live attack request carries the new version and the two category names, not the old version");
+           && !fake.Requests[0].System.Contains("assault ratio too low"),
+            "the live attack request carries the new version and the remaining category name");
         RunnerAtkCheck(runner.RecentHistory.Any(h => h.Contains("attack_army army-a-1 -> ok"))
            && fake.Requests[1].User.Contains("attack_army army-a-1 -> ok")
            && runner.Activity.Any(a => a.Kind == "command" && a.Text == "attack_army army-a-1 -> (2,1)"),
@@ -136,8 +136,8 @@ internal static partial class Harness
         runner.Begin(host, host.Token, "seat-a", 3);
 
         RunnerAtkCheck(fake.Requests[0].User.Contains("type=attack_city target_id=army-a-1 param_a=2 param_b=1 cost=2")
-           && fake.Requests[0].User.Contains("garrison 100") && fake.Requests[0].User.Contains("at least 300 troops"),
-            "the assault candidate states the garrison and the 3:1 requirement before the model chooses");
+           && fake.Requests[0].User.Contains("garrison 100") && !fake.Requests[0].User.Contains("at least"),
+            "the assault candidate states the garrison without a troop-ratio requirement");
         LlmDrain(runner);
 
         RunnerAtkCheck(engine.State.FindCity("city-n").OwnerSeatId == "seat-a"

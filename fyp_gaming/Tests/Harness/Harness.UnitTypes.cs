@@ -154,7 +154,7 @@ internal static partial class Harness
                   $"a siege defender deals 0.5x ({infVsSiege.AttackerLoss}/{baseline.AttackerLoss})");
         }
 
-        // ---- archer garrison defence + siege waiver
+        // ---- archer garrison defence + no troop-ratio gate
         {
             int infLosses = SiegeFirstRoundAttackerLosses(302, UnitTypes.Infantry);
             int archLosses = SiegeFirstRoundAttackerLosses(302, UnitTypes.Archer);
@@ -166,29 +166,19 @@ internal static partial class Harness
             e.State.FindCity("city-b").Garrison = 5000;
             var army = e.State.FindArmy("army-a");
             army.Troops = 1000;
-            army.UnitType = UnitTypes.Siege;
+            army.UnitType = UnitTypes.Infantry;
             var r = e.Submit(new ActionCommand { Type = ActionType.AttackCity, ActorSeatId = "seat-a", TargetId = army.Id, ParamA = 2, ParamB = 0 });
-            Check(r.Ok && Find(e.Log, "battle_siege") != null, $"a siege army waives the 3:1 gate ({r.Error})");
-
-            var e2 = SiegeEngine(defendingArmy: false);
-            e2.State.FindCity("city-b").Garrison = 5000;
-            var army2 = e2.State.FindArmy("army-a");
-            army2.Troops = 1000;
-            army2.UnitType = UnitTypes.Infantry;
-            var r2 = e2.Submit(new ActionCommand { Type = ActionType.AttackCity, ActorSeatId = "seat-a", TargetId = army2.Id, ParamA = 2, ParamB = 0 });
-            Check(!r2.Ok && r2.Error.Contains("3:1"), $"infantry still needs 3:1 ({r2.Error})");
+            Check(r.Ok && Find(e.Log, "battle_siege") != null,
+                  $"an under-strength infantry assault is no longer refused ({r.Error})");
         }
         {
             var state = SiegeScenario(defendingArmy: false);
-            state.Cities.Find(c => c.Id == "city-b").Garrison = 5000;
+            state.Cities.Find(c => c.Id == "city-b").Garrison = 600;
             var army = state.FindArmy("army-a");
             army.Troops = 1000;
-            army.UnitType = UnitTypes.Siege;
-            Check(PlanContains(state, "seat-a", ActionType.AttackCity),
-                  "the scripted seat plans a siege-army assault without 3:1");
             army.UnitType = UnitTypes.Infantry;
-            Check(!PlanContains(state, "seat-a", ActionType.AttackCity),
-                  "and refuses the same assault with infantry");
+            Check(PlanContains(state, "seat-a", ActionType.AttackCity),
+                  "the scripted seat plans an infantry assault with only a modest troop edge");
         }
 
         // ---- one type per army/garrison: transfers, formation, movement state

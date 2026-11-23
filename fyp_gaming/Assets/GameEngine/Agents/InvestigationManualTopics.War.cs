@@ -89,12 +89,6 @@ namespace LuanShi.Engine
                 "attack_city costs more than a default order."));
             facts.Add(Fact("adjacency", "the target city's hex or one hex away",
                 "The same hex counts as adjacent (distance 0), so a same-hex target passes the check."));
-            facts.Add(Fact("assault_ratio",
-                InvestigationText.Number(BalanceConfig.AssaultTroopRatio) + ":1",
-                "Attacker troops must be at least this multiple of the garrison plus any defending field army."));
-            facts.Add(Fact("siege_waiver",
-                UnitTypes.WaivesAssaultRatio(UnitTypes.Siege) ? "yes for 攻城器械" : "no",
-                "A siege army ignores the troop-ratio requirement."));
             facts.Add(Fact("defender_bonus",
                 "+" + InvestigationText.Percent(BalanceConfig.CombatDefenseBonusPerLevel) + " per 城防 level",
                 "城防 is raised by 修城 up to " + InvestigationText.Number(BalanceConfig.DefenseMax) + "."));
