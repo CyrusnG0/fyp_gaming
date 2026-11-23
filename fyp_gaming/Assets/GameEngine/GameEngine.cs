@@ -865,9 +865,7 @@ namespace LuanShi.Engine
                 return ValidationResult.Fail("enemy city — battle is beyond this demo");
 
             int budget = BalanceConfig.MarchBudget(State.Season, army.UnitType);   // type-aware (design §5.4)
-            int cost = State.RequireVisibleMarchRoutes
-                ? SpatialGeometry.VisiblePathCost(this, fac.SeatId, State.Map, army.X, army.Z, tx, tz, budget)
-                : State.Map.PathCost(army.X, army.Z, tx, tz, budget);
+            int cost = MarchPathCost(fac.SeatId, army.X, army.Z, tx, tz, budget);
             if (cost < 0) return ValidationResult.Fail(
                 $"destination out of reach this season (max cost {budget})");
 
