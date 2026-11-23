@@ -42,7 +42,7 @@ namespace LuanShi.Engine
             var rec = CurrentRequestRecord;
             string seatId = rec != null ? rec.SeatId : seat;
             sb.AppendLine($"Current Turn: {seatId} ({CurrentPersonaId})");
-            string act = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? rec.RawModelText : "end_turn";
+            string act = DescribeRequestAction(rec);
             sb.AppendLine("Action: " + act);
 
             if (_isCompleted)
@@ -230,7 +230,7 @@ namespace LuanShi.Engine
 
             bool rawExact = _observationHashMismatches == 0 && finalSeasonExact && allSeasonsExact
                             && _actionOutcomeMismatches == 0 && directMatched == directCount && cmdMatched == cmdCount
-                            && _visibleMarchRuleEstablished;
+                            && _visibleMarchRuleEstablished && _assaultTroopRatioRuleEstablished;
 
             bool isLegacyFiveSeasonDemo = _bundle.Bootstrap == null
                 && (_bundle.Summary == null || string.IsNullOrEmpty(_bundle.Summary.RunId)
@@ -252,7 +252,7 @@ namespace LuanShi.Engine
             if (_bundle.Bootstrap != null)
             {
                 deps.Add($"Replay bootstrap ({ReplayBootstrap.Schema}): seed={_bundle.Bootstrap.Seed}, scenario={_bundle.Bootstrap.ScenarioId ?? "default"}, profile={_bundle.Bootstrap.BalanceProfile?.Key ?? "unknown"}.");
-                deps.Add($"Command schemas enabled: attack={_allowAttack}, research={_allowResearch}, diplomacy={_allowDiplomacy}, garrison_conversion={_allowGarrisonConversion}, llm_visible_march_routes={_llmVisibleMarchRoutes}, engine_require_visible_march_routes={ReplayedVisibleMarchRoutes}.");
+                deps.Add($"Command schemas enabled: attack={_allowAttack}, research={_allowResearch}, diplomacy={_allowDiplomacy}, garrison_conversion={_allowGarrisonConversion}, llm_visible_march_routes={_llmVisibleMarchRoutes}, engine_require_visible_march_routes={ReplayedVisibleMarchRoutes}, engine_require_assault_troop_ratio={ReplayedAssaultTroopRatio}.");
                 if (_isIncompleteRun)
                     deps.Add($"Incomplete/paused run: stopped at Season {_currentSeason} ({_currentSeatId ?? "unknown"}), reason='{_stopReason ?? "unknown"}'. Final incomplete season was not rolled over.");
             }
@@ -283,6 +283,12 @@ namespace LuanShi.Engine
                 AcceptedActionsReplayed = _acceptedActionsReplayed,
                 ExpectedRejectedActions = _expectedRejectedActions,
                 RejectedActionsReplayed = _rejectedActionsReplayed,
+                ExpectedEngineRejections = _expectedEngineRejections,
+                EngineRejectionsReplayed = _engineRejectionsReplayed,
+                ExpectedInvalidResponses = _expectedInvalidResponses,
+                InvalidResponsesReplayed = _invalidResponsesReplayed,
+                ExpectedProviderFailures = _expectedProviderFailures,
+                ProviderFailuresReplayed = _providerFailuresReplayed,
                 UnexpectedRejections = _unexpectedRejections,
                 UnexpectedAcceptances = _unexpectedAcceptances,
                 RejectionReasonMismatches = _rejectionReasonMismatches,
@@ -318,6 +324,10 @@ namespace LuanShi.Engine
                 VisibleMarchRuleProvenance = _visibleMarchRuleProvenance,
                 VisibleMarchRuleEstablished = _visibleMarchRuleEstablished,
                 VisibleMarchRuleNote = _visibleMarchRuleNote,
+                AssaultTroopRatioProvenance = _assaultTroopRatioProvenance,
+                AssaultTroopRatioRuleEstablished = _assaultTroopRatioRuleEstablished,
+                EstablishedAssaultTroopRatio = _establishedAssaultTroopRatio,
+                AssaultTroopRatioRuleNote = _assaultTroopRatioRuleNote,
                 RawExactMatch = rawExact
             };
         }

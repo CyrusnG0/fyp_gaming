@@ -26,7 +26,7 @@ namespace LuanShi.Engine
         public const string UnsupportedAction = "unsupported action";
         public const string GameOver = "game over";
         public const string ArmyMoraleBroken = "army morale broken";
-        public const string AssaultRatioTooLow = "assault ratio too low";
+        public const string AssaultRatioTooLow = "assault ratio too low"; // legacy historical replay only
         public const string Generic = "action rejected";
 
         private static readonly string[] AllCategories =
@@ -34,7 +34,7 @@ namespace LuanShi.Engine
             NotEnoughGold, NotEnoughFood, NotEnoughPopulation, NoOrdersLeft, CapReached,
             AlreadyMarched, AlreadyAtDestination, DestinationNotReachable, DestinationNotVisible,
             DestinationBlocked, InvalidTarget, UnsupportedAction, GameOver,
-            ArmyMoraleBroken, AssaultRatioTooLow, Generic,
+            ArmyMoraleBroken, Generic,
         };
 
         private static readonly ReadOnlyCollection<string> AllCategoriesView =
@@ -121,20 +121,18 @@ namespace LuanShi.Engine
 
         /// <summary>
         /// Attack-aware form of <see cref="ForModel(string)"/>. Everything the plain mapping answers is
-        /// returned unchanged; only two attack rejections are upgraded from generic, and only when the
-        /// seat's own observation establishes that the reason is something it can already see:
-        /// <list type="bullet">
-        /// <item><see cref="ArmyMoraleBroken"/>: the engine checks morale before it reads the target, so
-        /// the answer depends on the seat's own army alone, which the observation must list as its own.</item>
-        /// <item><see cref="AssaultRatioTooLow"/>: the engine only reaches the ratio test for an adjacent,
-        /// enemy-owned city, so the observation must already show an enemy city on the ordered hex
-        /// (cities in sight carry their garrison). No numbers are repeated.</item>
-        /// </list>
+        /// returned unchanged; in live play only a broken-morale attack rejection is upgraded from generic,
+        /// and only when the seat's own observation establishes that the reason is something it can already see:
+        /// the engine checks morale before it reads the target, so the answer depends on the seat's own
+        /// army alone, which the observation must list as its own.
+        /// When <paramref name="legacyAssaultRatioRule"/> is true (historical replay under the old 3:1 rule),
+        /// an adjacent enemy city's ratio failure still maps to <see cref="AssaultRatioTooLow"/>.
         /// Treaties are deliberately absent: the engine never rejects an attack on a treaty partner, it
         /// prices it afterwards, so there is no rejection to explain. A missing or mismatched observation
         /// keeps the generic answer.
         /// </summary>
-        public static string ForModel(string engineError, ActionCommand command, Observation observation)
+        public static string ForModel(string engineError, ActionCommand command, Observation observation,
+            bool legacyAssaultRatioRule = false)
         {
             string category = ForModel(engineError);
             if (category != Generic || string.IsNullOrEmpty(engineError)
@@ -144,7 +142,7 @@ namespace LuanShi.Engine
 
             if (Starts(engineError, "army morale is broken"))
                 return OwnArmyListed(observation, command.TargetId) ? ArmyMoraleBroken : category;
-            if (city && Starts(engineError, "assault needs"))
+            if (legacyAssaultRatioRule && city && Starts(engineError, "assault needs"))
                 return EnemyCityListed(observation, command.ParamA, command.ParamB)
                     ? AssaultRatioTooLow : category;
             return category;

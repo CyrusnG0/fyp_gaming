@@ -5,18 +5,17 @@ using LuanShi.Engine;
 
 // [ATK-4] Typed feedback for rejected model attack commands.
 //
-// Only two engine rejections are explained to the model: a broken-morale army (own state, checked
-// before the target is read) and a failed assault ratio (only reachable for an adjacent enemy city,
-// whose garrison the seat can already see). Everything else, and anything the seat's own observation
-// does not back up, stays the generic category. The engine validator is untouched: these tests read
-// what it says, they never change what it accepts.
+// Only one engine rejection is explained to the model: a broken-morale army (own state, checked
+// before the target is read). Everything else, and anything the seat's own observation does not back
+// up, stays the generic category. The engine validator is untouched: these tests read what it says,
+// they never change what it accepts.
 
 internal static partial class Harness
 {
     private static void RunAttackFeedback()
     {
         Section("[ATK-4] typed attack-rejection feedback (fake provider)");
-        AttackFeedbackRatio();
+        AttackFeedbackNoRatioGate();
         AttackFeedbackMorale();
         AttackFeedbackTreatyIsNotARejection();
         AttackFeedbackFogSafety();
@@ -37,41 +36,56 @@ internal static partial class Harness
         return runner.RecentHistory.Where(h => h.Contains("rejected") || h.Contains("-> ok")).ToList();
     }
 
-    // ---- assault ratio ---------------------------------------------------------
+    // ---- no assault ratio gate -------------------------------------------------
 
-    private static void AttackFeedbackRatio()
+    private static void AttackFeedbackNoRatioGate()
     {
-        // 2000 troops against a 1000 garrison: 3:1 needs 3000, so the engine rejects the assault.
+        // 2000 troops against a 1000 garrison is legal: the 3:1 gate is removed.
         var engine = AttackWorld(9601, cityGarrison: 1000);
         var viewBefore = AttackPlanner.Build(engine, "seat-a");
-        AtkFb(AtkOption(AtkPlan(viewBefore, "army-a-1"), ActionType.AttackCity, 1, 2) == null,
-            "the planner does not advertise the failing assault (the engine would reject it)");
+        AtkFb(AtkOption(AtkPlan(viewBefore, "army-a-1"), ActionType.AttackCity, 1, 2) != null,
+            "the planner advertises the below-3:1 assault");
 
-        string raw = engine.Submit(AtkCityOrder("seat-a", "army-a-1", 1, 2)).Error;
-        AtkFb(raw != null && raw.StartsWith("assault needs"),
-            $"the validator itself says the assault ratio failed ({raw})");
+        var history = AtkFbRun(engine, AtkJson("attack_city", "army-a-1", 1, 2));
+        AtkFb(history.Count == 1 && history[0] == "attack_city army-a-1 -> ok",
+            "a below-3:1 assault is accepted and reports ok");
+        AtkFb(engine.Log.Records.Any(r => r.EventType == "battle_siege"),
+            "and the assault resolves as a siege battle");
 
-        var fresh = AttackWorld(9601, cityGarrison: 1000);
-        var history = AtkFbRun(fresh, AtkJson("attack_city", "army-a-1", 1, 2));
-        AtkFb(history.Count == 1 && history[0] == "attack_city army-a-1 -> rejected: assault ratio too low",
-            "the model is told the assault ratio was too low");
-        AtkFb(!history[0].Contains("1000") && !history[0].Contains("3000") && !history[0].Contains("2000"),
-            "and no garrison, required or own troop figure is repeated");
-        AtkFb(fresh.State.FindFaction("seat-a").CommandPoints == 5
-           && fresh.Log.Records.All(r => r.EventType != "battle_siege"),
-            "the rejected assault cost nothing and fought nothing");
-
-        // The same garrison with a legal ratio is accepted: the feedback never invents a rejection.
-        var ok = AttackWorld(9601, cityGarrison: 300);
-        var okHistory = AtkFbRun(ok, AtkJson("attack_city", "army-a-1", 1, 2));
-        AtkFb(okHistory.Count == 1 && okHistory[0] == "attack_city army-a-1 -> ok",
-            "a legal assault is still accepted and reports ok");
-
-        // A siege army waives the ratio, so the same garrison is accepted rather than explained.
+        // A siege army is accepted like any other unit type.
         var siege = AttackWorld(9601, UnitTypes.Siege, cityGarrison: 5000);
         var siegeHistory = AtkFbRun(siege, AtkJson("attack_city", "army-a-1", 1, 2));
         AtkFb(siegeHistory.Count == 1 && siegeHistory[0].EndsWith("-> ok"),
-            "a siege army's waived assault is accepted, so no ratio feedback appears");
+            "a siege army's assault is accepted too");
+
+        // Both human and LLM controllers can submit a below-3:1 assault; invalid assaults (neutral/own/non-adjacent/broken) still fail.
+        var humanWorld = AttackWorld(9602, cityGarrison: 1000);
+        var humanOk = humanWorld.Submit(new ActionCommand
+        {
+            Type = ActionType.AttackCity, ActorSeatId = "seat-a", ControllerType = ControllerType.Human,
+            TargetId = "army-a-1", ParamA = 1, ParamB = 2,
+        });
+        AtkFb(humanOk.Ok && humanWorld.Log.Records.Any(r => r.EventType == "battle_siege"),
+            "a human-submitted below-3:1 assault is also accepted and resolved");
+
+        var invalidHuman = AttackWorld(9603, cityGarrison: 1000);
+        var neutralFail = invalidHuman.Submit(new ActionCommand
+        {
+            Type = ActionType.AttackCity, ActorSeatId = "seat-a", ControllerType = ControllerType.Human,
+            TargetId = "army-a-1", ParamA = 0, ParamB = 1,
+        });
+        var nonAdjFail = invalidHuman.Submit(new ActionCommand
+        {
+            Type = ActionType.AttackCity, ActorSeatId = "seat-a", ControllerType = ControllerType.Human,
+            TargetId = "army-a-1", ParamA = 7, ParamB = 5,
+        });
+        var ownCityFail = invalidHuman.Submit(new ActionCommand
+        {
+            Type = ActionType.AttackCity, ActorSeatId = "seat-a", ControllerType = ControllerType.Human,
+            TargetId = "army-a-1", ParamA = 0, ParamB = 0,
+        });
+        AtkFb(!neutralFail.Ok && !nonAdjFail.Ok && !ownCityFail.Ok,
+            "neutral, non-adjacent and own-city assaults still fail validation for humans");
     }
 
     // ---- broken morale -----------------------------------------------------------
@@ -157,17 +171,17 @@ internal static partial class Harness
             histories.Add(AtkFbRun(engine,
                 AtkJson("attack_army", "army-a-1", 6, 4),      // hidden army hex
                 AtkJson("attack_city", "army-a-1", 7, 5),      // hidden city hex
-                AtkJson("attack_city", "army-a-1", 1, 2),      // visible enemy city, ratio fails
-                AtkJson("attack_city", "army-a-1", 0, 1)));    // neutral city
+                AtkJson("attack_city", "army-a-1", 0, 1),      // neutral city
+                AtkJson("attack_city", "army-a-1", 1, 2)));    // visible enemy city, accepted
         }
         AtkFb(histories[0].SequenceEqual(histories[1]),
             "worlds differing only outside sight give identical typed feedback for every probe");
         AtkFb(histories[0].Count == 4
            && histories[0][0].EndsWith("rejected: action rejected")
            && histories[0][1].EndsWith("rejected: action rejected")
-           && histories[0][2].EndsWith("rejected: assault ratio too low")
-           && histories[0][3].EndsWith("rejected: action rejected"),
-            "hidden, out-of-range and neutral probes stay generic; only the visible failing assault is explained");
+           && histories[0][2].EndsWith("rejected: action rejected")
+           && histories[0][3].EndsWith("-> ok"),
+            "hidden, out-of-range and neutral probes stay generic; the visible assault is accepted");
 
         // The upgrade needs the seat's own observation to back it. Without it the answer is generic.
         var world = AttackWorld(9632, cityGarrison: 1000);
@@ -178,30 +192,27 @@ internal static partial class Harness
         var hiddenCity = AtkCityOrder("seat-a", "army-a-1", 7, 5);
         var neutralCity = AtkCityOrder("seat-a", "army-a-1", 0, 1);
         var foreignArmy = AttackOrder("seat-a", "army-b-1", 2, 1);
-        AtkFb(FeedbackPolicy.ForModel(ratio) == FeedbackPolicy.Generic
-           && FeedbackPolicy.ForModel(morale) == FeedbackPolicy.Generic,
-            "the plain string mapping never upgrades attack text by itself");
-        AtkFb(FeedbackPolicy.ForModel(ratio, visibleCity, obs) == FeedbackPolicy.AssaultRatioTooLow
-           && FeedbackPolicy.ForModel(ratio, visibleCity, null) == FeedbackPolicy.Generic
-           && FeedbackPolicy.ForModel(ratio, hiddenCity, obs) == FeedbackPolicy.Generic
-           && FeedbackPolicy.ForModel(ratio, neutralCity, obs) == FeedbackPolicy.Generic,
-            "the ratio category needs an enemy city on that hex in the seat's own observation");
+        AtkFb(FeedbackPolicy.ForModel(morale) == FeedbackPolicy.Generic
+           && FeedbackPolicy.ForModel(ratio, visibleCity, obs) == FeedbackPolicy.Generic,
+            "the plain string mapping and live attack feedback never upgrade ratio text");
+        AtkFb(FeedbackPolicy.ForModel(ratio, visibleCity, obs, true) == FeedbackPolicy.AssaultRatioTooLow
+           && FeedbackPolicy.ForModel(ratio, visibleCity, null, true) == FeedbackPolicy.Generic
+           && FeedbackPolicy.ForModel(ratio, hiddenCity, obs, true) == FeedbackPolicy.Generic
+           && FeedbackPolicy.ForModel(ratio, neutralCity, obs, true) == FeedbackPolicy.Generic,
+            "only historical ratio-rule replay upgrades the legacy ratio category on a visible enemy city");
         AtkFb(FeedbackPolicy.ForModel(morale, visibleCity, obs) == FeedbackPolicy.ArmyMoraleBroken
            && FeedbackPolicy.ForModel(morale, visibleCity, null) == FeedbackPolicy.Generic
            && FeedbackPolicy.ForModel(morale, foreignArmy, obs) == FeedbackPolicy.Generic,
             "the morale category needs the order's army to be listed as the seat's own");
-        AtkFb(FeedbackPolicy.ForModel(ratio, new ActionCommand
+        AtkFb(FeedbackPolicy.ForModel(morale, new ActionCommand
                 { Type = ActionType.March, TargetId = "army-a-1", ParamA = 1, ParamB = 2 }, obs)
-              == FeedbackPolicy.Generic
-           && FeedbackPolicy.ForModel(ratio, AttackOrder("seat-a", "army-a-1", 1, 2), obs)
               == FeedbackPolicy.Generic,
-            "and only on an attack order of the matching kind (a field order cannot name a ratio)");
+            "and only on an attack order");
 
         AtkFb(FeedbackPolicy.IsSafeCategory(FeedbackPolicy.ArmyMoraleBroken)
-           && FeedbackPolicy.IsSafeCategory(FeedbackPolicy.AssaultRatioTooLow)
-           && !FeedbackPolicy.ArmyMoraleBroken.Any(char.IsDigit)
-           && !FeedbackPolicy.AssaultRatioTooLow.Any(char.IsDigit),
-            "both new categories are in the published allowlist and carry no numbers");
+           && !FeedbackPolicy.IsSafeCategory(FeedbackPolicy.AssaultRatioTooLow)
+           && !FeedbackPolicy.ArmyMoraleBroken.Any(char.IsDigit),
+            "the morale category is in the live allowlist, carries no digits, and AssaultRatioTooLow is retired from live categories");
     }
 
     // ---- unchanged elsewhere -------------------------------------------------------

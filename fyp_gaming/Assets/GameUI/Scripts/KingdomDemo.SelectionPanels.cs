@@ -302,9 +302,10 @@ namespace LuanShi
                 int defensiveArmyTroops = defensiveArmy != null && defensiveArmy.OwnerSeatId == city.OwnerSeatId
                     ? defensiveArmy.Troops : 0;
                 int effectiveGarrison = city.Garrison + defensiveArmyTroops;
-                int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
+                bool ratioEnforced = engine != null && engine.State != null && engine.State.RequireAssaultTroopRatio;
+                int requiredTroops = ratioEnforced ? BalanceConfig.AssaultTroopRatio * effectiveGarrison : 0;
                 string blocked = army.Morale <= BalanceConfig.CombatRoutMoraleThreshold ? "Army routed and unable to fight"
-                    : UnitTypes.WaivesAssaultRatio(army.UnitType) ? null
+                    : !ratioEnforced || UnitTypes.WaivesAssaultRatio(army.UnitType) ? null
                     : army.Troops < requiredTroops
                         ? $"Requires {BalanceConfig.AssaultTroopRatio}:1 troop ratio ({requiredTroops} troops needed)" : null;
                 hint = FirstReason(hint, OrderButton(new Rect(buttonLeft, buttonTop + row * 38f, buttonWidth, 34), ActionType.AttackCity,

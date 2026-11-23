@@ -21,7 +21,7 @@ internal static partial class Harness
     private const int PromptSizeProbePreFitChars = 39882;
     private const int PromptSizeProbePreFitUserLen = 25914;
     private const string PromptSizeProbePreFitUserHash =
-        "cd04ce41bc0b37aad9ac1036126a1ecf17f6e51d8dd260cb003d226cce534efa";
+        "1c96393374c80c9b9532e73e2bca514d617f42f92ec271645452bd1a3fff8713";
     private const string PromptSizeProbePreFitReportHash =
         "8ae6e5ce97cb727a548c745ffdba8e250cf6c1c32530b23efc35a010b3c05d0d";
     private const string PromptSizeProbePreFitObservationHash =
@@ -31,7 +31,7 @@ internal static partial class Harness
     private const int PromptSizeProbePreCompactChars = 36241;
     private const int PromptSizeProbePreCompactUserLen = 22273;
     private const string PromptSizeProbePreCompactUserHash =
-        "93a5262ab8152150a7dbbcf67a0f2a28891ab506c06c408e01dbf32c09de23b6";
+        "b27d2a9ae0686863037b131fed73082275516f853f0e03441f3ea62c5850f41a";
     private const string PromptSizeProbePreCompactReportHash =
         "b925b1e155dfc3c383f1b09ac50b5ebc300da3b98a350286cd82dddc22bec004";
     private const string PromptSizeProbePreCompactObservationHash =

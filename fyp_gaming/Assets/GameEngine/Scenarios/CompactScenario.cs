@@ -104,9 +104,9 @@ namespace LuanShi.Engine
             },
             new List<ScenarioCity>
             {
-                // Capitals hold a real garrison, so storming one needs the 3:1 rule or 器械.
-                // 500 troops => an assault needs 1,500; a fresh 2,000-troop host qualifies, a vanguard
-                // that has already fought a field battle usually does not. (TBD for architect review.)
+                // Capitals hold a real garrison, so storming one is a real fight.
+                // 500 troops => a fresh 2,000-troop host has a comfortable edge; a vanguard that has
+                // already fought a field battle usually does not. (TBD for architect review.)
                 new ScenarioCity
                 {
                     Id = "city-wei", Name = "Luoyang", X = 6, Z = 8, OwnerSeatId = "seat-0",

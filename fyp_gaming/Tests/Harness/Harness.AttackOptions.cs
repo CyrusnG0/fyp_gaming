@@ -100,9 +100,9 @@ internal static partial class Harness
             "an adjacent enemy army is a field-battle candidate carrying only its observable facts");
         var city = AtkOption(plan, ActionType.AttackCity, 1, 2);
         AtkCheck(city != null && city.TargetCityId == "city-b" && city.TargetTroops == 300
-           && city.RequiredTroops == 900 && !city.AssaultRatioWaived && city.CommandPointCost == 2
+           && !city.AssaultRatioEnforced && city.CommandPointCost == 2
            && city.DefendingArmyTroops == 0,
-            "an adjacent enemy city is an assault candidate with the 3:1 troop requirement spelled out");
+            "an adjacent enemy city is an assault candidate carrying only its observable facts");
         AtkCheck(AtkOption(plan, ActionType.AttackArmy, 1, 3) == null,
             "an enemy army two hexes away is not a candidate for a range-1 army");
         AtkCheck(plan.Options.All(o => o.X != 0 || o.Z != 1),
@@ -132,10 +132,10 @@ internal static partial class Harness
     private static void AttackBruteForceEquivalence()
     {
         CheckAttackEquivalence("infantry, weak city", () => AttackWorld(9311), "army-a-1");
-        CheckAttackEquivalence("infantry, city too strong for 3:1",
+        CheckAttackEquivalence("infantry, strong city (below old 3:1)",
             () => AttackWorld(9312, cityGarrison: 700), "army-a-1");
         CheckAttackEquivalence("archer range 2", () => AttackWorld(9313, UnitTypes.Archer), "army-a-1");
-        CheckAttackEquivalence("siege waives the ratio",
+        CheckAttackEquivalence("siege unit",
             () => AttackWorld(9314, UnitTypes.Siege, cityGarrison: 5000), "army-a-1");
         CheckAttackEquivalence("cavalry with a defending army on the city hex", () =>
         {
@@ -241,8 +241,8 @@ internal static partial class Harness
         {
             var e = AttackWorld(9325, UnitTypes.Siege, cityGarrison: 5000);
             var city = AtkOption(AtkPlan(AttackPlanner.Build(e, "seat-a"), "army-a-1"), ActionType.AttackCity, 1, 2);
-            AtkCheck(city != null && city.AssaultRatioWaived && city.RequiredTroops == 0,
-                "a siege army's assault is advertised with the ratio waived");
+            AtkCheck(city != null && !city.AssaultRatioEnforced && city.CommandPointCost == 2,
+                "a siege army's assault is advertised like any other unit type's");
         }
         {
             var e = AttackWorld(9326);
@@ -359,8 +359,8 @@ internal static partial class Harness
         AtkCheck(assault.TargetId == "army-a-1" && assault.ParamA == 1 && assault.ParamB == 2
            && assault.CommandPointCost == 2 && assault.LikelyAffordable
            && assault.Label.Contains("City B") && assault.Label.Contains("garrison 300")
-           && assault.Label.Contains("at least 900"),
-            "the assault entry targets the own army, carries the hex and states the troop requirement");
+           && !assault.Label.Contains("at least") && !assault.Label.Contains("waives"),
+            "the assault entry targets the own army, carries the hex and states no troop-ratio requirement");
         AtkCheck(battle.ParamA == 2 && battle.ParamB == 1 && battle.CommandPointCost == 1
            && battle.Label.Contains("troops 500") && battle.Label.Contains("Shu Vanguard"),
             "the field entry carries the observable enemy strength");
@@ -450,7 +450,8 @@ internal static partial class Harness
             "with the flag off the system prompt, hash and version are byte-identical to before");
         string system = PromptBuilder.SystemPromptFor(true, false, null, true);
         AtkCheck(system.StartsWith(PromptBuilder.SystemPromptFor(true))
-           && system.Contains("ATTACK AND CAPTURE") && system.Contains("at least 3 times the defending troops")
+           && system.Contains("ATTACK AND CAPTURE") && system.Contains("attack_city assaults an adjacent enemy city")
+           && !system.Contains("times the defending troops")
            && system.Contains("costs 2 command points") && system.Contains("Neutral cities and unowned watch towers")
            && PromptBuilder.VersionFor(true, false, null, true) == PromptBuilder.AttackPromptVersion
            && PromptBuilder.SchemaHashFor(true, false, null, true) != PromptBuilder.SchemaHash(),
@@ -461,16 +462,16 @@ internal static partial class Harness
            && PromptBuilder.VersionFor(false, false, null, true) == PromptBuilder.DomesticPromptVersion,
             "a non-planning (domestic) prompt never gains attack text");
 
-        const string oldVersion = "demo-slice-6-attack";
-        const string cat1 = "army morale broken", cat2 = "assault ratio too low";
-        AtkCheck(PromptBuilder.AttackPromptVersion == "demo-slice-6-attack-1"
-           && PromptBuilder.VersionFor(true, false, null, true) == "demo-slice-6-attack-1"
+        const string oldVersion = "demo-slice-6-attack-1";
+        const string cat1 = "army morale broken", retiredCat2 = "assault ratio too low";
+        AtkCheck(PromptBuilder.AttackPromptVersion == "demo-slice-6-attack-2"
+           && PromptBuilder.VersionFor(true, false, null, true) == "demo-slice-6-attack-2"
            && PromptBuilder.VersionFor(true, false, null, true) != oldVersion
-           && PromptBuilder.VersionFor(true, true, null, true) == "demo-slice-6-attack-1",
-            "the attack-enabled prompt version is demo-slice-6-attack-1, not the old string");
-        AtkCheck(system.Contains("\"" + cat1 + "\"") && system.Contains("\"" + cat2 + "\"")
-           && FeedbackPolicy.ArmyMoraleBroken == cat1 && FeedbackPolicy.AssaultRatioTooLow == cat2,
-            "the attack rules name both feedback categories exactly as the policy emits them");
+           && PromptBuilder.VersionFor(true, true, null, true) == "demo-slice-6-attack-2",
+            "the attack-enabled prompt version is demo-slice-6-attack-2, not the old string");
+        AtkCheck(system.Contains("\"" + cat1 + "\"") && !system.Contains(retiredCat2)
+           && FeedbackPolicy.ArmyMoraleBroken == cat1,
+            "the attack rules name the remaining feedback category and omit the retired ratio category");
         string rule = system.Substring(system.IndexOf("A rejected attack may be reported", StringComparison.Ordinal));
         rule = rule.Substring(0, rule.IndexOf('\n'));
         bool noDigits = true;
@@ -485,7 +486,7 @@ internal static partial class Harness
            && hashOn == PromptBuilder.SchemaHashFor(true, false, null, true),
             "the attack schema hash follows from the new text deterministically");
         string off = PromptBuilder.SystemPromptFor(true, false, null, false);
-        AtkCheck(!off.Contains(cat1) && !off.Contains(cat2) && !off.Contains("ATTACK AND CAPTURE")
+        AtkCheck(!off.Contains(cat1) && !off.Contains(retiredCat2) && !off.Contains("ATTACK AND CAPTURE")
            && PromptBuilder.VersionFor(true, false, null, false) == "demo-slice-4"
            && off == PromptBuilder.SystemPromptFor(true),
             "the attack-disabled prompt carries no category names and keeps its version and text");

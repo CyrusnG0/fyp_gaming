@@ -105,11 +105,20 @@ internal static partial class Harness
 
             var synReplay = new ReplaySession(synBundle);
             synReplay.RunToCompletion();
+            bool feedHasProviderFailure = synReplay.EventFeed.Count == 9
+                && synReplay.EventFeed[8].ResultText == "provider failure"
+                && synReplay.EventFeed[8].ActionSummary.Contains("Provider failure (Network)");
             Check(synReplay.IsCompleted && !synReplay.HasDivergence && synReplay.ObservationHashesMatched == 9
                 && synReplay.AcceptedActionsReplayed == 5 && synReplay.RejectedActionsReplayed == 1
+                && synReplay.ProviderFailuresReplayed == 1 && synReplay.InvalidResponsesReplayed == 0
+                && synReplay.EngineRejectionsReplayed == 0
+                && feedHasProviderFailure
+                && ReplaySession.DescribeRequestAction(synBundle.Requests[8]).Contains("Provider failure (Network)")
+                && synReplay.ReplayedAssaultTroopRatio == false
+                && synReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.Established
                 && synReplay.VoluntaryEndTurnsReplayed == 2 && synReplay.ActionOutcomeMismatches == 0
                 && synReplay.IsIncompleteRun && synReplay.FinalReport.AllSeasonsScoreboardExactMatch && synReplay.FinalReport.RawExactMatch,
-                $"[REPLAY-PAID] synthetic run exact parity: obs={synReplay.ObservationHashesMatched}/9 acc={synReplay.AcceptedActionsReplayed}/5 rej={synReplay.RejectedActionsReplayed}/1 mis={synReplay.ActionOutcomeMismatches} inc={synReplay.IsIncompleteRun} sbExact={synReplay.FinalReport?.AllSeasonsScoreboardExactMatch}");
+                $"[REPLAY-PAID] synthetic run exact parity: obs={synReplay.ObservationHashesMatched}/9 acc={synReplay.AcceptedActionsReplayed}/5 provErr={synReplay.ProviderFailuresReplayed}/1 mis={synReplay.ActionOutcomeMismatches} inc={synReplay.IsIncompleteRun} sbExact={synReplay.FinalReport?.AllSeasonsScoreboardExactMatch}");
 
             // Fail-closed security / integrity checks on the synthetic bundle:
             bool missingBootThrew = false;
@@ -168,6 +177,13 @@ internal static partial class Harness
                     && diagPaid.ReplayedLlmVisibleMarchRoutes
                     && diagPaid.EstablishedSharedVisibleMarchRoutes == null,
                     "[REPLAY-PAID] preserves LlmHostOnlyHistorical movement provenance without asserting shared-engine rule");
+                Check(diagPaid.ReplayedAssaultTroopRatio
+                    && diagPaid.Engine.State.RequireAssaultTroopRatio
+                    && diagPaid.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                    && diagPaid.ProviderFailuresReplayed == 1 && diagPaid.ExpectedProviderFailures == 1
+                    && diagPaid.InvalidResponsesReplayed == 3 && diagPaid.ExpectedInvalidResponses == 3
+                    && diagPaid.EngineRejectionsReplayed == 0 && diagPaid.ExpectedEngineRejections == 0,
+                    $"[REPLAY-PAID] preserves historical 3:1 provenance and splits invalid ({diagPaid.InvalidResponsesReplayed}/3) vs provider error ({diagPaid.ProviderFailuresReplayed}/1)");
                 Check(diagPaid.IsIncompleteRun && diagPaid.CurrentSeason == 3
                     && diagPaid.StopReason != null && diagPaid.StopReason.Contains("usage unknown"),
                     "[REPLAY-PAID] paused Season 3 does not fabricate rollover and records stop reason");

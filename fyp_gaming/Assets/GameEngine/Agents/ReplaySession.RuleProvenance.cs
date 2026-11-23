@@ -115,6 +115,148 @@ namespace LuanShi.Engine
                 VisibleMarchRuleProvenance.LegacyUnenforced, true, null);
         }
 
+        private readonly struct AssaultRatioRuleResolution
+        {
+            public readonly bool SharedEngineRule;
+            public readonly bool? EstablishedRule;
+            public readonly AssaultTroopRatioRuleProvenance Provenance;
+            public readonly bool RuleEstablished;
+            public readonly string Note;
+
+            public AssaultRatioRuleResolution(bool sharedEngineRule, bool? establishedRule,
+                AssaultTroopRatioRuleProvenance provenance, bool ruleEstablished, string note)
+            {
+                SharedEngineRule = sharedEngineRule;
+                EstablishedRule = establishedRule;
+                Provenance = provenance;
+                RuleEstablished = ruleEstablished;
+                Note = note;
+            }
+        }
+
+        private static AssaultRatioRuleResolution ResolveAssaultRatioRuleInfo(ReplayBundle bundle)
+        {
+            if (bundle == null)
+                return new AssaultRatioRuleResolution(false, false,
+                    AssaultTroopRatioRuleProvenance.Established, true, null);
+
+            bool? stateFlag = bundle.BootstrapStateRequireAssaultTroopRatio;
+            bool? bootFlag = bundle.BootstrapAssaultTroopRatio;
+            bool? sumFlag = bundle.Summary != null ? bundle.Summary.AssaultTroopRatioEnforced : null;
+
+            bool? explicitRule = null;
+            void CheckSource(bool? next, string name)
+            {
+                if (!next.HasValue) return;
+                if (explicitRule.HasValue && explicitRule.Value != next.Value)
+                    throw new InvalidOperationException(
+                        $"Recorded assault_troop_ratio rule diverges at {name}: expected {explicitRule.Value}, got {next.Value}.");
+                explicitRule = next.Value;
+            }
+            CheckSource(stateFlag, "bootstrap.initial_world");
+            CheckSource(bootFlag, "bootstrap.features");
+            CheckSource(sumFlag, "summary.assault_troop_ratio_enforced");
+
+            bool hasLegacyPrompt = false, hasNewPrompt = false, hasNonLlmAction = false;
+            if (bundle.Requests != null)
+            {
+                for (int i = 0; i < bundle.Requests.Count; i++)
+                {
+                    ReplayRequestRecord req = bundle.Requests[i];
+                    if (req == null) continue;
+                    if (PromptBuilder.HasLegacyAssaultRatioPromptVersion(req.PromptVersion))
+                        hasLegacyPrompt = true;
+                    if (PromptBuilder.HasNoAssaultRatioPromptVersion(req.PromptVersion))
+                        hasNewPrompt = true;
+                    if (IsNonLlmRecord(req))
+                        hasNonLlmAction = true;
+                }
+            }
+
+            if (hasLegacyPrompt && hasNewPrompt)
+                throw new InvalidOperationException(
+                    "Recorded prompt versions mix pre-removal and post-removal city assault rules.");
+            if (explicitRule.HasValue && !explicitRule.Value && hasLegacyPrompt)
+                throw new InvalidOperationException(
+                    "Recorded assault_troop_ratio=false diverges from legacy 3:1 prompt version.");
+            if (explicitRule.HasValue && explicitRule.Value && hasNewPrompt)
+                throw new InvalidOperationException(
+                    "Recorded assault_troop_ratio=true diverges from post-removal prompt version.");
+
+            if (stateFlag.HasValue)
+            {
+                string note = stateFlag.Value
+                    ? "Established from bootstrap initial_world.require_assault_troop_ratio=true (3:1 city assault ratio preserved)."
+                    : null;
+                return new AssaultRatioRuleResolution(
+                    stateFlag.Value, stateFlag.Value,
+                    AssaultTroopRatioRuleProvenance.Established, true, note);
+            }
+
+            if (explicitRule.HasValue)
+            {
+                if (hasNonLlmAction)
+                    return new AssaultRatioRuleResolution(
+                        explicitRule.Value, null,
+                        AssaultTroopRatioRuleProvenance.Unestablished, false,
+                        "Recorded evidence lacks initial_world.require_assault_troop_ratio for non-LLM (human) actions; cannot establish exact shared-engine assault rule.");
+
+                return new AssaultRatioRuleResolution(
+                    explicitRule.Value, explicitRule.Value,
+                    explicitRule.Value
+                        ? AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                        : AssaultTroopRatioRuleProvenance.Established,
+                    true,
+                    explicitRule.Value
+                        ? "Historical recording: old 3:1 city assault ratio preserved during replay."
+                        : null);
+            }
+
+            if (hasNewPrompt)
+                return new AssaultRatioRuleResolution(
+                    false, null,
+                    AssaultTroopRatioRuleProvenance.Unestablished, false,
+                    "Post-removal prompt version recorded without initial_world.require_assault_troop_ratio; rule provenance is unestablished.");
+
+            if (hasNonLlmAction)
+                return new AssaultRatioRuleResolution(
+                    true, null,
+                    AssaultTroopRatioRuleProvenance.Unestablished, false,
+                    "Historical recording without initial_world.require_assault_troop_ratio: preserving old 3:1 city assault rule, but non-LLM (human) rule provenance is unestablished.");
+
+            return new AssaultRatioRuleResolution(
+                true, true,
+                AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved, true,
+                "Historical recording without initial_world.require_assault_troop_ratio: preserving old 3:1 city assault rule during replay.");
+        }
+
+        public static string DescribeRequestAction(ReplayRequestRecord rec)
+        {
+            if (rec == null) return "unknown";
+            if (rec.IsProviderFailure)
+            {
+                string detail = !string.IsNullOrEmpty(rec.ErrorDetail) ? rec.ErrorDetail : rec.ResultError;
+                return string.IsNullOrEmpty(detail)
+                    ? $"Provider failure ({rec.ErrorKind})"
+                    : $"Provider failure ({rec.ErrorKind}): {detail}";
+            }
+            if (rec.IsEmptyResponse)
+            {
+                if (!string.IsNullOrEmpty(rec.ResultError)) return rec.ResultError;
+                return string.IsNullOrEmpty(rec.FinishReason)
+                    ? "Empty model response"
+                    : $"Empty model response (finish_reason={rec.FinishReason})";
+            }
+            if (!rec.ParseOk)
+            {
+                if (!string.IsNullOrEmpty(rec.RawModelText)) return rec.RawModelText;
+                return !string.IsNullOrEmpty(rec.ResultError) ? $"Invalid model response: {rec.ResultError}" : "Invalid model response";
+            }
+            if (!string.IsNullOrEmpty(rec.RawModelText)) return rec.RawModelText;
+            if (!string.IsNullOrEmpty(rec.CommandJson)) return rec.CommandJson;
+            return "unknown";
+        }
+
         private static bool IsNonLlmRecord(ReplayRequestRecord req)
             => req != null
                && !string.IsNullOrEmpty(req.ControllerType)
@@ -162,6 +304,14 @@ namespace LuanShi.Engine
                 return;
             }
 
+            if (req.IsProviderFailure)
+            {
+                parseError = req.ResultError ?? req.ErrorDetail ?? "provider error";
+                actType = "provider_error";
+                actSummary = DescribeRequestAction(req);
+                return;
+            }
+
             // Never execute a reply the original runner rejected as invalid, even if a later
             // parser accepts it. The recorded outcome, not today's parser, defines replay.
             ParseResult parsed = !req.ParseOk
@@ -174,12 +324,12 @@ namespace LuanShi.Engine
             if (replayedParseOk && !isEndTurn)
                 cmd = LlmActionParser.ToCommand(parsed.Action);
 
-            actType = isEndTurn ? "end_turn" : (replayedParseOk ? parsed.Action.Type : "unknown");
+            actType = isEndTurn ? "end_turn" : (replayedParseOk ? parsed.Action.Type : (req.IsEmptyResponse ? "empty_response" : "invalid_response"));
             actSummary = isEndTurn
                 ? "Voluntary end of turn"
                 : (replayedParseOk
                     ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
-                    : (!string.IsNullOrEmpty(req.RawModelText) ? req.RawModelText : "unknown"));
+                    : DescribeRequestAction(req));
         }
 
         private static bool TryParseCommandJson(string json, out ActionCommand cmd, out string error)

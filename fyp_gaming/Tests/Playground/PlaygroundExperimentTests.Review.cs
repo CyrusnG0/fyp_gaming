@@ -26,7 +26,7 @@ namespace LuanShi.Playground
                 fake.Requests[0].System.Contains("RICH DELIBERATION") &&
                 fake.Requests[0].User.Contains("args={\"line\":\"agri\"}"),
                 "rich research: dispatched system and candidates contain both features");
-            log.Check(fake.Requests[0].User.Contains("demo-slice-8-rich-research-1"),
+            log.Check(fake.Requests[0].User.Contains("demo-slice-8-rich-research-2"),
                 "rich research: dispatched user prompt identifies the combined version");
         }
 

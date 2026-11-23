@@ -269,14 +269,22 @@ internal static partial class Harness
                   "[LS-002] the rejection names no hidden garrison");
         }
 
-        // An adjacent (= in-sight) city's 3:1 message may name its garrison, but only to the actor.
+        // A live adjacent visible-city assault proceeds without a 3:1 check; when the legacy ratio
+        // rule is enabled on State, its exact-garrison message reaches only the actor.
         {
+            var live = PrivacyWorld(612);
+            var liveArmy = AddArmy(live, "seat-a", 9, 100);
+            var liveProbe = live.Submit(PrivacyOrder(ActionType.AttackCity, "seat-a", liveArmy.Id, 10, 0));
+            Check(liveProbe.Ok && Find(live.Log, "battle_siege") != null,
+                  $"[LS-002] live below-3:1 assault on adjacent visible city proceeds ({liveProbe.Error})");
+
             var e = PrivacyWorld(612);
+            e.State.RequireAssaultTroopRatio = true;
             var armyA = AddArmy(e, "seat-a", 9, 100);
             var probe = e.Submit(PrivacyOrder(ActionType.AttackCity, "seat-a", armyA.Id, 10, 0));
             var reject = Find(e.Log, "action_rejected");
             Check(!probe.Ok && probe.Error.Contains("garrison 1000"),
-                  $"[LS-002] the visible city's 3:1 message may name its garrison ({probe.Error})");
+                  $"[LS-002] the visible city's legacy 3:1 message may name its garrison ({probe.Error})");
             Check(reject != null && !e.SeesEvent("seat-b", reject) && !e.SeesEvent("seat-c", reject),
                   "[LS-002] but the exact-garrison feedback reaches no other seat");
         }

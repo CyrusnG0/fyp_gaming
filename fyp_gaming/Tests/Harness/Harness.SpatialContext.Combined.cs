@@ -72,7 +72,7 @@ internal static partial class Harness
         string expectedVer = PromptBuilder.CombinedVersionFor(true, false, null, false, true, true, true, true);
         string expectedHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, true, true, true, true);
         string baseHash = PromptBuilder.CombinedSchemaHashFor(true, false, null, false, true, true, true, false);
-        Check(expectedVer == "demo-slice-8-rich-research-1+spatial"
+        Check(expectedVer == "demo-slice-8-rich-research-2+spatial"
               && !string.Equals(expectedHash, baseHash, StringComparison.Ordinal),
             "combined identity: version and schema hash distinguish spatial+rich+research");
 

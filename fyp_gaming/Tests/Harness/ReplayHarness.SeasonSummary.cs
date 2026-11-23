@@ -18,6 +18,7 @@ internal static partial class Harness
         RunLookupEvidenceTests();
         RunActionOutcomeTests();
         RunLoaderEvidenceTests(bundle);
+        RunProviderAndFeatureSummaryTests();
     }
 
     private static ReplayRequestRecord SumReq(string seat, int season, string raw, bool parseOk = true,
@@ -204,5 +205,90 @@ internal static partial class Harness
                 "loaded runner records count answered lookup from chars, exclude failed lookup and leave action outcome unknown");
         }
         finally { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+    }
+
+    private static void RunProviderAndFeatureSummaryTests()
+    {
+        // Feature-enabled attack/research orders must count as accepted, not invalid; provider failures
+        // must be tracked separately from invalid/empty model replies; turn end reasons must populate.
+        string featureVer = PromptBuilder.CombinedVersionFor(true, false, null, true, true, true, true, true, true);
+        var bundle = new ReplayBundle
+        {
+            Summary = new ReplaySummaryData
+            {
+                RunId = ReplayLoader.VerifiedDemoRunId,
+                SeasonsPlayed = 1,
+                AttackEnabled = true,
+                ResearchEnabled = true,
+                DiplomacyEnabled = true,
+                GarrisonConversionEnabled = true,
+                Turns = new List<ReplayTurnSummary>
+                {
+                    new ReplayTurnSummary
+                    {
+                        Season = 1, SeatId = "seat-0",
+                        EndReasonText = "Failed - provider network [ceiling: provider_error]",
+                        EndedBy = "failed: provider network",
+                    },
+                },
+            },
+            Requests = new List<ReplayRequestRecord>
+            {
+                new ReplayRequestRecord
+                {
+                    RunId = ReplayLoader.VerifiedDemoRunId, SeatId = "seat-0", Season = 1, RequestIndex = 1,
+                    PromptVersion = featureVer, ParseOk = true, ResultOk = true, ResultRecorded = true,
+                    RawModelText = "{\"type\":\"research\",\"args\":{\"line\":\"military\"}}",
+                },
+                new ReplayRequestRecord
+                {
+                    RunId = ReplayLoader.VerifiedDemoRunId, SeatId = "seat-0", Season = 1, RequestIndex = 2,
+                    PromptVersion = featureVer, ParseOk = true, ResultOk = true, ResultRecorded = true,
+                    RawModelText = "{\"type\":\"attack_army\",\"target_id\":\"army-wei-1\",\"param_a\":2,\"param_b\":1}",
+                },
+                new ReplayRequestRecord
+                {
+                    RunId = ReplayLoader.VerifiedDemoRunId, SeatId = "seat-0", Season = 1, RequestIndex = 3,
+                    PromptVersion = featureVer, ParseOk = false, ResultOk = false, ResultRecorded = false,
+                    ErrorKind = "None", ResultError = "empty response (finish_reason=length)", RawModelText = "",
+                },
+                new ReplayRequestRecord
+                {
+                    RunId = ReplayLoader.VerifiedDemoRunId, SeatId = "seat-0", Season = 1, RequestIndex = 4,
+                    PromptVersion = featureVer, ParseOk = false, ResultOk = false, ResultRecorded = false,
+                    ErrorKind = "Network", ErrorDetail = "transport failure", ResultError = "transport failure", RawModelText = "",
+                },
+            },
+        };
+
+        var items = ReplaySeasonSummaryBuilder.Build(bundle);
+        var wei = items[0].Wei;
+        Check(wei.AcceptedActions == 2 && wei.InvalidRequests == 1 && wei.ProviderFailures == 1
+              && wei.ActionCountsSummary.Contains("attack_army: 1")
+              && wei.ActionCountsSummary.Contains("research: 1")
+              && wei.ActionCountsSummary.Contains("invalid 1")
+              && wei.ActionCountsSummary.Contains("provider_error 1")
+              && wei.TurnEndReasonsSummary == "Failed - provider network [ceiling: provider_error]",
+            $"season summary counts attack+research as accepted and splits invalid vs provider failure (got '{wei.ActionCountsSummary}')");
+
+        // Verify on the real 10-season pilot recording if available from the working directory:
+        const string pilot10Run = "run-20261123090426264-1890d898";
+        if (ReplayLoader.TryResolveRunFiles(pilot10Run, null, out string ps, out string pj, out string pe, out string pb, out _))
+        {
+            ReplayBundle p10 = ReplayLoader.Load(ps, pj, pe, pilot10Run, pb);
+            var p10Sums = ReplaySeasonSummaryBuilder.Build(p10);
+            int totalAcc = 0, totalInv = 0, totalProv = 0, totalRej = 0;
+            foreach (var it in p10Sums)
+            {
+                totalAcc += it.Wei.AcceptedActions + it.Shu.AcceptedActions;
+                totalInv += it.Wei.InvalidRequests + it.Shu.InvalidRequests;
+                totalProv += it.Wei.ProviderFailures + it.Shu.ProviderFailures;
+                totalRej += it.Wei.RejectedActions + it.Shu.RejectedActions;
+            }
+            Check(totalAcc == 81 && totalRej == 0 && totalInv == 3 && totalProv == 1
+                  && p10Sums[9].Shu.ProviderFailures == 1 && p10Sums[9].Shu.InvalidRequests == 0
+                  && !string.IsNullOrEmpty(p10Sums[9].Shu.TurnEndReasonsSummary),
+                $"pilot 10-season summary fixes miscount: acc={totalAcc}/81 rej={totalRej}/0 inv={totalInv}/3 provErr={totalProv}/1");
+        }
     }
 }

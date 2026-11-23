@@ -27,8 +27,9 @@ namespace LuanShi.Engine
         public int TargetTroops;            // enemy army troops, or the city garrison
         public int TargetMorale;            // enemy army only
         public int DefendingArmyTroops;     // attack_city: an enemy-owned army standing on the city hex
-        public int RequiredTroops;          // attack_city: AssaultTroopRatio x effective garrison (0 if waived)
-        public bool AssaultRatioWaived;     // attack_city by a siege army
+        public bool AssaultRatioEnforced;   // true only under legacy/historical RequireAssaultTroopRatio rule
+        public int RequiredTroops;          // legacy attack_city: AssaultTroopRatio x effective garrison (0 if waived or not enforced)
+        public bool AssaultRatioWaived;     // legacy attack_city by a siege army
         public string Note;                 // short typed warning (treaty in force) or null
     }
 
@@ -139,8 +140,11 @@ namespace LuanShi.Engine
             sb.Append(",\"target_troops\":").Append(MiniJson.Num(option.TargetTroops));
             sb.Append(",\"target_morale\":").Append(MiniJson.Num(option.TargetMorale));
             sb.Append(",\"defending_army_troops\":").Append(MiniJson.Num(option.DefendingArmyTroops));
-            sb.Append(",\"required_troops\":").Append(MiniJson.Num(option.RequiredTroops));
-            sb.Append(",\"ratio_waived\":").Append(option.AssaultRatioWaived ? "true" : "false");
+            if (option.AssaultRatioEnforced)
+            {
+                sb.Append(",\"required_troops\":").Append(MiniJson.Num(option.RequiredTroops));
+                sb.Append(",\"ratio_waived\":").Append(option.AssaultRatioWaived ? "true" : "false");
+            }
             sb.Append(",\"note\":").Append(MiniJson.Str(option.Note));
             sb.Append('}');
             return sb.ToString();
@@ -320,13 +324,14 @@ namespace LuanShi.Engine
             var city = engine.State.CityAt(x, z);
             if (city == null || city.IsNeutral || city.OwnerSeatId == fac.SeatId) return null;
 
-            bool waived = UnitTypes.WaivesAssaultRatio(UnitTypes.Normalize(army.UnitType));
+            bool ratioEnforced = engine.State.RequireAssaultTroopRatio;
+            bool waived = ratioEnforced && UnitTypes.WaivesAssaultRatio(UnitTypes.Normalize(army.UnitType));
             var defending = engine.State.ArmyAt(city.X, city.Z);
             int defendingTroops = defending != null && defending.OwnerSeatId == city.OwnerSeatId
                 ? defending.Troops : 0;
             int effectiveGarrison = city.Garrison + defendingTroops;
-            int required = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
-            if (!waived && army.Troops < required) return null;
+            int required = ratioEnforced ? BalanceConfig.AssaultTroopRatio * effectiveGarrison : 0;
+            if (ratioEnforced && !waived && army.Troops < required) return null;
 
             CityView view = CityView.From(city);
             return new AttackOption
@@ -342,7 +347,8 @@ namespace LuanShi.Engine
                 TargetUnitType = UnitTypes.Normalize(view.GarrisonType),
                 TargetTroops = view.Garrison,
                 DefendingArmyTroops = defendingTroops,
-                RequiredTroops = waived ? 0 : required,
+                AssaultRatioEnforced = ratioEnforced,
+                RequiredTroops = ratioEnforced && !waived ? required : 0,
                 AssaultRatioWaived = waived,
                 Note = TreatyNote(engine, fac.SeatId, view.OwnerSeatId),
             };

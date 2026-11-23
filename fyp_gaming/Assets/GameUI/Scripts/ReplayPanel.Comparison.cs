@@ -118,7 +118,7 @@ namespace LuanShi
                 return;
             }
 
-            float contentHeight = summaries.Count * 135f + 10f;
+            float contentHeight = summaries.Count * 155f + 10f;
             Rect viewRect = new Rect(x, y, width, viewH);
             _replaySeasonsScroll = GUI.BeginScrollView(viewRect, _replaySeasonsScroll, new Rect(0, 0, width - 20f, contentHeight));
 
@@ -158,6 +158,11 @@ namespace LuanShi
             rowY += 15f;
             GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f), $"Requests: {side.ActionCountsSummary}", uiHint);
             rowY += 15f;
+            if (!string.IsNullOrEmpty(side.TurnEndReasonsSummary))
+            {
+                GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f), $"End: {side.TurnEndReasonsSummary}", uiHint);
+                rowY += 15f;
+            }
             GUI.Label(new Rect(12f, rowY, innerW - 16f, 14f), $"Troops: {side.TroopSummary}", uiHint);
             return rowY + 15f + 6f;
         }

@@ -135,7 +135,7 @@ namespace LuanShi
                 GUI.Label(new Rect(x, y, width, 16f), $"Current Turn: {seatId} ({persona})", uiPanelTitle);
                 y += 18f;
 
-                string cmdAction = rec != null && !string.IsNullOrEmpty(rec.RawModelText) ? EllipsizeToWidth(uiSmall, rec.RawModelText, width) : "end_turn";
+                string cmdAction = rec != null ? EllipsizeToWidth(uiSmall, ReplaySession.DescribeRequestAction(rec), width) : "unknown";
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
                 y += 16f;
 
@@ -175,7 +175,6 @@ namespace LuanShi
             int acts = _replaySession.AcceptedActionsReplayed;
             int expActs = _replaySession.ExpectedAcceptedActions;
             int rejs = _replaySession.RejectedActionsReplayed;
-            int expRejs = _replaySession.ExpectedRejectedActions;
             int mismatches = _replaySession.ActionOutcomeMismatches;
             if (_replaySession.IsCompleted)
             {
@@ -188,7 +187,7 @@ namespace LuanShi
                 int cmdInf = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredMatched : 0;
                 int cmdCount = _replaySession.FinalReport != null ? _replaySession.FinalReport.CommandInferredCount : 0;
                 int unverified = _replaySession.FinalReport != null ? _replaySession.FinalReport.UnverifiedSceneSetupCount : 0;
-                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{totalReq}  |  Accepted: {acts}/{expActs} (Rej: {rejs}/{expRejs}, Mismatch: {mismatches})", uiSmall);
+                GUI.Label(new Rect(x, y, width, 14f), $"Obs: {obs}/{totalReq}  |  Accepted: {acts}/{expActs} (Rej: {_replaySession.EngineRejectionsReplayed}, Inv: {_replaySession.InvalidResponsesReplayed}, ProvErr: {_replaySession.ProviderFailuresReplayed}, Mis: {mismatches})", uiSmall);
                 y += 14f;
                 GUI.Label(new Rect(x, y, width, 14f), $"Positions: {dirObs}/{dirCount} obs, {cmdInf}/{cmdCount} cmd-inferred, {unverified} unverified (fog/setup)", uiSmall);
             }

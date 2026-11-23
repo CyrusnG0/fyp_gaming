@@ -218,6 +218,84 @@ namespace LuanShi.Playground
                           && divReplay.UnexpectedRejections == 1
                           && divReplay.ActionOutcomeMismatches == 1,
                     "fairness-replay-divergence: loader and ReplaySession catch rule/action divergence");
+
+                // 8. Historical 3:1 city assault replay provenance vs post-removal replay:
+                //    - Historical run WITHOUT initial_world.require_assault_troop_ratio preserves 3:1 rule,
+                //      so a recorded <3:1 assault rejection still fails with AssaultRatioTooLow (0 mismatches).
+                string oldAtkVer = PromptBuilder.LegacyAttackPromptVersion;
+                ReplayBundle histAssaultBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null,
+                    bootstrapVisibleMarchRoutes: null,
+                    bootstrapStateRequireVisible: null,
+                    spatialLevel: null,
+                    promptVersion: oldAtkVer,
+                    requests: new List<ReplayRequestRecord>
+                    {
+                        new ReplayRequestRecord
+                        {
+                            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+                            ControllerType = ControllerType.Llm, Season = 1, TurnToken = 1, RequestIndex = 1, TotalRequests = 2,
+                            PromptVersion = oldAtkVer, ParseOk = true, ResultOk = false, ResultRecorded = true,
+                            ResultError = FeedbackPolicy.AssaultRatioTooLow,
+                            RawModelText = "{\"type\":\"attack_city\",\"target_id\":\"inf-replay\",\"param_a\":2,\"param_b\":0}",
+                        },
+                        EndTurnRecord(oldAtkVer, ControllerType.Llm, 2, 2),
+                    });
+                var histAssaultReplay = new ReplaySession(histAssaultBundle, BuildCorridor(11));
+                SetupReplayAssaultUnits(histAssaultReplay.Engine);
+                histAssaultReplay.RunToCompletion();
+                log.Check(histAssaultReplay.ReplayedAssaultTroopRatio
+                          && histAssaultReplay.Engine.State.RequireAssaultTroopRatio
+                          && histAssaultReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                          && histAssaultReplay.EngineRejectionsReplayed == 1
+                          && histAssaultReplay.ActionOutcomeMismatches == 0,
+                    "assault-replay-historical: old run without require_assault_troop_ratio preserves 3:1 rejection",
+                    $"ratio={histAssaultReplay.ReplayedAssaultTroopRatio} prov={histAssaultReplay.AssaultTroopRatioProvenance} rej={histAssaultReplay.EngineRejectionsReplayed} mis={histAssaultReplay.ActionOutcomeMismatches}");
+
+                //    - New post-removal bundle WITH require_assault_troop_ratio=false and -2 prompt accepts <3:1 assault.
+                string newAtkVer = PromptBuilder.AttackPromptVersion;
+                ReplayBundle newAssaultBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null,
+                    bootstrapVisibleMarchRoutes: null,
+                    bootstrapStateRequireVisible: null,
+                    spatialLevel: null,
+                    promptVersion: newAtkVer,
+                    requests: new List<ReplayRequestRecord>
+                    {
+                        new ReplayRequestRecord
+                        {
+                            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+                            ControllerType = ControllerType.Llm, Season = 1, TurnToken = 1, RequestIndex = 1, TotalRequests = 2,
+                            PromptVersion = newAtkVer, ParseOk = true, ResultOk = true, ResultRecorded = true,
+                            RawModelText = "{\"type\":\"attack_city\",\"target_id\":\"inf-replay\",\"param_a\":2,\"param_b\":0}",
+                        },
+                        EndTurnRecord(newAtkVer, ControllerType.Llm, 2, 2),
+                    });
+                newAssaultBundle.BootstrapAssaultTroopRatio = false;
+                newAssaultBundle.BootstrapStateRequireAssaultTroopRatio = false;
+                newAssaultBundle.Summary.AssaultTroopRatioEnforced = false;
+                var newAssaultReplay = new ReplaySession(newAssaultBundle, BuildCorridor(11));
+                SetupReplayAssaultUnits(newAssaultReplay.Engine);
+                newAssaultReplay.RunToCompletion();
+                log.Check(!newAssaultReplay.ReplayedAssaultTroopRatio
+                          && !newAssaultReplay.Engine.State.RequireAssaultTroopRatio
+                          && newAssaultReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.Established
+                          && newAssaultReplay.AcceptedActionsReplayed == 1
+                          && newAssaultReplay.ActionOutcomeMismatches == 0,
+                    "assault-replay-new: post-removal bootstrap replays below-3:1 assault as accepted",
+                    $"ratio={newAssaultReplay.ReplayedAssaultTroopRatio} prov={newAssaultReplay.AssaultTroopRatioProvenance} acc={newAssaultReplay.AcceptedActionsReplayed} mis={newAssaultReplay.ActionOutcomeMismatches}");
+
+                //    - Rule divergence fail-closed: require_assault_troop_ratio=false paired with legacy -1 prompt throws.
+                bool caughtRatioDivergence = false;
+                ReplayBundle badRatioBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: oldAtkVer,
+                    requests: new List<ReplayRequestRecord> { EndTurnRecord(oldAtkVer, ControllerType.Llm, 1, 1) });
+                badRatioBundle.BootstrapStateRequireAssaultTroopRatio = false;
+                try { new ReplaySession(badRatioBundle); }
+                catch (InvalidOperationException ex) { caughtRatioDivergence = ex.Message.Contains("diverges"); }
+                log.Check(caughtRatioDivergence,
+                    "assault-replay-divergence: rule/prompt mismatch fails closed");
             }
             finally
             {
@@ -291,7 +369,7 @@ namespace LuanShi.Playground
                 "{\"schema\":\"luanshi-replay-bootstrap/1\",\"run_id\":\"" + ReplayLoader.VerifiedDemoRunId + "\""
                 + ",\"features\":{\"visible_march_routes\":true}"
                 + (includeInitialWorldRule
-                    ? ",\"initial_world\":{\"require_visible_march_routes\":" + (sharedEngineRule ? "true" : "false") + "}"
+                    ? ",\"initial_world\":{\"require_visible_march_routes\":" + (sharedEngineRule ? "true" : "false") + ",\"require_assault_troop_ratio\":false}"
                     : ",\"initial_world\":{\"season\":1}")
                 + "}");
 
@@ -361,6 +439,16 @@ namespace LuanShi.Playground
             engine.State.Cities.Add(new CityState { Id = "ce", Name = "E", X = 8, Z = 0, OwnerSeatId = "seat-0", Population = 3000, Food = 300, Gold = 300 });
             engine.State.Armies.Add(new ArmyState { Id = "cav-replay", Name = "C", OwnerSeatId = "seat-0", Troops = 1000, UnitType = UnitTypes.Cavalry, X = 1, Z = 0 });
             engine.State.Armies.Add(new ArmyState { Id = "cav-llm", Name = "L", OwnerSeatId = "seat-0", Troops = 1000, UnitType = UnitTypes.Cavalry, X = 1, Z = 0 });
+        }
+
+        private static void SetupReplayAssaultUnits(GameEngine engine)
+        {
+            engine.State.Cities.Clear();
+            engine.State.WatchTowers.Clear();
+            engine.State.Armies.Clear();
+            engine.State.Cities.Add(new CityState { Id = "cw", Name = "W", X = 0, Z = 0, OwnerSeatId = "seat-0", Population = 3000, Food = 300, Gold = 300 });
+            engine.State.Cities.Add(new CityState { Id = "ce", Name = "E", X = 2, Z = 0, OwnerSeatId = "seat-1", Population = 3000, Food = 300, Gold = 300, Garrison = 1000 });
+            engine.State.Armies.Add(new ArmyState { Id = "inf-replay", Name = "I", OwnerSeatId = "seat-0", Troops = 1500, UnitType = UnitTypes.Infantry, X = 1, Z = 0 });
         }
 
         private static ReplayRequestRecord EndTurnRecord(string promptVersion, string controllerType, int reqIdx, int total)

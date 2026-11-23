@@ -325,30 +325,30 @@ namespace LuanShi.EditorTools
             Next(3, 6);
         }
 
-        // ---- step 3: the 3:1 rule refuses an assault ----------------------------
+        // ---- step 3: below-3:1 assault proceeds without a ratio gate ------------
 
         private static void StepAssaultRejected(KingdomDemo demo)
         {
             DismissModals(demo);
             var engine = Engine(demo);
             var city = engine.State.FindCity("city-shu");
-            city.Garrison = 1000;   // 3:1 needs 3,000; the host has 2,000
+            city.Garrison = 1000;   // previously refused by 3:1 (would have needed 3,000 for 2,000 host)
             var host = EnsureRehearsalArmy(demo, "army-wei-9", "Wei Siege Host", "seat-0", 19, 8, 2000);
             CallByName(demo, "RefreshObservation");
             CallByName(demo, "TintCity", city.Id);
-            _log.Add("[assault-reject] fixture: " + city.Id + " garrison 1000 at (" + city.X + "," + city.Z
+            _log.Add("[assault-below-3to1] fixture: " + city.Id + " garrison 1000 at (" + city.X + "," + city.Z
                 + "), host " + host.Id + " adjacent=" + engine.State.Map.AreAdjacent(host.X, host.Z, city.X, city.Z));
 
             string json = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-9\",\"param_a\":" + city.X
                  + ",\"param_b\":" + city.Z + "}";
             SubmitThroughDemoJson(demo, json, out bool accepted, out string error);
             var siege = LatestEvent(engine, "battle_siege");
-            _log.Add("[assault-reject] accepted=" + accepted + " error=" + (error ?? "-")
+            _log.Add("[assault-below-3to1] accepted=" + accepted + " error=" + (error ?? "-")
                 + " battleEvent=" + (siege == null ? "none" : siege.Payload["outcome"]));
-            _log.Add("[assault-reject] status=\"" + (string)Field(demo, "statusMsg") + "\"");
+            _log.Add("[assault-below-3to1] status=\"" + (string)Field(demo, "statusMsg") + "\"");
             LogLines();
-            Record(demo, "assault-rejected", !accepted && siege == null);
-            Capture("04-assault-rejected");
+            Record(demo, "assault-below-3to1-accepted", accepted && siege != null);
+            Capture("04-assault-below-3to1");
             Next(4, 6);
         }
 

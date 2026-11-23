@@ -16,6 +16,7 @@ namespace LuanShi.Engine
         public bool ManualLookup;
         public bool Deliberation;
         public bool VisibleMarchRoutes;
+        public bool AssaultTroopRatio;
     }
 
     public sealed class ReplayBootstrapData
@@ -32,6 +33,8 @@ namespace LuanShi.Engine
         public ReplayBootstrapFeatures Features = new ReplayBootstrapFeatures();
         public bool? HasVisibleMarchRoutesFeature;
         public bool? StateRequireVisibleMarchRoutes;
+        public bool? HasAssaultTroopRatioFeature;
+        public bool? StateRequireAssaultTroopRatio;
         public string InitialMapSha256;
         public string InitialWorldSha256;
         public JsonObject RawMap;
@@ -86,11 +89,15 @@ namespace LuanShi.Engine
                 throw new InvalidDataException("Bootstrap initial_world is not an object.");
 
             BalanceProfile profile = ParseBalanceProfile(root);
-            ReplayBootstrapFeatures features = ParseFeatures(root, out bool? hasVisible);
+            ReplayBootstrapFeatures features = ParseFeatures(root, out bool? hasVisible, out bool? hasAssaultRatio);
             bool? stateVisible = NullableBool(worldObj, "require_visible_march_routes");
             if (hasVisible.HasValue && stateVisible.HasValue && hasVisible.Value != stateVisible.Value)
                 throw new InvalidDataException(
                     $"Bootstrap rule divergence: features.visible_march_routes={hasVisible.Value} != initial_world.require_visible_march_routes={stateVisible.Value}.");
+            bool? stateAssaultRatio = NullableBool(worldObj, "require_assault_troop_ratio");
+            if (hasAssaultRatio.HasValue && stateAssaultRatio.HasValue && hasAssaultRatio.Value != stateAssaultRatio.Value)
+                throw new InvalidDataException(
+                    $"Bootstrap rule divergence: features.assault_troop_ratio={hasAssaultRatio.Value} != initial_world.require_assault_troop_ratio={stateAssaultRatio.Value}.");
 
             return new ReplayBootstrapData
             {
@@ -106,6 +113,8 @@ namespace LuanShi.Engine
                 Features = features,
                 HasVisibleMarchRoutesFeature = hasVisible,
                 StateRequireVisibleMarchRoutes = stateVisible,
+                HasAssaultTroopRatioFeature = hasAssaultRatio,
+                StateRequireAssaultTroopRatio = stateAssaultRatio,
                 InitialMapSha256 = mapSha,
                 InitialWorldSha256 = worldSha,
                 RawMap = mapObj,
@@ -145,9 +154,11 @@ namespace LuanShi.Engine
             throw new InvalidDataException($"Unknown balance profile '{key}' in replay bootstrap.");
         }
 
-        private static ReplayBootstrapFeatures ParseFeatures(JsonObject root, out bool? visibleMarchRoutes)
+        private static ReplayBootstrapFeatures ParseFeatures(JsonObject root, out bool? visibleMarchRoutes,
+            out bool? assaultTroopRatio)
         {
             visibleMarchRoutes = null;
+            assaultTroopRatio = null;
             var f = new ReplayBootstrapFeatures();
             if (root.TryGet("features", out JsonNode n) && n is JsonObject obj)
             {
@@ -159,6 +170,8 @@ namespace LuanShi.Engine
                 f.Deliberation = Bool(obj, "deliberation");
                 visibleMarchRoutes = NullableBool(obj, "visible_march_routes");
                 f.VisibleMarchRoutes = visibleMarchRoutes == true;
+                assaultTroopRatio = NullableBool(obj, "assault_troop_ratio");
+                f.AssaultTroopRatio = assaultTroopRatio == true;
             }
             return f;
         }

@@ -82,6 +82,7 @@ namespace LuanShi.Engine
               .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
               .Append(config != null && config.EffectiveVisibleMarchRoutes ? "true" : "false");
+            sb.Append(",\"assault_troop_ratio_enforced\":false");
             sb.Append(",\"replay_bootstrap_path\":")
               .Append(MiniJson.Str("runs/" + SafeName(runId) + "-bootstrap.json"));
             Field(sb, "spatial_context_level",

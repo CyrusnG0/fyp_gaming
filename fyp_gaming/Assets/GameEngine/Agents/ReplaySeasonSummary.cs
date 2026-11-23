@@ -24,12 +24,16 @@ namespace LuanShi.Engine
         public int AcceptedActions;
         /// <summary>Parsed game actions whose recorded result is rejected by the engine.</summary>
         public int RejectedActions;
-        /// <summary>Requests that produced no valid game action (unparseable reply or unusable inquiry).</summary>
+        /// <summary>Requests that produced no valid game action (unparseable/empty reply or unusable inquiry).</summary>
         public int InvalidRequests;
+        /// <summary>Requests that failed at the transport or provider layer before a model reply arrived.</summary>
+        public int ProviderFailures;
         /// <summary>Voluntary end_turn replies, reported apart from game actions.</summary>
         public int EndTurns;
         /// <summary>Parsed game actions whose record carries no result, so acceptance is not established.</summary>
         public int UnrecordedOutcomes;
+        /// <summary>Recorded turn-ending reasons for this seat in this season, if present in the summary.</summary>
+        public string TurnEndReasonsSummary;
 
         /// <summary>Answered manual_lookup inquiries; null when the records do not establish the count.</summary>
         public int? Lookups;
@@ -131,6 +135,12 @@ namespace LuanShi.Engine
                         continue;
                     rows++;
 
+                    if (req.IsProviderFailure)
+                    {
+                        side.ProviderFailures++;
+                        continue;
+                    }
+
                     string tool = InquiryToolOf(req);
                     if (tool != null)
                     {
@@ -170,13 +180,26 @@ namespace LuanShi.Engine
                         continue;
                     }
 
-                    ParseResult p = LlmActionParser.Parse(req.RawModelText, false, false,
-                        PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion),
-                        PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
+                    ReplayBootstrapFeatures bf = bundle.Bootstrap?.Features;
+                    bool allowAttack = (bf != null && bf.Attack)
+                        || (bundle.Summary?.AttackEnabled == true)
+                        || PromptBuilder.IsAttackPromptVersion(req.PromptVersion);
+                    bool allowResearch = (bf != null && bf.Research)
+                        || (bundle.Summary?.ResearchEnabled == true)
+                        || PromptBuilder.IsResearchPromptVersion(req.PromptVersion);
+                    bool allowDiplomacy = (bf != null && bf.Diplomacy)
+                        || (bundle.Summary?.DiplomacyEnabled == true)
+                        || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion);
+                    bool allowGarrison = (bf != null && bf.GarrisonConversion)
+                        || (bundle.Summary?.GarrisonConversionEnabled == true)
+                        || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion);
+
+                    ParseResult p = LlmActionParser.Parse(req.RawModelText, allowAttack, allowResearch,
+                        allowDiplomacy, allowGarrison);
                     if (!p.Ok || p.Action == null) { lookupsKnown = false; side.InvalidRequests++; continue; }
                     if (p.Action.EndTurn) { side.EndTurns++; continue; }
 
-                        if (!req.ResultRecorded) side.UnrecordedOutcomes++;
+                    if (!req.ResultRecorded) side.UnrecordedOutcomes++;
                     else if (!req.ResultOk) side.RejectedActions++;
                     else
                     {
@@ -188,6 +211,8 @@ namespace LuanShi.Engine
                 }
             }
 
+            side.TurnEndReasonsSummary = BuildTurnEndReasons(bundle, season, seatId);
+
             if (rows == 0) return; // nothing recorded for this seat/season: counts stay unknown
             side.Lookups = lookupsKnown ? (int?)lookups : null;
 
@@ -196,8 +221,27 @@ namespace LuanShi.Engine
             parts.Sort(StringComparer.Ordinal);
             string detail = parts.Count > 0 ? " (" + string.Join(", ", parts) + ")" : "";
             string summary = $"accepted {side.AcceptedActions}{detail} | rejected {side.RejectedActions} | invalid {side.InvalidRequests} | end_turn {side.EndTurns}";
+            if (side.ProviderFailures > 0) summary += $" | provider_error {side.ProviderFailures}";
             if (side.UnrecordedOutcomes > 0) summary += $" | outcome unrecorded {side.UnrecordedOutcomes}";
             side.ActionCountsSummary = summary;
+        }
+
+        private static string BuildTurnEndReasons(ReplayBundle bundle, int season, string seatId)
+        {
+            var turns = bundle?.Summary?.Turns;
+            if (turns == null || turns.Count == 0) return null;
+            var reasons = new List<string>();
+            for (int i = 0; i < turns.Count; i++)
+            {
+                var t = turns[i];
+                if (t == null || t.Season != season || !string.Equals(t.SeatId, seatId, StringComparison.Ordinal))
+                    continue;
+                string text = !string.IsNullOrEmpty(t.EndReasonText)
+                    ? t.EndReasonText
+                    : (!string.IsNullOrEmpty(t.EndedBy) ? t.EndedBy : t.EndReason);
+                if (!string.IsNullOrEmpty(text)) reasons.Add(text);
+            }
+            return reasons.Count > 0 ? string.Join("; ", reasons) : null;
         }
 
         // Tool name when the record is an inquiry (a reply object carrying a "tool" field, or a

@@ -299,15 +299,17 @@ namespace LuanShi.Engine
                     CityView city = observation.Cities.Find(c => c != null && c.Id == a.TargetCityId
                         && c.X == a.X && c.Z == a.Z && !c.IsNeutral && c.OwnerSeatId != observation.SeatId);
                     if (city == null) continue;
-                    string need = a.AssaultRatioWaived
-                        ? "siege army waives the troop ratio"
-                        : "needs at least " + a.RequiredTroops.ToString(CultureInfo.InvariantCulture) + " troops";
+                    string need = !a.AssaultRatioEnforced
+                        ? ""
+                        : (a.AssaultRatioWaived
+                            ? "; siege army waives the troop ratio"
+                            : "; needs at least " + a.RequiredTroops.ToString(CultureInfo.InvariantCulture) + " troops");
                     string defender = a.DefendingArmyTroops > 0
                         ? ", defending army " + a.DefendingArmyTroops.ToString(CultureInfo.InvariantCulture)
                         : "";
                     label = "Assault " + NameOf(city.Name, city.Id) + " owned by " + city.OwnerSeatId
                         + " (garrison " + city.Garrison.ToString(CultureInfo.InvariantCulture) + defender
-                        + "; " + need + ") with " + NameOf(pair.Army.Name, pair.Army.Id);
+                        + need + ") with " + NameOf(pair.Army.Name, pair.Army.Id);
                 }
                 else
                 {

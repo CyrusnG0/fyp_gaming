@@ -125,7 +125,7 @@ namespace LuanShi.Engine
         public const int CombatRoutMoraleThreshold = 0;    // LOCKED (ACTIONS.md M2): 士氣 0 → 潰散 (design §5.1 says <30)
         public const float CombatRoutExtraLoss = 0.30f;    // LOCKED (design §6.2): a 潰散 army loses a further 30%
         public const int CombatVictoryMoraleGain = 10;     // TBD: winning restores 士氣 (design §5.1: 勝仗)
-        public const int AssaultTroopRatio = 3;            // LOCKED (design §4.3): 強攻 needs ≥3:1 unless 器械
+        public const int AssaultTroopRatio = 3;            // Legacy/historical replay only: old 3:1 city assault rule (disabled in live State.RequireAssaultTroopRatio=false)
 
         // ---- 名聲: victory prestige and 背盟 / 偷襲 penalties (design §7.3–§7.4) -
 

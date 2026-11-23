@@ -13,12 +13,16 @@ namespace LuanShi.Engine
             out ReplayBootstrapData bootstrap,
             out bool? bootstrapVisible,
             out bool? bootstrapStateVisible,
+            out bool? bootstrapAssaultRatio,
+            out bool? bootstrapStateAssaultRatio,
             out string setupSource,
             out string mapSource)
         {
             bootstrap = null;
             bootstrapVisible = null;
             bootstrapStateVisible = null;
+            bootstrapAssaultRatio = null;
+            bootstrapStateAssaultRatio = null;
             setupSource = "legacy_demo";
             mapSource = "legacy_default_map";
 
@@ -35,13 +39,17 @@ namespace LuanShi.Engine
                 bootstrap = ReplayBootstrapLoader.LoadFromFile(bootstrapPath, summary.RunId, summary.Seed);
                 bootstrapVisible = bootstrap.HasVisibleMarchRoutesFeature;
                 bootstrapStateVisible = bootstrap.StateRequireVisibleMarchRoutes;
+                bootstrapAssaultRatio = bootstrap.HasAssaultTroopRatioFeature;
+                bootstrapStateAssaultRatio = bootstrap.StateRequireAssaultTroopRatio;
                 setupSource = "bootstrap";
                 mapSource = "bootstrap";
-                ValidateSummaryAgainstBootstrap(summary, bootstrapStateVisible ?? bootstrapVisible);
+                ValidateSummaryAgainstBootstrap(summary, bootstrapStateVisible ?? bootstrapVisible,
+                    bootstrapStateAssaultRatio ?? bootstrapAssaultRatio);
                 return;
             }
 
-            LoadBootstrapRuleFlags(bootstrapPath, summary, out bootstrapVisible, out bootstrapStateVisible);
+            LoadBootstrapRuleFlags(bootstrapPath, summary, out bootstrapVisible, out bootstrapStateVisible,
+                out bootstrapAssaultRatio, out bootstrapStateAssaultRatio);
         }
 
         private static bool BootstrapHasFullSnapshot(string path)
@@ -53,31 +61,54 @@ namespace LuanShi.Engine
         }
 
         private static void LoadBootstrapRuleFlags(string path, ReplaySummaryData summary,
-            out bool? featuresVisible, out bool? stateVisible)
+            out bool? featuresVisible, out bool? stateVisible,
+            out bool? featuresAssaultRatio, out bool? stateAssaultRatio)
         {
             featuresVisible = null;
             stateVisible = null;
+            featuresAssaultRatio = null;
+            stateAssaultRatio = null;
             string text = File.ReadAllText(path);
             if (!StrictJson.TryParseLenientNumbers(text, out JsonNode root, out string err) || !(root is JsonObject obj))
                 throw new InvalidDataException("Invalid bootstrap JSON: " + err);
             if (obj.TryGet("features", out JsonNode fNode) && fNode is JsonObject fObj)
+            {
                 featuresVisible = GetNullableBool(fObj, "visible_march_routes");
+                featuresAssaultRatio = GetNullableBool(fObj, "assault_troop_ratio");
+            }
             if (obj.TryGet("initial_world", out JsonNode wNode) && wNode is JsonObject wObj)
+            {
                 stateVisible = GetNullableBool(wObj, "require_visible_march_routes");
+                stateAssaultRatio = GetNullableBool(wObj, "require_assault_troop_ratio");
+            }
 
             if (featuresVisible.HasValue && stateVisible.HasValue && featuresVisible.Value != stateVisible.Value)
                 throw new InvalidDataException(
                     $"Bootstrap rule divergence: features.visible_march_routes={featuresVisible.Value} != initial_world.require_visible_march_routes={stateVisible.Value}.");
-            ValidateSummaryAgainstBootstrap(summary, stateVisible ?? featuresVisible);
-        }
-
-        private static void ValidateSummaryAgainstBootstrap(ReplaySummaryData summary, bool? bootRule)
-        {
-            if (summary != null && summary.VisibleMarchRoutesEnforced.HasValue && bootRule.HasValue
-                && bootRule.Value != summary.VisibleMarchRoutesEnforced.Value)
+            if (featuresAssaultRatio.HasValue && stateAssaultRatio.HasValue
+                && featuresAssaultRatio.Value != stateAssaultRatio.Value)
             {
                 throw new InvalidDataException(
-                    $"Summary/bootstrap rule divergence: summary.visible_march_routes_enforced={summary.VisibleMarchRoutesEnforced.Value} != bootstrap={bootRule.Value}.");
+                    $"Bootstrap rule divergence: features.assault_troop_ratio={featuresAssaultRatio.Value} != initial_world.require_assault_troop_ratio={stateAssaultRatio.Value}.");
+            }
+            ValidateSummaryAgainstBootstrap(summary, stateVisible ?? featuresVisible,
+                stateAssaultRatio ?? featuresAssaultRatio);
+        }
+
+        private static void ValidateSummaryAgainstBootstrap(ReplaySummaryData summary,
+            bool? bootVisibleRule, bool? bootAssaultRule)
+        {
+            if (summary != null && summary.VisibleMarchRoutesEnforced.HasValue && bootVisibleRule.HasValue
+                && bootVisibleRule.Value != summary.VisibleMarchRoutesEnforced.Value)
+            {
+                throw new InvalidDataException(
+                    $"Summary/bootstrap rule divergence: summary.visible_march_routes_enforced={summary.VisibleMarchRoutesEnforced.Value} != bootstrap={bootVisibleRule.Value}.");
+            }
+            if (summary != null && summary.AssaultTroopRatioEnforced.HasValue && bootAssaultRule.HasValue
+                && bootAssaultRule.Value != summary.AssaultTroopRatioEnforced.Value)
+            {
+                throw new InvalidDataException(
+                    $"Summary/bootstrap rule divergence: summary.assault_troop_ratio_enforced={summary.AssaultTroopRatioEnforced.Value} != bootstrap={bootAssaultRule.Value}.");
             }
         }
 

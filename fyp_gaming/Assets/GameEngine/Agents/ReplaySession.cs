@@ -31,6 +31,9 @@ namespace LuanShi.Engine
         private readonly List<string> _observationHashDiscrepancies = new List<string>();
 
         private int _acceptedActionsReplayed, _rejectedActionsReplayed, _unexpectedRejections, _unexpectedAcceptances;
+        private int _expectedEngineRejections, _engineRejectionsReplayed;
+        private int _expectedInvalidResponses, _invalidResponsesReplayed;
+        private int _expectedProviderFailures, _providerFailuresReplayed;
         private int _rejectionReasonMismatches, _actionOutcomeMismatches;
         private readonly List<string> _actionDiscrepancies = new List<string>();
         private int _voluntaryEndTurnsReplayed;
@@ -38,6 +41,10 @@ namespace LuanShi.Engine
         private bool? _establishedSharedVisibleMarchRoutes;
         private VisibleMarchRuleProvenance _visibleMarchRuleProvenance;
         private string _visibleMarchRuleNote;
+        private AssaultTroopRatioRuleProvenance _assaultTroopRatioProvenance;
+        private bool _assaultTroopRatioRuleEstablished;
+        private bool? _establishedAssaultTroopRatio;
+        private string _assaultTroopRatioRuleNote;
 
         private readonly List<ReplaySeasonScoreboard> _replayedScores = new List<ReplaySeasonScoreboard>();
         private readonly List<ReplayFeedEvent> _eventFeed = new List<ReplayFeedEvent>();
@@ -61,6 +68,11 @@ namespace LuanShi.Engine
         public VisibleMarchRuleProvenance VisibleMarchRuleProvenance => _visibleMarchRuleProvenance;
         public bool VisibleMarchRuleEstablished => _visibleMarchRuleEstablished;
         public string VisibleMarchRuleNote => _visibleMarchRuleNote;
+        public bool ReplayedAssaultTroopRatio { get; private set; }
+        public AssaultTroopRatioRuleProvenance AssaultTroopRatioProvenance => _assaultTroopRatioProvenance;
+        public bool AssaultTroopRatioRuleEstablished => _assaultTroopRatioRuleEstablished;
+        public bool? EstablishedAssaultTroopRatio => _establishedAssaultTroopRatio;
+        public string AssaultTroopRatioRuleNote => _assaultTroopRatioRuleNote;
         public int TotalSeasons => _totalSeasons;
         public int TotalRequests => _totalRequests;
         public int CurrentRequestIndex => _currentRequestIndex;
@@ -72,6 +84,12 @@ namespace LuanShi.Engine
         public int ExpectedVoluntaryEndTurns => _expectedVoluntaryEndTurns;
         public int AcceptedActionsReplayed => _acceptedActionsReplayed;
         public int RejectedActionsReplayed => _rejectedActionsReplayed;
+        public int ExpectedEngineRejections => _expectedEngineRejections;
+        public int EngineRejectionsReplayed => _engineRejectionsReplayed;
+        public int ExpectedInvalidResponses => _expectedInvalidResponses;
+        public int InvalidResponsesReplayed => _invalidResponsesReplayed;
+        public int ExpectedProviderFailures => _expectedProviderFailures;
+        public int ProviderFailuresReplayed => _providerFailuresReplayed;
         public int UnexpectedRejections => _unexpectedRejections;
         public int UnexpectedAcceptances => _unexpectedAcceptances;
         public int RejectionReasonMismatches => _rejectionReasonMismatches;
@@ -126,16 +144,23 @@ namespace LuanShi.Engine
             _hasDivergence = false; _divergenceSummary = null; _isIncompleteRun = false; _stopReason = null;
 
             ReplayBootstrapFeatures bf = _bundle.Bootstrap?.Features;
-            _allowAttack = bf != null && bf.Attack;
-            _allowResearch = bf != null && bf.Research;
+            _allowAttack = (bf != null && bf.Attack)
+                || (_bundle.Summary?.AttackEnabled == true)
+                || (_bundle.Requests.Count > 0 && PromptBuilder.IsAttackPromptVersion(_bundle.Requests[0].PromptVersion));
+            _allowResearch = (bf != null && bf.Research)
+                || (_bundle.Summary?.ResearchEnabled == true)
+                || (_bundle.Requests.Count > 0 && PromptBuilder.IsResearchPromptVersion(_bundle.Requests[0].PromptVersion));
             _allowDiplomacy = (bf != null && bf.Diplomacy)
+                || (_bundle.Summary?.DiplomacyEnabled == true)
                 || (_bundle.Requests.Count > 0 && PromptBuilder.IsDiplomacyPromptVersion(_bundle.Requests[0].PromptVersion));
             _allowGarrisonConversion = (bf != null && bf.GarrisonConversion)
+                || (_bundle.Summary?.GarrisonConversionEnabled == true)
                 || (_bundle.Requests.Count > 0 && PromptBuilder.IsGarrisonConversionPromptVersion(_bundle.Requests[0].PromptVersion));
 
             _totalSeasons = _bundle.Summary != null ? _bundle.Summary.SeasonsPlayed : 0;
             _totalRequests = _bundle.Requests.Count;
             _expectedAcceptedActions = 0; _expectedRejectedActions = 0; _expectedVoluntaryEndTurns = 0;
+            _expectedEngineRejections = 0; _expectedInvalidResponses = 0; _expectedProviderFailures = 0;
             for (int i = 0; i < _bundle.Requests.Count; i++)
             {
                 var req = _bundle.Requests[i];
@@ -146,12 +171,20 @@ namespace LuanShi.Engine
                 }
                 else
                 {
-                    if (req.ResultOk) _expectedAcceptedActions++; else _expectedRejectedActions++;
+                    if (req.ResultOk) _expectedAcceptedActions++;
+                    else
+                    {
+                        _expectedRejectedActions++;
+                        if (req.IsProviderFailure) _expectedProviderFailures++;
+                        else if (!req.ParseOk) _expectedInvalidResponses++;
+                        else _expectedEngineRejections++;
+                    }
                 }
             }
 
             _observationHashesMatched = 0; _observationHashMismatches = 0; _observationHashDiscrepancies.Clear();
             _acceptedActionsReplayed = 0; _rejectedActionsReplayed = 0; _unexpectedRejections = 0;
+            _engineRejectionsReplayed = 0; _invalidResponsesReplayed = 0; _providerFailuresReplayed = 0;
             _unexpectedAcceptances = 0; _rejectionReasonMismatches = 0; _actionOutcomeMismatches = 0; _actionDiscrepancies.Clear();
             _voluntaryEndTurnsReplayed = 0; _replayedScores.Clear(); _eventFeed.Clear(); _finalReport = null; _seasonSummaries = null;
 
@@ -162,11 +195,19 @@ namespace LuanShi.Engine
             _visibleMarchRuleEstablished = rule.RuleEstablished;
             _visibleMarchRuleNote = rule.Note;
 
+            AssaultRatioRuleResolution assaultRule = ResolveAssaultRatioRuleInfo(_bundle);
+            _assaultTroopRatioProvenance = assaultRule.Provenance;
+            _assaultTroopRatioRuleEstablished = assaultRule.RuleEstablished;
+            _establishedAssaultTroopRatio = assaultRule.EstablishedRule;
+            _assaultTroopRatioRuleNote = assaultRule.Note;
+
             if (_bundle.Bootstrap != null)
             {
                 _engine = ReplayBootstrapLoader.CreateEngine(_bundle.Bootstrap);
                 _engine.State.RequireVisibleMarchRoutes = rule.SharedEngineRule;
+                _engine.State.RequireAssaultTroopRatio = assaultRule.SharedEngineRule;
                 ReplayedVisibleMarchRoutes = _engine.State.RequireVisibleMarchRoutes;
+                ReplayedAssaultTroopRatio = _engine.State.RequireAssaultTroopRatio;
                 _currentSeason = _engine.State.Season;
                 return;
             }
@@ -178,7 +219,9 @@ namespace LuanShi.Engine
             string gameId = "match-20261109T082434772-7e66ac10ae8c46fcbc94eea45d66cb53";
             _engine = new GameEngine(seed, gameId, profile);
             _engine.State.RequireVisibleMarchRoutes = rule.SharedEngineRule;
+            _engine.State.RequireAssaultTroopRatio = assaultRule.SharedEngineRule;
             ReplayedVisibleMarchRoutes = _engine.State.RequireVisibleMarchRoutes;
+            ReplayedAssaultTroopRatio = _engine.State.RequireAssaultTroopRatio;
             _engine.State.Map = _hostMap ?? BuildDefaultStaggeredHexMap(26, 17);
 
             _engine.State.Factions.Add(new FactionState { SeatId = "seat-0", Name = "Wei", Controller = ControllerType.Llm, Prestige = 50 });
@@ -316,7 +359,10 @@ namespace LuanShi.Engine
             }
             else
             {
-                ParseReplayRecordAction(req, _allowAttack, _allowResearch, diplomacy,
+                ParseReplayRecordAction(req,
+                    _allowAttack || PromptBuilder.IsAttackPromptVersion(req.PromptVersion),
+                    _allowResearch || PromptBuilder.IsResearchPromptVersion(req.PromptVersion),
+                    diplomacy,
                     _allowGarrisonConversion || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion),
                     isLlmController, out parsedCmd, out isEndTurn, out replayedParseOk,
                     out parseError, out actType, out actSummary);
@@ -375,9 +421,20 @@ namespace LuanShi.Engine
                         bool categoryMatch = req.ParseOk == replayedParseOk;
                         bool reasonMatch = true;
                         if (req.ParseOk && replayedParseOk && !string.IsNullOrEmpty(req.ResultError))
-                            reasonMatch = string.Equals(replayedError, req.ResultError, StringComparison.Ordinal);
+                        {
+                            reasonMatch = string.Equals(replayedError, req.ResultError, StringComparison.Ordinal)
+                                || (isLlmController && string.Equals(
+                                    FeedbackPolicy.ForModel(replayedError, parsedCmd, obs, _engine.State.RequireAssaultTroopRatio),
+                                    req.ResultError, StringComparison.Ordinal));
+                        }
 
-                        if (categoryMatch && reasonMatch) _rejectedActionsReplayed++;
+                        if (categoryMatch && reasonMatch)
+                        {
+                            _rejectedActionsReplayed++;
+                            if (req.IsProviderFailure) _providerFailuresReplayed++;
+                            else if (!req.ParseOk) _invalidResponsesReplayed++;
+                            else _engineRejectionsReplayed++;
+                        }
                         else
                         {
                             _rejectionReasonMismatches++; _actionOutcomeMismatches++;
@@ -397,7 +454,11 @@ namespace LuanShi.Engine
                 }
             }
 
-            string resText = isInquiry ? "inquiry" : (isNote ? "note" : (isEndTurn ? "end_turn" : (replayedOk ? "accepted" : "rejected")));
+            string resText = isInquiry ? "inquiry" : (isNote ? "note" : (isEndTurn ? "end_turn"
+                : (replayedOk ? "accepted"
+                    : (req.IsProviderFailure ? "provider failure"
+                        : (req.IsEmptyResponse ? "empty response"
+                            : (!replayedParseOk ? "invalid response" : "rejected"))))));
             string facName = "unknown";
             if (_engine?.State?.Factions != null)
             {
@@ -543,7 +604,9 @@ namespace LuanShi.Engine
                 return TryParseCommandJson(req.CommandJson, out ActionCommand cmd, out _)
                     && string.Equals(cmd.Type, "end_turn", StringComparison.Ordinal);
             // Same feature flags as the replay step's own parse, derived from the bootstrap and record identity.
-            ParseResult p = LlmActionParser.Parse(req.RawModelText, allowAttack, allowResearch,
+            ParseResult p = LlmActionParser.Parse(req.RawModelText,
+                allowAttack || PromptBuilder.IsAttackPromptVersion(req.PromptVersion),
+                allowResearch || PromptBuilder.IsResearchPromptVersion(req.PromptVersion),
                 allowDiplomacy || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion),
                 allowGarrisonConversion || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
             return p.Ok && p.Action != null && p.Action.EndTurn;

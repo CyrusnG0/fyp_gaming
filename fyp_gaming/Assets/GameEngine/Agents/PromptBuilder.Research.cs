@@ -16,14 +16,20 @@ namespace LuanShi.Engine
     public static partial class PromptBuilder
     {
         /// <summary>Distinct identity for the opt-in research orders.</summary>
-        public const string ResearchPromptVersion = "demo-slice-8-research-1";
+        public const string ResearchPromptVersion = "demo-slice-8-research-2";
+        public const string LegacyResearchPromptVersion = "demo-slice-8-research-1";
 
         /// <summary>
         /// Distinct identity for research combined with production deliberation, so a run record can
         /// never confuse the two opt-in bundles.
         /// </summary>
         public const string DeliberationResearchPromptVersion =
+            "demo-slice-8-deliberation-research-2";
+        public const string LegacyDeliberationResearchPromptVersion =
             "demo-slice-8-deliberation-research-1";
+
+        public const string RichResearchPromptVersion = "demo-slice-8-rich-research-2";
+        public const string LegacyRichResearchPromptVersion = "demo-slice-8-rich-research-1";
 
         /// <summary>
         /// Appended to the system prompt when research orders are enabled. Every number comes from
@@ -73,8 +79,7 @@ namespace LuanShi.Engine
                    Number(BalanceConfig.ResearchMilTrainingCapBonus) + " (" + trainingBase + " becomes " +
                    trainingResearched + ").\n" +
                    "  military 2: cavalry can be recruited.\n" +
-                   "  military 3: siege engines can be recruited, and a siege army waives the assault " +
-                   "troop ratio.\n" +
+                   "  military 3: siege engines can be recruited.\n" +
                    "  military 4: your armies fight at +" +
                    Percent(BalanceConfig.ResearchMilCombatBonus) + " strength.\n" +
                    "  military 5: DEFERRED (no generals).\n" +
@@ -194,7 +199,58 @@ namespace LuanShi.Engine
         {
             if (!research) return RichVersionFor(planning, inquiry, persona, attack, deliberation, rich);
             if (!rich) return VersionFor(planning, inquiry, persona, attack, deliberation, true);
-            return "demo-slice-8-rich-research-1";
+            return RichResearchPromptVersion;
+        }
+
+        private static string StripKnownFeatureSuffixes(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return version;
+            if (IsGarrisonConversionPromptVersion(version))
+                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
+                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            const string dipSuffix = "+diplomacy";
+            if (version.EndsWith(dipSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - dipSuffix.Length);
+            const string spatialSuffix = "+spatial";
+            if (version.EndsWith(spatialSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - spatialSuffix.Length);
+            return version;
+        }
+
+        public static bool IsAttackPromptVersion(string version)
+        {
+            string baseVer = StripKnownFeatureSuffixes(version);
+            return string.Equals(baseVer, AttackPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyAttackPromptVersion, StringComparison.Ordinal);
+        }
+
+        public static bool IsResearchPromptVersion(string version)
+        {
+            string baseVer = StripKnownFeatureSuffixes(version);
+            return string.Equals(baseVer, ResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, DeliberationResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyDeliberationResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, RichResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyRichResearchPromptVersion, StringComparison.Ordinal);
+        }
+
+        public static bool HasLegacyAssaultRatioPromptVersion(string version)
+        {
+            string baseVer = StripKnownFeatureSuffixes(version);
+            return string.Equals(baseVer, LegacyAttackPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyDeliberationResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, LegacyRichResearchPromptVersion, StringComparison.Ordinal);
+        }
+
+        public static bool HasNoAssaultRatioPromptVersion(string version)
+        {
+            string baseVer = StripKnownFeatureSuffixes(version);
+            return string.Equals(baseVer, AttackPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, ResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, DeliberationResearchPromptVersion, StringComparison.Ordinal)
+                || string.Equals(baseVer, RichResearchPromptVersion, StringComparison.Ordinal);
         }
 
         public static string CombinedSystemPromptFor(bool planning, bool inquiry, LlmPersona persona,

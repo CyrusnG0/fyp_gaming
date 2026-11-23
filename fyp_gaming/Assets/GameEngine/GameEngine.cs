@@ -1486,13 +1486,14 @@ namespace LuanShi.Engine
             if (city.OwnerSeatId == fac.SeatId) return ValidationResult.Fail("that is your own city");
 
             string attackerType = UnitTypes.Normalize(army.UnitType);
-            bool siegeWaiver = UnitTypes.WaivesAssaultRatio(attackerType);
+            bool ratioEnforced = State.RequireAssaultTroopRatio;
+            bool siegeWaiver = ratioEnforced && UnitTypes.WaivesAssaultRatio(attackerType);
             var defendingArmy = State.ArmyAt(city.X, city.Z);
             int defendingArmyTroops = defendingArmy != null && defendingArmy.OwnerSeatId == city.OwnerSeatId
                 ? defendingArmy.Troops : 0;
             int effectiveGarrison = city.Garrison + defendingArmyTroops;
-            int requiredTroops = BalanceConfig.AssaultTroopRatio * effectiveGarrison;
-            if (!siegeWaiver && army.Troops < requiredTroops)
+            int requiredTroops = ratioEnforced ? BalanceConfig.AssaultTroopRatio * effectiveGarrison : 0;
+            if (ratioEnforced && !siegeWaiver && army.Troops < requiredTroops)
                 return ValidationResult.Fail(
                     $"assault needs {BalanceConfig.AssaultTroopRatio}:1 troops (have {army.Troops}, garrison {effectiveGarrison}) or a siege army");
 
@@ -1530,9 +1531,9 @@ namespace LuanShi.Engine
                 $"* (1 + defense({city.Defense}) * defense_bonus({BalanceConfig.CombatDefenseBonusPerLevel})) * research_mult({garrisonResearch}) * type_mult({garrisonTypeMult}) = {previewGarrisonStrength}; " +
                 $"army_strength = troops({army.Troops}) * (1 + training({training}) * training_bonus({BalanceConfig.CombatTrainingBonusPerLevel})) " +
                 $"* (morale_floor({BalanceConfig.CombatMoraleFloor}) + morale({army.Morale}) / morale_scale({BalanceConfig.CombatMoraleScale})) * research_mult({attackerResearch}) * type_mult({attackerTypeMult}) = {previewAttackerStrength}; " +
-                $"attacker_type={attackerType}, garrison_type={garrisonType}, siege_waiver={siegeWaiver}, " +
+                $"attacker_type={attackerType}, garrison_type={garrisonType}, ratio_enforced={ratioEnforced}, siege_waiver={siegeWaiver}, " +
                 $"siege_vs_city={siegeVsCity}, attacker_type_mult={Fmt(attackerTypeMult)}, " +
-                $"assault_ratio={BalanceConfig.AssaultTroopRatio}:1, required_troops={requiredTroops}, " +
+                $"assault_ratio={(ratioEnforced ? BalanceConfig.AssaultTroopRatio + ":1" : "none")}, required_troops={requiredTroops}, " +
                 $"available_troops={army.Troops}");
             string legitimacy = ApplyAttackReputation(fac, city.OwnerSeatId, cmd);
 

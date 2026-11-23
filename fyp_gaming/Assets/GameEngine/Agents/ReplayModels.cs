@@ -19,6 +19,13 @@ namespace LuanShi.Engine
         Unestablished
     }
 
+    public enum AssaultTroopRatioRuleProvenance
+    {
+        Established,
+        HistoricalOldRulePreserved,
+        Unestablished
+    }
+
     public sealed class ReplayTurnSummary
     {
         public int Season;
@@ -82,7 +89,12 @@ namespace LuanShi.Engine
         public long InputTokens;
         public long OutputTokens;
         public int TotalInvalid;
+        public bool? AttackEnabled;
+        public bool? ResearchEnabled;
+        public bool? GarrisonConversionEnabled;
+        public bool? DiplomacyEnabled;
         public bool? VisibleMarchRoutesEnforced;
+        public bool? AssaultTroopRatioEnforced;
         public string SpatialContextLevel;
         public IReadOnlyList<ReplaySeasonScoreboard> Scoreboards;
         public IReadOnlyList<ReplayTurnSummary> Turns;
@@ -137,6 +149,12 @@ namespace LuanShi.Engine
         public string PromptExcerpt;
         public string ResponseContentText;
         public string RecordedExplanation;
+
+        public bool IsProviderFailure
+            => !string.IsNullOrEmpty(ErrorKind) && !string.Equals(ErrorKind, "None", StringComparison.Ordinal);
+
+        public bool IsEmptyResponse
+            => !IsProviderFailure && !ParseOk && string.IsNullOrWhiteSpace(RawModelText);
     }
 
     public sealed class ReplayFeedEvent
@@ -169,6 +187,8 @@ namespace LuanShi.Engine
         public string BootstrapPath;
         public bool? BootstrapVisibleMarchRoutes;
         public bool? BootstrapStateRequireVisibleMarchRoutes;
+        public bool? BootstrapAssaultTroopRatio;
+        public bool? BootstrapStateRequireAssaultTroopRatio;
     }
 
     public sealed class ReplayPositionCheck
@@ -206,6 +226,12 @@ namespace LuanShi.Engine
         public int AcceptedActionsReplayed;
         public int ExpectedRejectedActions;
         public int RejectedActionsReplayed;
+        public int ExpectedEngineRejections;
+        public int EngineRejectionsReplayed;
+        public int ExpectedInvalidResponses;
+        public int InvalidResponsesReplayed;
+        public int ExpectedProviderFailures;
+        public int ProviderFailuresReplayed;
         public int UnexpectedRejections;
         public int UnexpectedAcceptances;
         public int RejectionReasonMismatches;
@@ -253,6 +279,10 @@ namespace LuanShi.Engine
         public VisibleMarchRuleProvenance VisibleMarchRuleProvenance;
         public bool VisibleMarchRuleEstablished = true;
         public string VisibleMarchRuleNote;
+        public AssaultTroopRatioRuleProvenance AssaultTroopRatioProvenance;
+        public bool AssaultTroopRatioRuleEstablished = true;
+        public bool? EstablishedAssaultTroopRatio;
+        public string AssaultTroopRatioRuleNote;
         public bool RawExactMatch;
         public bool ExactVerificationPassed => RawExactMatch;
 
@@ -274,6 +304,7 @@ namespace LuanShi.Engine
             sb.AppendLine($"Seasons Verified: {SeasonsVerified} | Total Requests: {TotalRequests}");
             sb.AppendLine($"Observation Hashes (raw SHA-256): {ObservationHashesMatched}/{TotalRequests} matched ({ObservationHashMismatches} mismatches)");
             sb.AppendLine($"Accepted Actions:   {AcceptedActionsReplayed}/{ExpectedAcceptedActions} matched (replayed rejected: {RejectedActionsReplayed}, unexpected rejections: {UnexpectedRejections}, unexpected acceptances: {UnexpectedAcceptances}, reason mismatches: {RejectionReasonMismatches})");
+            sb.AppendLine($"Non-Accepted Breakdown: engine rejected {EngineRejectionsReplayed}/{ExpectedEngineRejections} | invalid/empty {InvalidResponsesReplayed}/{ExpectedInvalidResponses} | provider failure {ProviderFailuresReplayed}/{ExpectedProviderFailures}");
             sb.AppendLine($"Voluntary EndTurns: {VoluntaryEndTurnsReplayed}/{ExpectedVoluntaryEndTurns} matched");
             sb.AppendLine($"Action Outcome Mismatches: {ActionOutcomeMismatches}");
             sb.AppendLine();
@@ -331,6 +362,8 @@ namespace LuanShi.Engine
             }
             if (!string.IsNullOrEmpty(VisibleMarchRuleNote))
                 sb.AppendLine("  * Visible March Rule: " + VisibleMarchRuleNote);
+            if (!string.IsNullOrEmpty(AssaultTroopRatioRuleNote))
+                sb.AppendLine("  * Assault Troop Ratio Rule: " + AssaultTroopRatioRuleNote);
             sb.AppendLine();
             sb.AppendLine($"OVERALL RAW VERIFICATION: {(RawExactMatch ? "PASS" : "FAIL (RAW MISMATCHES REPORTED HONESTLY)")}");
             sb.AppendLine("================================================");

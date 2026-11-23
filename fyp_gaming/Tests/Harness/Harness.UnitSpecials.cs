@@ -122,7 +122,7 @@ internal static partial class Harness
                   $"infantry takes 0.85x losses ({infRound.AttackerLoss}/{arcRound.AttackerLoss})");
         }
 
-        // ---- 器械 剋 城防 (OQ-29): ×1.3 attacker multiplier in a siege, stacking with the 3:1 waiver
+        // ---- 器械 剋 城防 (OQ-29): ×1.3 attacker multiplier in a siege
         {
             var inf = P15Siege(512, UnitTypes.Infantry);
             var siege = P15Siege(512, UnitTypes.Siege);

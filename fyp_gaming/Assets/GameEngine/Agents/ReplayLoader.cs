@@ -154,6 +154,8 @@ namespace LuanShi.Engine
                 out ReplayBootstrapData bootstrap,
                 out bool? bootstrapVisible,
                 out bool? bootstrapStateVisible,
+                out bool? bootstrapAssaultRatio,
+                out bool? bootstrapStateAssaultRatio,
                 out string setupSource,
                 out string mapSource);
 
@@ -192,6 +194,8 @@ namespace LuanShi.Engine
                 BootstrapPath = bootstrapPath,
                 BootstrapVisibleMarchRoutes = bootstrapVisible,
                 BootstrapStateRequireVisibleMarchRoutes = bootstrapStateVisible,
+                BootstrapAssaultTroopRatio = bootstrapAssaultRatio,
+                BootstrapStateRequireAssaultTroopRatio = bootstrapStateAssaultRatio,
             };
         }
 
@@ -279,6 +283,11 @@ namespace LuanShi.Engine
                 EndUtc = GetString(obj, "end_utc"), TotalRequests = GetInt(obj, "requests"),
                 InputTokens = GetLong(obj, "input_tokens"), OutputTokens = GetLong(obj, "output_tokens"),
                 VisibleMarchRoutesEnforced = GetNullableBool(obj, "visible_march_routes_enforced"),
+                AttackEnabled = GetNullableBool(obj, "attack_enabled"),
+                ResearchEnabled = GetNullableBool(obj, "research_enabled"),
+                GarrisonConversionEnabled = GetNullableBool(obj, "garrison_conversion_enabled"),
+                DiplomacyEnabled = GetNullableBool(obj, "diplomacy_enabled"),
+                AssaultTroopRatioEnforced = GetNullableBool(obj, "assault_troop_ratio_enforced"),
                 SpatialContextLevel = GetString(obj, "spatial_context_level", null),
             };
             bool spatialActive = string.Equals(data.SpatialContextLevel, "standard", StringComparison.OrdinalIgnoreCase)

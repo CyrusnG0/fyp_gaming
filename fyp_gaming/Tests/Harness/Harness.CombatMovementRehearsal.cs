@@ -19,7 +19,7 @@ internal static partial class Harness
         RehearseFieldAttack();
         RehearseCityAssaultCapture();
         RehearseFoggedMarchRejection();
-        RehearseUnderStrengthAssaultRejection();
+        RehearseWeakAssaultAccepted();
     }
 
     private static void CmrCheck(bool ok, string name) => Check(ok, "[CMR] " + name);
@@ -336,14 +336,14 @@ internal static partial class Harness
             "rehearsal 4a: post-rejection seat-0 observation still does not see (20,8)");
     }
 
-    private static void RehearseUnderStrengthAssaultRejection()
+    private static void RehearseWeakAssaultAccepted()
     {
-        // Staged state: army-wei-2 at (19,8) with 400 troops (< 3 * 500 = 1500 needed for Chengdu at (20,8)).
+        // Staged state: army-wei-2 at (19,8) with 400 troops against Chengdu's 500-garrison capital.
+        // The old 3:1 gate would have refused this; now it proceeds through normal siege combat.
         GameEngine engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31015);
         ArmyState weiMain = engine.State.FindArmy("army-wei-2");
         weiMain.X = 19; weiMain.Z = 8;
         weiMain.Troops = 400;
-        CityState chengdu = engine.State.FindCity("city-shu");
 
         var fake = new FakeLlmTransport();
         var config = CmrConfig(SpatialDetailLevel.Standard, attack: true);
@@ -351,7 +351,7 @@ internal static partial class Harness
         var runner = new LlmTurnRunner(fake, config, null);
         var session = new SpectatorSession(engine, runner, 1, 31015);
 
-        string weakAssault = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-2\",\"param_a\":20,\"param_b\":8,\"summary\":\"REHEARSAL understrength assault\"}";
+        string weakAssault = "{\"type\":\"attack_city\",\"target_id\":\"army-wei-2\",\"param_a\":20,\"param_b\":8,\"summary\":\"REHEARSAL weak assault\"}";
         string endReply = "{\"type\":\"end_turn\",\"summary\":\"REHEARSAL end\"}";
         fake.EnqueueSuccess(weakAssault);
         fake.EnqueueSuccess(endReply);
@@ -360,11 +360,13 @@ internal static partial class Harness
         session.Start();
         for (int i = 0; i < 64 && session.State == SpectatorState.Running; i++) session.Tick();
 
-        CmrCheck(session.State == SpectatorState.Completed && session.TotalRejected == 1 && session.TotalAccepted == 0,
-            "rehearsal 4b (under-strength assault): rejected safely and turn completes (rejected=" + session.TotalRejected + ")");
-        CmrCheck(chengdu.OwnerSeatId == "seat-1" && weiMain.Troops == 400,
-            "rehearsal 4b: canonical state unchanged (Chengdu owner=seat-1, army-wei-2 troops=400)");
-        CmrCheck(fake.Requests[1].User.Contains("attack_city army-wei-2 -> rejected: " + FeedbackPolicy.AssaultRatioTooLow),
-            "rehearsal 4b: useful AssaultRatioTooLow feedback reached subsequent prompt");
+        var siegeEvent = Find(engine.Log, "battle_siege");
+        CmrCheck(session.State == SpectatorState.Completed && session.TotalRejected == 0
+                 && session.TotalAccepted == 1 && siegeEvent != null,
+            "rehearsal 4b (weak assault): accepted and resolved without a ratio gate (accepted="
+            + session.TotalAccepted + ", rejected=" + session.TotalRejected + ")");
+        CmrCheck(fake.Requests[1].User.Contains("attack_city army-wei-2 -> ok")
+                 && !fake.Requests[1].User.Contains("assault ratio"),
+            "rehearsal 4b: accepted feedback reached subsequent prompt with no ratio category");
     }
 }

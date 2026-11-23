@@ -576,6 +576,7 @@ namespace LuanShi.Engine
         public string GameId = "g-001";
         public string ScenarioId;                // opt-in scenario key; null for the built-in demo roster
         public bool RequireVisibleMarchRoutes;   // shared visible-only march pathing rule across all controllers
+        public bool RequireAssaultTroopRatio;    // historical replay rule only (false = 3:1 city assault ratio removed)
         public int Season;                       // 1-based once the first season begins
         public string Phase = "setup";           // setup | player_orders | resolution
         public string WinnerSeatId;              // 一統天下: set when one seat owns every city (design §13)

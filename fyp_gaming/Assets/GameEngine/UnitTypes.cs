@@ -67,7 +67,7 @@ namespace LuanShi.Engine
             }
         }
 
-        /// <summary>Design §4.3: an attacking 攻城器械 army waives the 3:1 assault requirement.</summary>
+        /// <summary>Legacy/historical replay helper: under old 3:1 rule, an attacking 攻城器械 army waived it.</summary>
         public static bool WaivesAssaultRatio(string type) => Normalize(type) == Siege;
 
         /// <summary>Design §5.3/§5.4: an 弓兵 garrison defends a city at +25%.</summary>

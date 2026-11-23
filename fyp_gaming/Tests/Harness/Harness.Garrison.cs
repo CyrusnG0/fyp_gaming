@@ -207,11 +207,11 @@ internal static partial class Harness
             Check(e.SeesEvent("seat-c", action), "and a third seat still sees them");
         }
 
-        // ---- the scripted baseline judges a siege on the engine's effective garrison
+        // ---- the scripted baseline judges a siege on the effective garrison (defender merges)
         {
             var defended = SiegeScenario(defendingArmy: true);
             Check(!PlanContains(defended, "seat-a", ActionType.AttackCity),
-                  "the baseline does not plan an assault the engine would refuse (defending army counted)");
+                  "the baseline does not plan an assault when a defending army removes its troop advantage");
             var bare = SiegeScenario(defendingArmy: false);
             Check(PlanContains(bare, "seat-a", ActionType.AttackCity),
                   "and it still plans the assault when the garrison really is small");
