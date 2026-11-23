@@ -124,6 +124,7 @@ namespace LuanShi.Engine
                 system += PromptBuilder.ActionReferenceAddendum(session.Balance, attack, research, diplomacy, conversion, historicalRule);
                 version += PromptBuilder.ActionReferenceVersionSuffix;
             }
+            if (attack && !historicalRule) version += PromptBuilder.AssaultTextVersionSuffix;
             if (conversion) { version += PromptBuilder.GarrisonConversionVersionSuffix; system += PromptBuilder.GarrisonConversionAddendum; }
             Field(sb, "prompt_version",
                 version,

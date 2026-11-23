@@ -422,12 +422,12 @@ internal static partial class Harness
         SpectatorSummaryIdentity("attack off, personas off", false, false,
             PromptBuilder.PromptVersion, PromptBuilder.SchemaHash());
         SpectatorSummaryIdentity("attack on, personas off", true, false,
-            PromptBuilder.AttackPromptVersion,
+            PromptBuilder.AttackPromptVersion + PromptBuilder.AssaultTextVersionSuffix,
             PromptBuilder.SchemaHashFor(true, false, null, true));
         SpectatorSummaryIdentity("attack off, personas on", false, true,
             PromptBuilder.PersonaPromptVersion, "per-request");
         SpectatorSummaryIdentity("attack on, personas on", true, true,
-            PromptBuilder.AttackPromptVersion, "per-request");
+            PromptBuilder.AttackPromptVersion + PromptBuilder.AssaultTextVersionSuffix, "per-request");
     }
 
     /// <summary>

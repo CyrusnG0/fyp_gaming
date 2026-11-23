@@ -366,6 +366,10 @@ namespace LuanShi.Engine
                 promptVersion += PromptBuilder.ActionReferenceVersionSuffix;
                 schemaHash = PromptBuilder.ActionReferenceHash(system);
             }
+            // The revised live attack wording carries its own identity; historical mode already
+            // switched to the legacy attack version above.
+            if (planning && attackOn && !assaultRatioRule)
+                promptVersion += PromptBuilder.AssaultTextVersionSuffix;
             if (_config.EnableGarrisonConversion)
             {
                 system += PromptBuilder.GarrisonConversionAddendum;

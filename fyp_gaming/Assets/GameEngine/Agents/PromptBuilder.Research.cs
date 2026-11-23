@@ -205,9 +205,7 @@ namespace LuanShi.Engine
         private static string StripKnownFeatureSuffixes(string version)
         {
             if (string.IsNullOrEmpty(version)) return version;
-            if (IsGarrisonConversionPromptVersion(version))
-                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
-                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            version = StripGarrisonSuffix(version);
             // +actions-1 sits between +diplomacy and the garrison suffix, so it is next to go.
             if (version.EndsWith(ActionReferenceVersionSuffix, StringComparison.Ordinal))
                 version = version.Substring(0, version.Length - ActionReferenceVersionSuffix.Length);

@@ -50,8 +50,17 @@ internal static partial class Harness
         ActAssaultCheck(minimum == 2 && !first.System.Contains("times the defending")
             && !first.System.Contains("assault ratio too low"),
             "both the attack rules and the reference say no minimum ratio (" + minimum + " statements)");
-        ActAssaultCheck(first.User.Contains("Prompt version: demo-slice-6-attack-2" + PromptBuilder.ActionReferenceVersionSuffix + "\n"),
-            "the dispatched identity is the post-removal attack version plus +actions-1");
+        ActAssaultCheck(first.User.Contains("Prompt version: demo-slice-6-attack-2" + PromptBuilder.ActionReferenceVersionSuffix
+                + PromptBuilder.AssaultTextVersionSuffix + "\n"),
+            "the dispatched identity is the post-removal attack version plus +actions-1 and the revised assault wording");
+        string liveVersion = "demo-slice-6-attack-2" + PromptBuilder.ActionReferenceVersionSuffix + PromptBuilder.AssaultTextVersionSuffix;
+        ActAssaultCheck(PromptBuilder.HasNoAssaultRatioPromptVersion(liveVersion) && !PromptBuilder.HasLegacyAssaultRatioPromptVersion(liveVersion)
+            && PromptBuilder.IsAttackPromptVersion(liveVersion + PromptBuilder.GarrisonConversionVersionSuffix)
+            && PromptBuilder.HasNoAssaultRatioPromptVersion(liveVersion + PromptBuilder.GarrisonConversionVersionSuffix)
+            && PromptBuilder.IsActionReferencePromptVersion(liveVersion)
+            && PromptBuilder.HasNoAssaultRatioPromptVersion("demo-slice-6-attack-2" + PromptBuilder.AssaultTextVersionSuffix)
+            && PromptBuilder.HasNoAssaultRatioPromptVersion("demo-slice-6-attack-2"),
+            "the revised-wording suffix resolves as the post-removal rule and earlier attack-2 identities stay valid");
         ActAssaultCheck(liveHost.Commands.Count == 1 && liveHost.Commands[0].Type == ActionType.AttackCity
             && liveRunner.RecentHistory.Any(h => h.Contains("attack_city army-a-1 -> ok")),
             "the engine accepts the below-3:1 assault the model chose");
@@ -90,6 +99,8 @@ internal static partial class Harness
             && PromptBuilder.HasLegacyAssaultRatioPromptVersion("demo-slice-6-attack-1" + PromptBuilder.ActionReferenceVersionSuffix)
             && !PromptBuilder.HasNoAssaultRatioPromptVersion("demo-slice-6-attack-1" + PromptBuilder.ActionReferenceVersionSuffix),
             "historical mode: the dispatched identity is the legacy attack version, which replay reads as the old rule");
+        ActAssaultCheck(!histReq.User.Contains(PromptBuilder.AssaultTextVersionSuffix),
+            "historical mode never carries the revised-wording suffix");
         ActAssaultCheck(oldHost.Commands.Count == 1 && !oldRunner.RecentHistory.Any(h => h.Contains("attack_city army-a-1 -> ok"))
             && old.State.CityAt(1, 2).OwnerSeatId == "seat-b",
             "historical mode: the engine rejects the below-3:1 assault and the city is unchanged");

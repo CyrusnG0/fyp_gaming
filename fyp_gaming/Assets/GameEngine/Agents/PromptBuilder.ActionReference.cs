@@ -23,6 +23,16 @@ namespace LuanShi.Engine
         /// </summary>
         public const string ActionReferenceVersionSuffix = "+actions-1";
 
+        /// <summary>
+        /// Marks the revised live attack wording (an explicit "no minimum troop ratio" statement and the
+        /// morale-only rejection line) under an unchanged base version id, so a run record can tell it
+        /// from earlier attack-2 prompts that said nothing about the ratio. It sits after
+        /// <see cref="ActionReferenceVersionSuffix"/> and before the garrison suffix. Historical-rule
+        /// mode never carries it: it uses the legacy attack identity instead. Old identities without it
+        /// stay valid post-removal identities.
+        /// </summary>
+        public const string AssaultTextVersionSuffix = "+assault-text-1";
+
         public static bool IsActionReferencePromptVersion(string version)
         {
             if (string.IsNullOrEmpty(version)) return false;
@@ -30,10 +40,16 @@ namespace LuanShi.Engine
             return stripped.EndsWith(ActionReferenceVersionSuffix, StringComparison.Ordinal);
         }
 
+        /// <summary>Removes the garrison-conversion suffix, then the assault-text suffix beneath it.</summary>
         private static string StripGarrisonSuffix(string version)
-            => !IsGarrisonConversionPromptVersion(version) ? version
-                : version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
+        {
+            if (IsGarrisonConversionPromptVersion(version))
+                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
                     ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            return !string.IsNullOrEmpty(version) && version.EndsWith(AssaultTextVersionSuffix, StringComparison.Ordinal)
+                ? version.Substring(0, version.Length - AssaultTextVersionSuffix.Length)
+                : version;
+        }
 
         /// <summary>Removes the garrison-conversion suffix, then the action-reference suffix.</summary>
         internal static string StripActionReferenceSuffix(string version)

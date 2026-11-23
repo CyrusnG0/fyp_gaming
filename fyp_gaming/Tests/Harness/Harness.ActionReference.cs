@@ -168,8 +168,9 @@ internal static partial class Harness
         string versionLine = "Prompt version: ";
         int vi = on.User.IndexOf(versionLine, StringComparison.Ordinal);
         string version = vi < 0 ? "" : on.User.Substring(vi + versionLine.Length, on.User.IndexOf('\n', vi) - vi - versionLine.Length);
-        Check(version.EndsWith(PromptBuilder.ActionReferenceVersionSuffix + PromptBuilder.GarrisonConversionVersionSuffix, StringComparison.Ordinal),
-              tag + "the dispatched version records +actions-1 before the garrison suffix (" + version + ")");
+        Check(version.EndsWith(PromptBuilder.ActionReferenceVersionSuffix + PromptBuilder.AssaultTextVersionSuffix
+                  + PromptBuilder.GarrisonConversionVersionSuffix, StringComparison.Ordinal),
+              tag + "the dispatched version records +actions-1 and the live assault wording before the garrison suffix (" + version + ")");
         Check(PromptBuilder.IsDiplomacyPromptVersion(version) && PromptBuilder.IsSpatialPromptVersion(version),
               tag + "the dispatched version still reads as diplomacy and spatial");
         Check(!off.System.Contains("ACTION REFERENCE") && !off.User.Contains(PromptBuilder.ActionReferenceVersionSuffix),

@@ -224,10 +224,19 @@ namespace LuanShi.Engine
                     AssaultTroopRatioRuleProvenance.Unestablished, false,
                     "Historical recording without initial_world.require_assault_troop_ratio: preserving old 3:1 city assault rule, but non-LLM (human) rule provenance is unestablished.");
 
+            if (hasLegacyPrompt)
+                return new AssaultRatioRuleResolution(
+                    true, true,
+                    AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved, true,
+                    "Historical recording without initial_world.require_assault_troop_ratio: its pre-removal prompt version supports the old 3:1 city assault rule, preserved during replay.");
+
+            // No flag, no summary field and no prompt identity that names either rule: nothing supports
+            // either reading. Replay still runs under the old rule (the only rule such a recording could
+            // have predated), but it must not be labelled as established 3:1 nor claim an exact match.
             return new AssaultRatioRuleResolution(
-                true, true,
-                AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved, true,
-                "Historical recording without initial_world.require_assault_troop_ratio: preserving old 3:1 city assault rule during replay.");
+                true, null,
+                AssaultTroopRatioRuleProvenance.Unestablished, false,
+                "Recording carries no evidence of its city assault rule (no bootstrap flag, summary field or attack-rule prompt version); replaying under the old 3:1 rule as a best effort, provenance unestablished.");
         }
 
         public static string DescribeRequestAction(ReplayRequestRecord rec)

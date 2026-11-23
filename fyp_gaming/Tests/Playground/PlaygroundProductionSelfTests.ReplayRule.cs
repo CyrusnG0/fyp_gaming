@@ -358,6 +358,57 @@ namespace LuanShi.Playground
                     "assault-replay-actions-summary: +actions-1 identity does not turn a recorded attack into an invalid request",
                     refSide == null ? "no summary" : $"accepted={refSide.AcceptedActions} invalid={refSide.InvalidRequests}");
 
+                // 10. Known-new with the revised-wording identity: replays as the post-removal rule.
+                string textRefVer = newAtkVer + PromptBuilder.ActionReferenceVersionSuffix + PromptBuilder.AssaultTextVersionSuffix
+                                    + PromptBuilder.GarrisonConversionVersionSuffix;
+                ReplayBundle textBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: textRefVer,
+                    requests: new List<ReplayRequestRecord>
+                    {
+                        new ReplayRequestRecord
+                        {
+                            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+                            ControllerType = ControllerType.Llm, Season = 1, TurnToken = 1, RequestIndex = 1, TotalRequests = 2,
+                            PromptVersion = textRefVer, ParseOk = true, ResultOk = true, ResultRecorded = true,
+                            RawModelText = "{\"type\":\"attack_city\",\"target_id\":\"inf-replay\",\"param_a\":2,\"param_b\":0}",
+                        },
+                        EndTurnRecord(textRefVer, ControllerType.Llm, 2, 2),
+                    });
+                var textReplay = new ReplaySession(textBundle, BuildCorridor(11));
+                SetupReplayAssaultUnits(textReplay.Engine);
+                textReplay.RunToCompletion();
+                log.Check(!textReplay.ReplayedAssaultTroopRatio
+                          && textReplay.AssaultTroopRatioProvenance != AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                          && textReplay.AcceptedActionsReplayed == 1 && textReplay.ActionOutcomeMismatches == 0,
+                    "assault-replay-known-new: the revised-wording identity replays as the post-removal rule",
+                    $"ratio={textReplay.ReplayedAssaultTroopRatio} prov={textReplay.AssaultTroopRatioProvenance} acc={textReplay.AcceptedActionsReplayed}");
+
+                // 11. Genuinely unknown provenance: no bootstrap flag, no summary field and an identity that
+                //     names neither rule must NOT be labelled as an established 3:1 recording.
+                string unknownVer = PromptBuilder.PromptVersion;
+                ReplayBundle unknownBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: unknownVer,
+                    requests: new List<ReplayRequestRecord> { EndTurnRecord(unknownVer, ControllerType.Llm, 1, 1) });
+                var unknownReplay = new ReplaySession(unknownBundle, BuildCorridor(11));
+                unknownReplay.RunToCompletion();
+                log.Check(unknownReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.Unestablished
+                          && !unknownReplay.AssaultTroopRatioRuleEstablished
+                          && unknownReplay.EstablishedAssaultTroopRatio == null
+                          && !unknownReplay.FinalReport.RawExactMatch,
+                    "assault-replay-unknown: a recording with no evidence is unestablished and never claims an exact 3:1 match",
+                    $"prov={unknownReplay.AssaultTroopRatioProvenance} est={unknownReplay.AssaultTroopRatioRuleEstablished} exact={unknownReplay.FinalReport?.RawExactMatch}");
+                // Same bundle plus a legacy prompt identity IS evidence: the old rule is preserved as established.
+                ReplayBundle evidencedBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: oldAtkVer,
+                    requests: new List<ReplayRequestRecord> { EndTurnRecord(oldAtkVer, ControllerType.Llm, 1, 1) });
+                var evidencedReplay = new ReplaySession(evidencedBundle, BuildCorridor(11));
+                log.Check(evidencedReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                          && evidencedReplay.AssaultTroopRatioRuleEstablished && evidencedReplay.EstablishedAssaultTroopRatio == true,
+                    "assault-replay-known-old: a legacy prompt identity is evidence and keeps the old rule established");
+
                 //    - Genuinely unknown provenance (no assault wording, no recorded rule) is not silently assumed.
                 string bareRefVer = PromptBuilder.PromptVersion + PromptBuilder.ActionReferenceVersionSuffix;
                 log.Check(!PromptBuilder.HasLegacyAssaultRatioPromptVersion(bareRefVer)
