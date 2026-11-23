@@ -55,9 +55,7 @@ namespace LuanShi.Engine
         public static bool IsSpatialPromptVersion(string version)
         {
             if (string.IsNullOrEmpty(version)) return false;
-            if (IsGarrisonConversionPromptVersion(version))
-                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
-                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            version = StripActionReferenceSuffix(version);
             const string dipSuffix = "+diplomacy";
             if (version.EndsWith(dipSuffix, StringComparison.Ordinal))
                 version = version.Substring(0, version.Length - dipSuffix.Length);

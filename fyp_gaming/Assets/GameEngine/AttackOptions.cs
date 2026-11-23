@@ -62,6 +62,7 @@ namespace LuanShi.Engine
         public IReadOnlyList<ArmyAttackPlan> Armies;   // own armies only, ordered by army id
         public int TotalAvailable;                     // all legal candidates across every army, before the cap
         public bool Truncated;                         // true when the seat-wide cap dropped legal candidates
+        public bool AssaultRatioEnforced;              // the engine rule RequireAssaultTroopRatio for this match (historical mode only)
 
         /// <summary>Total advertised options across all armies.</summary>
         public int OptionCount
@@ -190,6 +191,7 @@ namespace LuanShi.Engine
                 Armies = new List<ArmyAttackPlan>(),
             };
             if (engine == null || engine.State == null) return view;
+            view.AssaultRatioEnforced = engine.State.RequireAssaultTroopRatio;
 
             var fac = engine.State.FindFaction(seatId);
             if (fac == null) return view;   // unknown/absent seat => empty view with SeatId null

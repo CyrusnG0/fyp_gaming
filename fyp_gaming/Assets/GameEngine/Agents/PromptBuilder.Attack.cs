@@ -22,14 +22,23 @@ namespace LuanShi.Engine
         /// <see cref="BalanceConfig"/>, so the text cannot drift from the validator. It states no
         /// odds: combat is resolved by the engine only.
         /// </summary>
-        public static string AttackAddendum()
+        public static string AttackAddendum() => AttackAddendum(false);
+
+        /// <summary>
+        /// As <see cref="AttackAddendum()"/>. <paramref name="assaultRatioEnforced"/> is the rule the
+        /// engine actually applies to this match (<see cref="GameState.RequireAssaultTroopRatio"/>, carried
+        /// on <see cref="AttackView.AssaultRatioEnforced"/>); it is true only for an explicit historical
+        /// rule mode. The retained <see cref="BalanceConfig.AssaultTroopRatio"/> constant supplies the
+        /// multiple in that mode only and never decides whether the rule applies.
+        /// </summary>
+        public static string AttackAddendum(bool assaultRatioEnforced)
         {
             string field = BalanceConfig.CommandPointCost(ActionType.AttackArmy).ToString(CultureInfo.InvariantCulture);
             string city = BalanceConfig.CommandPointCost(ActionType.AttackCity).ToString(CultureInfo.InvariantCulture);
             string archer = BalanceConfig.ArcherAttackRange.ToString(CultureInfo.InvariantCulture);
             return "\n\nATTACK AND CAPTURE (opt-in; the engine is authoritative):\n" +
                    "- attack_army starts a field battle. target_id is your own army id; param_a and param_b are the x and z of an enemy army listed in CANDIDATE OPTIONS. It costs " + field + " command point(s). The target must be adjacent to the attacking army (archers reach " + archer + " hexes).\n" +
-                   "- attack_city assaults an adjacent enemy city, resolved within the same season. target_id is your own army id; param_a and param_b are the x and z of a city listed in CANDIDATE OPTIONS. It costs " + city + " command points.\n" +
+                   "- attack_city assaults an adjacent enemy city, resolved within the same season. target_id is your own army id; param_a and param_b are the x and z of a city listed in CANDIDATE OPTIONS. It costs " + city + " command points and " + AssaultRequirementText(assaultRatioEnforced) + ".\n" +
                    "- Neutral cities and unowned watch towers are captured by march, not by attack_city. An enemy city cannot be entered by march.\n" +
                    "- Only attack a target that appears as an attack_army or attack_city option, with its listed coordinates. Do not invent a target.\n" +
                    "- The engine decides every battle. Results are not guaranteed: your army can lose troops and morale, be routed or be destroyed, and a routed army cannot attack. Compare troop numbers before attacking.\n" +

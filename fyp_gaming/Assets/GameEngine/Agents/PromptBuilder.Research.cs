@@ -208,6 +208,9 @@ namespace LuanShi.Engine
             if (IsGarrisonConversionPromptVersion(version))
                 version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
                     ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            // +actions-1 sits between +diplomacy and the garrison suffix, so it is next to go.
+            if (version.EndsWith(ActionReferenceVersionSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - ActionReferenceVersionSuffix.Length);
             const string dipSuffix = "+diplomacy";
             if (version.EndsWith(dipSuffix, StringComparison.Ordinal))
                 version = version.Substring(0, version.Length - dipSuffix.Length);

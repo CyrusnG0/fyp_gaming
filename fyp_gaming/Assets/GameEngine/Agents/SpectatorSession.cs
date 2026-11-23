@@ -126,6 +126,9 @@ namespace LuanShi.Engine
         public int Seed => _seed;
         public string ScenarioId => _engine.State.ScenarioId;
         public BalanceProfile Balance => _engine.Balance;
+
+        /// <summary>The engine's own city-assault rule for this match (true only in historical-rule mode).</summary>
+        public bool AssaultRatioEnforced => _engine.State.RequireAssaultTroopRatio;
         public int CurrentSeason => _currentSeason;
         public int SeasonsPlanned => _seasonsPlanned;
         public int SeasonsPlayed => _seasonsPlayed;

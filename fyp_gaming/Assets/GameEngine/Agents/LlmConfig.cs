@@ -46,6 +46,13 @@ namespace LuanShi.Engine
         public bool EnableGarrisonConversion;
 
         /// <summary>
+        /// Opt-in action reference, default OFF: appends rules, costs and consequences for the orders
+        /// this match enables (see <see cref="PromptBuilder.ActionReferenceAddendum"/>). Planning
+        /// hosts only. When false the prompt text, version and hash are unchanged.
+        /// </summary>
+        public bool EnableActionReference;
+
+        /// <summary>
         /// Opt-in diplomacy orders, default OFF. When true the prompt appends the first-slice rules
         /// (send_message, propose_treaty, respond_treaty accept/reject), the seat-safe catalogue
         /// advertises those candidates from the acting seat's own observation, and the parser accepts
@@ -244,6 +251,7 @@ namespace LuanShi.Engine
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
             if (EnableGarrisonConversion) sb.Append("; garrison_conversion=true");
+            if (EnableActionReference) sb.Append("; action_reference=true");
             if (EnableDiplomacy) sb.Append("; diplomacy=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
@@ -303,6 +311,8 @@ namespace LuanShi.Engine
                         EnableResearch = Bool(field.Value, EnableResearch); break;
                     case "enable_garrison_conversion":
                         EnableGarrisonConversion = Bool(field.Value, EnableGarrisonConversion); break;
+                    case "enable_action_reference":
+                        EnableActionReference = Bool(field.Value, EnableActionReference); break;
                     case "enable_diplomacy":
                         EnableDiplomacy = Bool(field.Value, EnableDiplomacy); break;
                     case "spatial_level":

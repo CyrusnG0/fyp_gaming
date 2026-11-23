@@ -296,6 +296,73 @@ namespace LuanShi.Playground
                 catch (InvalidOperationException ex) { caughtRatioDivergence = ex.Message.Contains("diverges"); }
                 log.Check(caughtRatioDivergence,
                     "assault-replay-divergence: rule/prompt mismatch fails closed");
+
+                // 9. Action-reference identities (+actions-1, optionally before +garrison-conversion-2) must
+                //    resolve the same assault rule, features and season summary as the bare version.
+                string refTail = PromptBuilder.ActionReferenceVersionSuffix + PromptBuilder.GarrisonConversionVersionSuffix;
+                string oldRefVer = oldAtkVer + refTail;
+                ReplayBundle histRefBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: oldRefVer,
+                    requests: new List<ReplayRequestRecord>
+                    {
+                        new ReplayRequestRecord
+                        {
+                            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+                            ControllerType = ControllerType.Llm, Season = 1, TurnToken = 1, RequestIndex = 1, TotalRequests = 2,
+                            PromptVersion = oldRefVer, ParseOk = true, ResultOk = false, ResultRecorded = true,
+                            ResultError = FeedbackPolicy.AssaultRatioTooLow,
+                            RawModelText = "{\"type\":\"attack_city\",\"target_id\":\"inf-replay\",\"param_a\":2,\"param_b\":0}",
+                        },
+                        EndTurnRecord(oldRefVer, ControllerType.Llm, 2, 2),
+                    });
+                var histRefReplay = new ReplaySession(histRefBundle, BuildCorridor(11));
+                SetupReplayAssaultUnits(histRefReplay.Engine);
+                histRefReplay.RunToCompletion();
+                log.Check(histRefReplay.ReplayedAssaultTroopRatio
+                          && histRefReplay.AssaultTroopRatioProvenance == AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                          && histRefReplay.EngineRejectionsReplayed == 1
+                          && histRefReplay.ActionOutcomeMismatches == 0,
+                    "assault-replay-actions-historical: a legacy identity with +actions-1 still replays the 3:1 rejection",
+                    $"ratio={histRefReplay.ReplayedAssaultTroopRatio} prov={histRefReplay.AssaultTroopRatioProvenance} rej={histRefReplay.EngineRejectionsReplayed} mis={histRefReplay.ActionOutcomeMismatches}");
+
+                string newRefVer = newAtkVer + refTail;
+                ReplayBundle newRefBundle = BuildRuleReplayBundle(
+                    visibleMarchRoutesEnforced: null, bootstrapVisibleMarchRoutes: null, bootstrapStateRequireVisible: null,
+                    spatialLevel: null, promptVersion: newRefVer,
+                    requests: new List<ReplayRequestRecord>
+                    {
+                        new ReplayRequestRecord
+                        {
+                            RunId = ReplayLoader.VerifiedDemoRunId, Seed = 12345, SeatId = "seat-0",
+                            ControllerType = ControllerType.Llm, Season = 1, TurnToken = 1, RequestIndex = 1, TotalRequests = 2,
+                            PromptVersion = newRefVer, ParseOk = true, ResultOk = true, ResultRecorded = true,
+                            RawModelText = "{\"type\":\"attack_city\",\"target_id\":\"inf-replay\",\"param_a\":2,\"param_b\":0}",
+                        },
+                        EndTurnRecord(newRefVer, ControllerType.Llm, 2, 2),
+                    });
+                var newRefReplay = new ReplaySession(newRefBundle, BuildCorridor(11));
+                SetupReplayAssaultUnits(newRefReplay.Engine);
+                newRefReplay.RunToCompletion();
+                log.Check(!newRefReplay.ReplayedAssaultTroopRatio
+                          && newRefReplay.AssaultTroopRatioProvenance != AssaultTroopRatioRuleProvenance.HistoricalOldRulePreserved
+                          && newRefReplay.AcceptedActionsReplayed == 1
+                          && newRefReplay.ActionOutcomeMismatches == 0,
+                    "assault-replay-actions-new: a post-removal identity with +actions-1 replays the below-3:1 assault as accepted",
+                    $"ratio={newRefReplay.ReplayedAssaultTroopRatio} prov={newRefReplay.AssaultTroopRatioProvenance} acc={newRefReplay.AcceptedActionsReplayed} mis={newRefReplay.ActionOutcomeMismatches}");
+
+                // Season summary: the attack order is parsed as an attack (not counted invalid) purely from the identity.
+                var refSummary = ReplaySeasonSummaryBuilder.Build(newRefBundle);
+                ReplaySideSeasonSummary refSide = refSummary.Count > 0 ? (refSummary[0].Wei ?? refSummary[0].Shu) : null;
+                log.Check(refSide != null && refSide.InvalidRequests == 0 && refSide.AcceptedActions == 1,
+                    "assault-replay-actions-summary: +actions-1 identity does not turn a recorded attack into an invalid request",
+                    refSide == null ? "no summary" : $"accepted={refSide.AcceptedActions} invalid={refSide.InvalidRequests}");
+
+                //    - Genuinely unknown provenance (no assault wording, no recorded rule) is not silently assumed.
+                string bareRefVer = PromptBuilder.PromptVersion + PromptBuilder.ActionReferenceVersionSuffix;
+                log.Check(!PromptBuilder.HasLegacyAssaultRatioPromptVersion(bareRefVer)
+                          && !PromptBuilder.HasNoAssaultRatioPromptVersion(bareRefVer),
+                    "assault-replay-actions-unknown: an identity that names no assault rule claims neither rule");
             }
             finally
             {

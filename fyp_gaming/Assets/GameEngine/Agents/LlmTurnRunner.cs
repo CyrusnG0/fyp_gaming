@@ -344,6 +344,28 @@ namespace LuanShi.Engine
             string schemaHash = PromptBuilder.CombinedSchemaHashFor(planning, inquiry, persona, attackOn,
                 deliberation, rich, research, spatialOn, diplomacy);
             List<ActionOption> options = ActionCatalogue.Build(observation, attacks, research, diplomacy);
+            // Opt-in action reference: rules and costs for exactly the orders this config enables,
+            // read from the match's own balance profile. It goes before the garrison-conversion
+            // addendum and suffix, which stay last in the system text and the version.
+            // The attack rule text follows the engine's own rule for this match (carried on the attack
+            // view), never the retained historical constant. Historical-rule mode swaps the wording and
+            // the version to the legacy identity; if that cannot be done exactly the turn fails closed.
+            bool assaultRatioRule = attackOn && attacks != null && attacks.AssaultRatioEnforced;
+            if (assaultRatioRule)
+            {
+                if (!PromptBuilder.TryApplyHistoricalAssaultRule(system, promptVersion,
+                        out system, out promptVersion))
+                { FinishFailed("assault rule prompt unavailable", EndReason.HostError); return; }
+                schemaHash = PromptBuilder.ActionReferenceHash(system);
+            }
+            bool actionReference = planning && _config.EnableActionReference;
+            if (actionReference)
+            {
+                system += PromptBuilder.ActionReferenceAddendum(observation?.Balance, attackOn, research,
+                    diplomacy, _config.EnableGarrisonConversion, assaultRatioRule);
+                promptVersion += PromptBuilder.ActionReferenceVersionSuffix;
+                schemaHash = PromptBuilder.ActionReferenceHash(system);
+            }
             if (_config.EnableGarrisonConversion)
             {
                 system += PromptBuilder.GarrisonConversionAddendum;
@@ -376,7 +398,7 @@ namespace LuanShi.Engine
             else
             {
                 SpatialTruncationReport spatialReport = null;
-                user = _config.EnableGarrisonConversion
+                user = _config.EnableGarrisonConversion || actionReference
                     ? PromptBuilder.UserPromptWithFinalBudget(observation, options, _history,
                         requestsLeft, actionsLeft, movement, spatialOn ? movement.SpatialContext : null,
                         spatialOn ? spatialOpts : null, promptLimit, promptVersion, system.Length,
@@ -405,9 +427,9 @@ namespace LuanShi.Engine
             // fails closed on the size check below. The version line is then aligned with the system
             // prompt and the run record, because the shared builders carry no diplomacy flag.
             if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
-            if (diplomacy || _config.EnableGarrisonConversion)
+            if (diplomacy || _config.EnableGarrisonConversion || actionReference)
                 user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
-            if (_config.EnableGarrisonConversion && LastSpatialTruncation != null)
+            if ((_config.EnableGarrisonConversion || actionReference) && LastSpatialTruncation != null)
             {
                 LastSpatialTruncation.SystemChars = system.Length;
                 LastSpatialTruncation.UserChars = user.Length;

@@ -78,11 +78,13 @@ namespace LuanShi.Engine
             sb.Append(",\"research_enabled\":").Append(config != null && config.EnableResearch ? "true" : "false");
             if (config != null && config.EnableGarrisonConversion)
                 sb.Append(",\"garrison_conversion_enabled\":true");
+            if (config != null && config.EnableActionReference)
+                sb.Append(",\"action_reference_enabled\":true");
             sb.Append(",\"diplomacy_enabled\":")
               .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
               .Append(config != null && config.EffectiveVisibleMarchRoutes ? "true" : "false");
-            sb.Append(",\"assault_troop_ratio_enforced\":false");
+            sb.Append(",\"assault_troop_ratio_enforced\":").Append(session.AssaultRatioEnforced ? "true" : "false");
             sb.Append(",\"replay_bootstrap_path\":")
               .Append(MiniJson.Str("runs/" + SafeName(runId) + "-bootstrap.json"));
             Field(sb, "spatial_context_level",
@@ -111,6 +113,17 @@ namespace LuanShi.Engine
             LlmPersona versionPersona = personas ? new LlmPersona("summary", "summary", "", "", false) : null;
             string version = PromptBuilder.CombinedVersionFor(true, inquiry, versionPersona, attack, deliberation, rich, research, spatial, diplomacy);
             string system = PromptBuilder.CombinedSystemPromptFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy);
+            // Historical-rule mode (the engine still enforces the old 3:1 assault rule) is recorded with
+            // the legacy identity, exactly as the runner does per request.
+            bool historicalRule = attack && session.AssaultRatioEnforced;
+            if (historicalRule && !PromptBuilder.TryApplyHistoricalAssaultRule(system, version, out system, out version))
+                historicalRule = false;
+            bool reference = config != null && config.EnableActionReference;
+            if (reference)
+            {
+                system += PromptBuilder.ActionReferenceAddendum(session.Balance, attack, research, diplomacy, conversion, historicalRule);
+                version += PromptBuilder.ActionReferenceVersionSuffix;
+            }
             if (conversion) { version += PromptBuilder.GarrisonConversionVersionSuffix; system += PromptBuilder.GarrisonConversionAddendum; }
             Field(sb, "prompt_version",
                 version,
@@ -118,7 +131,7 @@ namespace LuanShi.Engine
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
-                    : conversion ? PromptBuilder.GarrisonConversionHash(system)
+                    : conversion || reference || historicalRule ? PromptBuilder.GarrisonConversionHash(system)
                     : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);

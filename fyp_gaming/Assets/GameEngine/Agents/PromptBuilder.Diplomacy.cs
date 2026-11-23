@@ -101,9 +101,7 @@ namespace LuanShi.Engine
         public static bool IsDiplomacyPromptVersion(string version)
         {
             if (string.IsNullOrEmpty(version)) return false;
-            if (IsGarrisonConversionPromptVersion(version))
-                version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
-                    ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            version = StripActionReferenceSuffix(version);
             if (string.Equals(version, DiplomacyPromptVersion, StringComparison.Ordinal)) return true;
             const string suffix = "+diplomacy";
             return version.Length > suffix.Length
