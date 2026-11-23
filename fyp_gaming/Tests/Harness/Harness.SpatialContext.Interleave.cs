@@ -43,7 +43,9 @@ internal static partial class Harness
             SpatialContext = new SpatialContextOptions
             {
                 Level = SpatialDetailLevel.Rich,
-                ProviderCharLimit = 10500,
+                // The public map is mandatory prompt content, so the cap must leave room for it
+                // (~700 chars on the compact map); 10500 no longer fits the minimum spatial prompt.
+                ProviderCharLimit = 12000,
             },
         }, null);
 
@@ -72,11 +74,11 @@ internal static partial class Harness
               && transportRich.Requests.Count == 2
               && runnerOff.LastSpatialTruncation == null
               && runnerRich.LastSpatialTruncation != null
-              && runnerRich.LastSpatialTruncation.ProviderCharLimit == 10500
+              && runnerRich.LastSpatialTruncation.ProviderCharLimit == 12000
               && runnerRich.LastSpatialTruncation.Truncated
               && string.Equals(transportOff.Requests[1].System, baselineSystem, StringComparison.Ordinal)
               && string.Equals(transportOff.Requests[1].User, baselineUser, StringComparison.Ordinal)
-              && transportRich.Requests[1].User.Contains("context_config: level=rich provider_char_limit=10500", StringComparison.Ordinal),
+              && transportRich.Requests[1].User.Contains("context_config: level=rich provider_char_limit=12000", StringComparison.Ordinal),
             "interleaved runners with Off vs Rich settings do not contaminate each other's prompts or truncation reports");
     }
 }

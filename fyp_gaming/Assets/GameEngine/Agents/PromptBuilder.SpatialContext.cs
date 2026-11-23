@@ -221,7 +221,8 @@ namespace LuanShi.Engine
             bool inquiryEnabled = false, LlmPersona persona = null,
             bool attackEnabled = false, AttackView attacks = null,
             string strategicNote = null, IReadOnlyList<string> retainedInquiryResults = null,
-            bool deliberationEnabled = false, bool researchEnabled = false)
+            bool deliberationEnabled = false, bool researchEnabled = false,
+            bool actionReference = false, int reservedChars = 0)
         {
             if (spatialOptions == null || !spatialOptions.IsEnabled)
             {
@@ -239,12 +240,23 @@ namespace LuanShi.Engine
             string note = deliberationEnabled ? strategicNote : null;
             IReadOnlyList<string> retained = deliberationEnabled ? retainedInquiryResults : null;
             string version = CombinedVersionFor(true, inquiryEnabled, persona, attackEnabled,
-                deliberationEnabled, false, researchEnabled, true);
+                deliberationEnabled, false, researchEnabled, true, false, actionReference);
             int sysLen = CombinedSystemPromptFor(true, inquiryEnabled, persona, attackEnabled,
-                deliberationEnabled, false, researchEnabled, true).Length;
-            return AssembleBoundedSpatialPrompt(observation, options, recentHistory, requestsLeft,
+                deliberationEnabled, false, researchEnabled, true, false, actionReference).Length;
+            string user = AssembleBoundedSpatialPrompt(observation, options, recentHistory, requestsLeft,
                 actionsLeft, movement, spatial, spatialOptions, maxPromptChars, version, sysLen,
-                memories, inquiryResult, persona, attackNotice, retained, note, out truncationReport);
+                memories, inquiryResult, persona, attackNotice, retained, note, reservedChars,
+                out truncationReport);
+            // The caller may append a mandatory section after this builder. The report keeps the
+            // configured provider limit but must still describe the prompt actually sent, so its
+            // character counts include the reserved section.
+            if (truncationReport != null)
+            {
+                if (maxPromptChars > 0) truncationReport.ProviderCharLimit = maxPromptChars;
+                truncationReport.UserChars += Math.Max(0, reservedChars);
+                truncationReport.TotalChars += Math.Max(0, reservedChars);
+            }
+            return user;
         }
 
         private static void AppendOwnEntitiesSection(StringBuilder sb,

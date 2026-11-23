@@ -7,7 +7,7 @@ namespace LuanShi.Engine
     /// harness. Implements <see cref="ISpatialPlanningHost"/> so per-run spatial settings reach
     /// movement planning and prompts without global mutable state.
     /// </summary>
-    public sealed class SingleLlmTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
+    public sealed class SingleLlmTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost, IStaticMapProvider
     {
         private readonly GameEngine _engine;
         private readonly LlmConfig _config;
@@ -36,6 +36,8 @@ namespace LuanShi.Engine
 
         public Observation Observe() => _observe != null ? _observe() : _engine?.Observe(_seatId);
 
+        public PublicMapInfo GetPublicMapInfo() => PublicMapInfo.From(_engine?.State);
+
         public ValidationResult Submit(ActionCommand cmd)
             => _config != null && _config.EffectiveVisibleMarchRoutes
                && !MovementPlanner.AllowsVisibleRoute(_engine, _seatId, cmd)
@@ -54,7 +56,7 @@ namespace LuanShi.Engine
             return (_config != null && _config.EffectiveVisibleMarchRoutes) || spatialOn
                 ? MovementPlanner.BuildDiversified(_engine, _seatId,
                     MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
-                : MovementPlanner.Build(_engine, _seatId);
+                : MovementPlanner.BuildDiversified(_engine, _seatId);
         }
 
         /// <summary>Read-only, seat-filtered attack/assault candidates.</summary>

@@ -130,6 +130,7 @@ internal static partial class Harness
         RunVisibleMarchRunner();
         RunCompactScenario();
         RunCombatMovementRehearsal();
+        RunLlmActionReference();
         RunReplayBootstrap();
         RunReplayPlayback();
         RunReplayPresentation();

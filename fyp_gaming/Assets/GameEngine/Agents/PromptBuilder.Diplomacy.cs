@@ -100,6 +100,12 @@ namespace LuanShi.Engine
         public static bool IsDiplomacyPromptVersion(string version)
         {
             if (string.IsNullOrEmpty(version)) return false;
+            // Later opt-ins append their own suffix after "+diplomacy" (the action reference adds
+            // "+actions"), so strip that known tail before the strict check. Only suffixes the
+            // composition chain can append belong here.
+            const string actionsSuffix = "+actions";
+            if (version.EndsWith(actionsSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - actionsSuffix.Length);
             if (string.Equals(version, DiplomacyPromptVersion, StringComparison.Ordinal)) return true;
             const string suffix = "+diplomacy";
             return version.Length > suffix.Length

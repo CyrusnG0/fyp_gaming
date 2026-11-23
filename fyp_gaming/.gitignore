@@ -114,3 +114,5 @@ InitTestScene*.unity*
 
 # Unity crash-recovery scenes (auto-generated, not real content)
 /[Aa]ssets/_Recovery/
+
+llm.local.json

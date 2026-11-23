@@ -44,6 +44,14 @@ namespace LuanShi.Engine
         public bool EnableResearch;
 
         /// <summary>
+        /// Opt-in full action reference, default OFF. When true the planning system prompt appends
+        /// the compact every-order reference (costs, equations, one-line examples and the
+        /// season-resolution context) and the run identity gains "+actions". The reference widens
+        /// no parser vocabulary; when false the prompt text, version and hash are unchanged.
+        /// </summary>
+        public bool EnableActionReference;
+
+        /// <summary>
         /// Opt-in diplomacy orders, default OFF. When true the prompt appends the first-slice rules
         /// (send_message, propose_treaty, respond_treaty accept/reject), the seat-safe catalogue
         /// advertises those candidates from the acting seat's own observation, and the parser accepts
@@ -122,14 +130,14 @@ namespace LuanShi.Engine
         public int MaxActionsPerTurn = 5;
         public int MaxInvalidPerTurn = 2;
         public int MaxTurnSeconds = 60;
-        public int RequestTimeoutMs = 25000;
+        public int RequestTimeoutMs = 250000;
         public int MaxOutputTokens = 400;
 
         /// <summary>
         /// Whole-session request cap (default 60, the user-approved demo budget). This is the only
         /// spend bound when prices are not configured.
         /// </summary>
-        public int MaxTotalRequests = 60;
+        public int MaxTotalRequests = 600;
 
         public double? UsdPerMTokIn;
         public double? UsdPerMTokOut;
@@ -181,7 +189,8 @@ namespace LuanShi.Engine
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
         /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
-        /// enable_personas, enable_attack, enable_research, enable_diplomacy, personas, and the
+        /// enable_personas, enable_attack, enable_research, enable_diplomacy,
+        /// enable_action_reference, personas, and the
         /// deliberation-only keys
         /// enable_deliberation, max_inquiries_per_turn, max_inquiries_per_session,
         /// max_accepted_actions_per_session, max_note_chars, max_retained_inquiry_results,
@@ -240,6 +249,7 @@ namespace LuanShi.Engine
             if (EnablePersonas) sb.Append("; personas=true");
             if (EnableAttack) sb.Append("; attack=true");
             if (EnableResearch) sb.Append("; research=true");
+            if (EnableActionReference) sb.Append("; action_reference=true");
             if (EnableDiplomacy) sb.Append("; diplomacy=true");
             if (RequireVisibleMarchRoutes) sb.Append("; visible_march_routes=true");
             else if (EffectiveVisibleMarchRoutes) sb.Append("; visible_march_routes=enforced_by_spatial");
@@ -327,6 +337,8 @@ namespace LuanShi.Engine
                         break;
                     case "enable_attack":
                         EnableAttack = Bool(field.Value, EnableAttack); break;
+                    case "enable_action_reference":
+                        EnableActionReference = Bool(field.Value, EnableActionReference); break;
                     case "enable_deliberation":
                         EnableDeliberation = Bool(field.Value, EnableDeliberation); break;
                     case "max_inquiries_per_turn":

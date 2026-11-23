@@ -79,9 +79,6 @@ namespace LuanShi.Engine
             }
         }
 
-        /// <summary>Design §4.3: an attacking 攻城器械 army waives the 3:1 assault requirement.</summary>
-        public static bool WaivesAssaultRatio(string type) => Normalize(type) == Siege;
-
         /// <summary>Design §5.3/§5.4: an 弓兵 garrison defends a city at +25%.</summary>
         public static float SiegeDefenseMultiplier(string garrisonType)
             => Normalize(garrisonType) == Archer ? BalanceConfig.ArcherSiegeDefenseBonus : 1f;

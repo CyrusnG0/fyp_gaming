@@ -19,7 +19,7 @@ namespace LuanShi.Engine
     {
         public const int MaxRecentActions = 12;
 
-        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
+        private sealed class TurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost, IStaticMapProvider
         {
             private readonly SpectatorSession _session;
             private readonly GameEngine _engine;
@@ -49,6 +49,8 @@ namespace LuanShi.Engine
             }
 
             public Observation Observe() => _engine.Observe(_seatId);
+
+            public PublicMapInfo GetPublicMapInfo() => PublicMapInfo.From(_engine?.State);
 
             public ValidationResult Submit(ActionCommand cmd)
             {
@@ -81,7 +83,7 @@ namespace LuanShi.Engine
                 return _session.Runner.RequireVisibleMarchRoutes || spatialOn
                     ? MovementPlanner.BuildDiversified(_engine, _seatId,
                         MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
-                    : MovementPlanner.Build(_engine, _seatId);
+                    : MovementPlanner.BuildDiversified(_engine, _seatId);
             }
 
             /// <summary>

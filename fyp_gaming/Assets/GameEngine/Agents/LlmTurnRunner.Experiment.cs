@@ -279,7 +279,8 @@ namespace LuanShi.Engine
 
         private RichContextResult AssembleRichContext(Observation observation,
             List<ActionOption> options, MovementView movement, AttackView attacks, LlmPersona persona,
-            string inquiryResult, string version, int systemChars, int requestsLeft, int actionsLeft)
+            string inquiryResult, string version, int systemChars, int requestsLeft, int actionsLeft,
+            int reservedChars)
         {
             IReadOnlyList<RichInquiryEntry> prior = PriorInquiryEntries(inquiryResult, out int priorDropped);
             var input = new RichContextInputs
@@ -303,6 +304,7 @@ namespace LuanShi.Engine
                 ActionsLeft = actionsLeft,
                 Allowances = BuildAllowances(),
                 SpatialOptions = _config?.SpatialContext,
+                ReservedChars = reservedChars,
             };
             return RichContextAssembler.Assemble(input, _config);
         }
@@ -335,11 +337,11 @@ namespace LuanShi.Engine
 
         private bool TryBuildRichPrompt(Observation observation, List<ActionOption> options,
             MovementView movement, AttackView attacks, LlmPersona persona, string inquiryResult,
-            string version, int systemChars, int requestsLeft, int actionsLeft, out string user,
-            out string observationJson)
+            string version, int systemChars, int requestsLeft, int actionsLeft, int reservedChars,
+            out string user, out string observationJson)
         {
             RichContextResult assembled = AssembleRichContext(observation, options, movement, attacks,
-                persona, inquiryResult, version, systemChars, requestsLeft, actionsLeft);
+                persona, inquiryResult, version, systemChars, requestsLeft, actionsLeft, reservedChars);
             user = assembled.User;
             observationJson = assembled.ObservationJson;
             LastSpatialTruncation = assembled.SpatialTruncation;

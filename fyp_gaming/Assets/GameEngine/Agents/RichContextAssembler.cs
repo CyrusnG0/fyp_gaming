@@ -113,6 +113,8 @@ namespace LuanShi.Engine
         public int ActionsLeft;
         public PromptBuilder.RichAllowances Allowances;
         public SpatialContextOptions SpatialOptions;
+        /// <summary>Chars the caller adds after assembly (the public map); kept out of the budget.</summary>
+        public int ReservedChars;
     }
 
     internal sealed class RichContextResult
@@ -158,6 +160,7 @@ namespace LuanShi.Engine
                 && input.SpatialOptions.ProviderCharLimit > 0
                 ? Math.Min(config.EffectiveMaxPromptChars, input.SpatialOptions.ProviderCharLimit)
                 : config.EffectiveMaxPromptChars;
+            int budgetChars = Math.Max(0, effectiveMaxChars - input.ReservedChars);
             var report = new RichContextReport { TrimLevel = level, MaxPromptChars = effectiveMaxChars };
 
             int totalEvents = obs.Events.Count;
@@ -207,11 +210,11 @@ namespace LuanShi.Engine
                 input.ActionsLeft, input.Version, movementText, memories, input.LatestInquiryResult,
                 input.Persona, attackNotice, events);
             string user = PromptBuilder.InsertBeforeCandidates(body, section);
-            if (spatialOn && level == 3 && input.SystemChars + user.Length > effectiveMaxChars)
+            if (spatialOn && level == 3 && input.SystemChars + user.Length > budgetChars)
             {
-                for (int pass = 0; pass < 2 && input.SystemChars + user.Length > effectiveMaxChars; pass++)
+                for (int pass = 0; pass < 2 && input.SystemChars + user.Length > budgetChars; pass++)
                 {
-                    int excess = input.SystemChars + user.Length - effectiveMaxChars;
+                    int excess = input.SystemChars + user.Length - budgetChars;
                     int sectionBudget = Math.Max(0, (movementText == null ? 0 : movementText.Length) - excess);
                     movementText = PromptBuilder.RenderSpatialMovementSectionForBudget(input.Movement,
                         input.SpatialOptions, sectionBudget, out spatialReport);
@@ -231,11 +234,11 @@ namespace LuanShi.Engine
             {
                 spatialReport.ProviderCharLimit = effectiveMaxChars;
                 spatialReport.SystemChars = input.SystemChars;
-                spatialReport.UserChars = user.Length;
-                spatialReport.TotalChars = input.SystemChars + user.Length;
+                spatialReport.UserChars = user.Length + Math.Max(0, input.ReservedChars);
+                spatialReport.TotalChars = input.SystemChars + user.Length + Math.Max(0, input.ReservedChars);
                 report.SpatialTruncation = spatialReport;
             }
-            report.PromptChars = input.SystemChars + user.Length;
+            report.PromptChars = input.SystemChars + user.Length + Math.Max(0, input.ReservedChars);
             report.Fits = report.PromptChars <= report.MaxPromptChars;
             return new RichContextResult
             {

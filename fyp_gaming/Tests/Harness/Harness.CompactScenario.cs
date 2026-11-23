@@ -398,22 +398,28 @@ internal static partial class Harness
                  && engine.State.FindArmy(wei.Id) != null,
             "a model-shaped attack_army is accepted and resolved on the scenario world");
 
+        // No troop-ratio gate: 2,000 troops may assault a 1,000-garrison capital.
         var city = engine.State.FindCity("city-shu");
         var hostArmy = engine.State.FindArmy("army-wei-2");
         hostArmy.X = 19; hostArmy.Z = 8;
         city.Garrison = 1000;
         int token = engine.BeginSeatTurn("seat-0");
-        var refused = engine.SubmitAs("seat-0", token, AtkCityOrder("seat-0", hostArmy.Id, city.X, city.Z));
+        var weak = engine.SubmitAs("seat-0", token, AtkCityOrder("seat-0", hostArmy.Id, city.X, city.Z));
         engine.EndSeatTurn(token);
-        ScnCheck(!refused.Ok && refused.Error.StartsWith("assault needs 3:1"),
-            "the 3:1 rule still refuses an under-strength assault on the scenario capital ("
-            + refused.Error + ")");
-        city.Garrison = 500;
-        token = engine.BeginSeatTurn("seat-0");
-        var assault = engine.SubmitAs("seat-0", token, AtkCityOrder("seat-0", hostArmy.Id, city.X, city.Z));
-        engine.EndSeatTurn(token);
-        ScnCheck(assault.Ok && city.OwnerSeatId == "seat-0"
-                 && Find(engine.Log, "battle_siege")?.Payload["outcome"] == "captured",
+        ScnCheck(weak.Ok,
+            "an assault no longer needs a 3:1 troop edge (2,000 vs 1,000): " + weak.Error);
+
+        // A comfortable assault still captures the capital.
+        var capture = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.FoodEasy);
+        var captureCity = capture.State.FindCity("city-shu");
+        var captureHost = capture.State.FindArmy("army-wei-2");
+        captureHost.X = 19; captureHost.Z = 8;
+        captureCity.Garrison = 500;
+        token = capture.BeginSeatTurn("seat-0");
+        var assault = capture.SubmitAs("seat-0", token, AtkCityOrder("seat-0", captureHost.Id, captureCity.X, captureCity.Z));
+        capture.EndSeatTurn(token);
+        ScnCheck(assault.Ok && captureCity.OwnerSeatId == "seat-0"
+                 && Find(capture.Log, "battle_siege")?.Payload["outcome"] == "captured",
             "a legal assault captures the scenario capital");
     }
 

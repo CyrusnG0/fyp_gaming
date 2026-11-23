@@ -571,6 +571,132 @@ namespace LuanShi.Engine
             => value < min ? min : value > max ? max : value;
     }
 
+    /// <summary>Public, non-secret city data exposed to all controllers regardless of fog.</summary>
+    public sealed class PublicCityView
+    {
+        public string Id;
+        public string Name;
+        public int X, Z;
+        public string OwnerSeatId;
+
+        public static PublicCityView From(CityState city)
+        {
+            if (city == null) return null;
+            return new PublicCityView
+            {
+                Id = city.Id,
+                Name = city.Name,
+                X = city.X,
+                Z = city.Z,
+                OwnerSeatId = city.OwnerSeatId,
+            };
+        }
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"id\":").Append(MiniJson.Str(Id));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>Public, non-secret watchtower data exposed to all controllers regardless of fog.</summary>
+    public sealed class PublicWatchTowerView
+    {
+        public string Id;
+        public string Name;
+        public int X, Z;
+        public string OwnerSeatId;
+
+        public static PublicWatchTowerView From(WatchTowerState tower)
+        {
+            if (tower == null) return null;
+            return new PublicWatchTowerView
+            {
+                Id = tower.Id,
+                Name = tower.Name,
+                X = tower.X,
+                Z = tower.Z,
+                OwnerSeatId = tower.OwnerSeatId,
+            };
+        }
+
+        public string ToJson()
+        {
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            sb.Append("\"id\":").Append(MiniJson.Str(Id));
+            sb.Append(",\"name\":").Append(MiniJson.Str(Name));
+            sb.Append(",\"x\":").Append(MiniJson.Num(X));
+            sb.Append(",\"z\":").Append(MiniJson.Num(Z));
+            sb.Append(",\"owner_seat_id\":").Append(MiniJson.Str(OwnerSeatId));
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>Public, non-secret map layout exposed to all controllers regardless of fog.</summary>
+    public sealed class PublicMapInfo
+    {
+        public int Width;
+        public int Height;
+        public readonly List<PublicCityView> Cities = new List<PublicCityView>();
+        public readonly List<PublicWatchTowerView> WatchTowers = new List<PublicWatchTowerView>();
+        /// <summary>seat_id → city_id capital mapping. A faction's capital is its starting city.</summary>
+        public readonly Dictionary<string, string> Capitals = new Dictionary<string, string>();
+
+        public static PublicMapInfo From(GameState state)
+        {
+            if (state == null || state.Map == null) return null;
+            var info = new PublicMapInfo
+            {
+                Width = state.Map.Width,
+                Height = state.Map.Height,
+            };
+            foreach (var city in state.Cities)
+                info.Cities.Add(PublicCityView.From(city));
+            foreach (var tower in state.WatchTowers)
+                info.WatchTowers.Add(PublicWatchTowerView.From(tower));
+            foreach (var fac in state.Factions)
+            {
+                var capital = state.Cities.Find(c => c.OwnerSeatId == fac.SeatId);
+                if (capital != null)
+                    info.Capitals[fac.SeatId] = capital.Id;
+            }
+            return info;
+        }
+
+        public string ToJson()
+        {
+            var cityTexts = new List<string>(Cities.Count);
+            foreach (var c in Cities) cityTexts.Add(c.ToJson());
+            var towerTexts = new List<string>(WatchTowers.Count);
+            foreach (var t in WatchTowers) towerTexts.Add(t.ToJson());
+
+            var sb = new StringBuilder(512);
+            sb.Append("{\"width\":").Append(MiniJson.Num(Width));
+            sb.Append(",\"height\":").Append(MiniJson.Num(Height));
+            sb.Append(",\"cities\":").Append(MiniJson.Array(cityTexts));
+            sb.Append(",\"watch_towers\":").Append(MiniJson.Array(towerTexts));
+            sb.Append(",\"capitals\":{");
+            bool first = true;
+            foreach (var kv in Capitals)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append(MiniJson.Str(kv.Key)).Append(':').Append(MiniJson.Str(kv.Value));
+            }
+            sb.Append("}}");
+            return sb.ToString();
+        }
+    }
+
     public sealed class GameState
     {
         public string GameId = "g-001";

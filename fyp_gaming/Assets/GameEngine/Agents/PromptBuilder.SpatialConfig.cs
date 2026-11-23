@@ -236,13 +236,16 @@ namespace LuanShi.Engine
             int requestsLeft, int actionsLeft, MovementView movement, SpatialContextView spatial,
             SpatialContextOptions opts, int maxPromptChars, string version, int sysLen,
             IReadOnlyList<LlmMemory> memories, string inquiryResult, LlmPersona persona,
-            string attackNotice, IReadOnlyList<string> retained, string note,
+            string attackNotice, IReadOnlyList<string> retained, string note, int reservedChars,
             out SpatialTruncationReport report)
         {
             opts = opts ?? new SpatialContextOptions { Level = SpatialDetailLevel.Standard };
             int charLimit = maxPromptChars > 0
                 ? (opts.ProviderCharLimit > 0 ? Math.Min(maxPromptChars, opts.ProviderCharLimit) : maxPromptChars)
                 : opts.EffectiveProviderCharLimit();
+            // Chars the caller appends after this builder (the public map) still count against the
+            // provider, so only this much of the prompt may be built here.
+            int budgetChars = Math.Max(0, charLimit - Math.Max(0, reservedChars));
 
             if (opts.MaxSectionChars > 0 && movement != null)
             {
@@ -251,7 +254,7 @@ namespace LuanShi.Engine
                 string secPrompt = BuildUserPrompt(observation, options, recentHistory, requestsLeft,
                     actionsLeft, version, secText, memories, inquiryResult, persona, attackNotice,
                     retained, note);
-                if (sysLen + secPrompt.Length <= charLimit)
+                if (sysLen + secPrompt.Length <= budgetChars)
                 {
                     secReport.ProviderCharLimit = charLimit;
                     secReport.SystemChars = sysLen;
@@ -273,7 +276,7 @@ namespace LuanShi.Engine
                 actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                 persona, attackNotice, retained, note, baseCaps, includeRows, maxRows,
                 int.MaxValue, int.MaxValue, null, out report);
-            if (sysLen + full.Length <= charLimit) return full;
+            if (sysLen + full.Length <= budgetChars) return full;
 
             // In Rich mode, preserve all visible legal movement options first by dropping visible
             // cell row ranges / capping entity summaries before cutting any movement options.
@@ -283,21 +286,21 @@ namespace LuanShi.Engine
                     requestsLeft, actionsLeft, movement, spatial, version, sysLen, charLimit, memories,
                     inquiryResult, persona, attackNotice, retained, note, baseCaps, false, 0,
                     int.MaxValue, int.MaxValue, "provider_char_limit", out report);
-                if (sysLen + noRowsAll.Length <= charLimit) return noRowsAll;
+                if (sysLen + noRowsAll.Length <= budgetChars) return noRowsAll;
 
                 string stdAll = BuildSpatialCandidate(opts, observation, options, recentHistory,
                     requestsLeft, actionsLeft, movement, spatial, version, sysLen, charLimit, memories,
                     inquiryResult, persona, attackNotice, retained, note,
                     MinCaps(baseCaps, StandardCapTuple()), false, 0, int.MaxValue, int.MaxValue,
                     "provider_char_limit", out report);
-                if (sysLen + stdAll.Length <= charLimit) return stdAll;
+                if (sysLen + stdAll.Length <= budgetChars) return stdAll;
             }
 
             int maxMoveOpts = MaxPlanOptions(movement);
             bool searchRows = opts.Level == SpatialDetailLevel.Rich ? false : includeRows;
             int searchMaxRows = searchRows ? maxRows : 0;
             if (TryBinarySearchMoveLimit(opts, observation, options, recentHistory, requestsLeft,
-                    actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
+                    actionsLeft, movement, spatial, version, sysLen, budgetChars, memories, inquiryResult,
                     persona, attackNotice, retained, note, baseCaps, searchRows, searchMaxRows,
                     maxMoveOpts, out string moveFit, out SpatialTruncationReport moveReport))
             {
@@ -312,7 +315,7 @@ namespace LuanShi.Engine
                     actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                     persona, attackNotice, retained, note, baseCaps, false, 0, moveFloor, int.MaxValue,
                     "provider_char_limit", out report);
-                if (sysLen + noRows.Length <= charLimit) return noRows;
+                if (sysLen + noRows.Length <= budgetChars) return noRows;
             }
 
             if (opts.Level == SpatialDetailLevel.Rich)
@@ -321,7 +324,7 @@ namespace LuanShi.Engine
                     actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                     persona, attackNotice, retained, note, MinCaps(baseCaps, StandardCapTuple()), false, 0,
                     moveFloor, int.MaxValue, "provider_char_limit", out report);
-                if (sysLen + stdCand.Length <= charLimit) return stdCand;
+                if (sysLen + stdCand.Length <= budgetChars) return stdCand;
             }
 
             foreach (int[] caps in SpatialTruncationSteps)
@@ -330,7 +333,7 @@ namespace LuanShi.Engine
                     actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                     persona, attackNotice, retained, note, MinCaps(baseCaps, caps), false, 0, moveFloor,
                     int.MaxValue, "provider_char_limit", out report);
-                if (sysLen + tight.Length <= charLimit) return tight;
+                if (sysLen + tight.Length <= budgetChars) return tight;
             }
 
             int[] zeroCaps = SpatialTruncationSteps[3];
@@ -341,7 +344,7 @@ namespace LuanShi.Engine
                     actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                     persona, attackNotice, retained, note, zeroCaps, false, 0, 1, armies,
                     "provider_char_limit", out report);
-                if (sysLen + one.Length <= charLimit) return one;
+                if (sysLen + one.Length <= budgetChars) return one;
             }
             for (int armies = totalArmies; armies >= 0; armies--)
             {
@@ -349,7 +352,7 @@ namespace LuanShi.Engine
                     actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,
                     persona, attackNotice, retained, note, zeroCaps, false, 0, 0, armies,
                     "provider_char_limit", out report);
-                if (sysLen + zero.Length <= charLimit) return zero;
+                if (sysLen + zero.Length <= budgetChars) return zero;
             }
             return BuildSpatialCandidate(opts, observation, options, recentHistory, requestsLeft,
                 actionsLeft, movement, spatial, version, sysLen, charLimit, memories, inquiryResult,

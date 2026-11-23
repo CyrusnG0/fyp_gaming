@@ -269,16 +269,5 @@ internal static partial class Harness
                   "[LS-002] the rejection names no hidden garrison");
         }
 
-        // An adjacent (= in-sight) city's 3:1 message may name its garrison, but only to the actor.
-        {
-            var e = PrivacyWorld(612);
-            var armyA = AddArmy(e, "seat-a", 9, 100);
-            var probe = e.Submit(PrivacyOrder(ActionType.AttackCity, "seat-a", armyA.Id, 10, 0));
-            var reject = Find(e.Log, "action_rejected");
-            Check(!probe.Ok && probe.Error.Contains("garrison 1000"),
-                  $"[LS-002] the visible city's 3:1 message may name its garrison ({probe.Error})");
-            Check(reject != null && !e.SeesEvent("seat-b", reject) && !e.SeesEvent("seat-c", reject),
-                  "[LS-002] but the exact-garrison feedback reaches no other seat");
-        }
     }
 }

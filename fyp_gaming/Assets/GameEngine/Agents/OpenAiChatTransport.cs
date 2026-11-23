@@ -26,6 +26,9 @@ namespace LuanShi.Engine
         private readonly LlmConfig _config;
         private readonly string _apiKey;
 
+        /// <summary>Stable per-conversation id required by OpenCode Go for routing and prompt caching.</summary>
+        private readonly string _sessionId = "ses_" + Guid.NewGuid().ToString("N");
+
         public string Provider => string.IsNullOrEmpty(_config.Provider) ? "deepseek" : _config.Provider;
         public string Model => _config.Model;
 
@@ -64,6 +67,7 @@ namespace LuanShi.Engine
                 {
                     cts.CancelAfter(timeoutMs);
                     message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                    message.Headers.TryAddWithoutValidation("x-opencode-session", _sessionId);
                     message.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
                     message.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("deflate"));
                     message.Content = new StringContent(BuildBody(req, maxTokens), Encoding.UTF8,
