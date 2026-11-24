@@ -222,10 +222,15 @@ internal static partial class Harness
         var e2 = TurnGateScenario();
         var op2 = e2.CreateHandoverOperator(new[] { "seat-a" });
         op2.Request("seat-a", ControllerType.Llm);
+        int tbOpen = e2.BeginSeatTurn("seat-b");
+        Check(!e2.PrepareSeatTurn("seat-a") && e2.GetHandoverStatus("seat-a").HasPending
+              && e2.GetHandoverStatus("seat-a").Controller == ControllerType.Human,
+            "[HANDOVER] PrepareSeatTurn is a no-op while any other seat's turn gate is open");
+        e2.EndSeatTurn(tbOpen);
         Check(e2.PrepareSeatTurn("seat-a") && e2.GetHandoverStatus("seat-a").Controller == ControllerType.Llm
               && HandoverRecords(e2, "controller_handover_effective")[0].Payload["applied_via"] == "before_turn"
-              && e2.TurnToken == 0,
-            "[HANDOVER] PrepareSeatTurn applies an idle seat's request without touching the token");
+              && e2.TurnToken == tbOpen,
+            "[HANDOVER] PrepareSeatTurn applies an idle seat's request cleanly once the gate is closed");
         Check(!e2.PrepareSeatTurn("seat-a"), "[HANDOVER] applying is idempotent");
 
         var e3 = TurnGateScenario();
@@ -298,8 +303,11 @@ internal static partial class Harness
         string prompt = fake.Requests[0].User;
         Check(total > PromptBuilder.MaxPromptObservationEvents
               && e.Observe("seat-a").Events.Any(v => v.Payload.TryGetValue("reason", out var r) && r == "early-human-marker")
-              && !prompt.Contains("early-human-marker"),
-            $"[HANDOVER] bounded history is real: observation holds {total} events, the prompt carries the newest "
-            + $"{PromptBuilder.MaxPromptObservationEvents}; the earlier human action is omitted from the prompt");
+              && !prompt.Contains("early-human-marker")
+              && prompt.Contains($"Observation events truncated to newest {PromptBuilder.MaxPromptObservationEvents} of {total} seat-permitted events."),
+            $"[HANDOVER] bounded history is real and explicitly labelled: observation holds {total} events, the prompt carries the newest "
+            + $"{PromptBuilder.MaxPromptObservationEvents} with permitted-only count; earlier human action is omitted");
+        Check(runner.ContextReportJsonForSeat("seat-a") == null && runner.LastContextSeatId == null,
+            "[HANDOVER] non-rich runner leaves context telemetry unpopulated rather than attributing stale telemetry");
     }
 }

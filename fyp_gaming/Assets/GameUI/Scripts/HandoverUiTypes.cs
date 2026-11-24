@@ -1,6 +1,7 @@
 // HandoverUiTypes.cs — pure-C# data contracts and engine-seam interface for between-turn
 // Human <-> LLM handover UI. Zero engine mutations; zero canonical-state reads.
 
+using System;
 using System.Collections.Generic;
 using LuanShi.Engine;
 
@@ -15,13 +16,12 @@ namespace LuanShi
 
     public sealed class HandoverPendingRequest
     {
+        public string RequestId;
         public string SeatId;
         public string FactionName;
         public string TargetController;
         public HandoverPendingKind Kind;
-        public string Reason;
         public int RequestedSeason;
-        public bool RequestedWhileActiveTurn;
     }
 
     public readonly struct HandoverTransferOutcome
@@ -53,31 +53,85 @@ namespace LuanShi
     }
 
     /// <summary>
-    /// Integration seam to the authoritative engine transfer operation owned by the engine branch.
-    /// UI code never writes <see cref="FactionState.Controller"/> directly.
+    /// Authoritative engine handover seam. Pending requests, cancellation, eligibility and boundary
+    /// transfers live strictly inside <see cref="GameEngine"/>; UI code never maintains a second
+    /// pending queue or mutates <see cref="FactionState.Controller"/> directly.
     /// </summary>
     public interface IHandoverEngineAdapter
     {
-        bool IsTransferSupported { get; }
+        bool IsAvailable { get; }
         string UnavailableReason { get; }
-        HandoverTransferOutcome TryTransferBetweenTurns(
-            GameEngine engine, string seatId, string targetController, string reason);
+        bool IsEligibleSeat(string seatId);
+        HandoverStatus GetStatus(GameEngine engine, string seatId);
+        HandoverResult Request(GameEngine engine, string seatId, string toController);
+        HandoverResult Cancel(GameEngine engine, string seatId);
+        bool PrepareSeatTurn(GameEngine engine, string seatId);
     }
 
     /// <summary>
-    /// Baseline 9eeb633 placeholder adapter: keeps the UI compiling cleanly against the baseline
-    /// engine without creating a parallel transfer mechanism or mutating FactionState.Controller.
+    /// Host-authorized engine adapter backed by <see cref="HandoverOperator"/> and
+    /// <see cref="GameEngine.PrepareSeatTurn"/> / <see cref="GameEngine.GetHandoverStatus"/>.
     /// </summary>
-    public sealed class BaselineDeferredHandoverAdapter : IHandoverEngineAdapter
+    public sealed class EngineHandoverAdapter : IHandoverEngineAdapter
     {
-        public bool IsTransferSupported => false;
+        private readonly GameEngine _engine;
+        private readonly HandoverOperator _operator;
 
-        public string UnavailableReason
-            => "Engine handover API pending integration from handover-engine (baseline 9eeb633 stays unchanged).";
+        public EngineHandoverAdapter(GameEngine engine, IEnumerable<string> eligibleSeatIds)
+        {
+            _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+            _operator = _engine.CreateHandoverOperator(eligibleSeatIds ?? Array.Empty<string>());
+        }
 
-        public HandoverTransferOutcome TryTransferBetweenTurns(
-            GameEngine engine, string seatId, string targetController, string reason)
-            => HandoverTransferOutcome.DeferredUnsupported(UnavailableReason);
+        public bool IsAvailable => _engine != null && _operator != null;
+        public string UnavailableReason => IsAvailable ? null : "handover operator unavailable";
+
+        public bool IsEligibleSeat(string seatId) => _operator.IsEligible(seatId);
+
+        public HandoverStatus GetStatus(GameEngine engine, string seatId)
+            => (engine ?? _engine)?.GetHandoverStatus(seatId);
+
+        public HandoverResult Request(GameEngine engine, string seatId, string toController)
+        {
+            if (engine != null && !ReferenceEquals(engine, _engine))
+                return new HandoverResult(false, "handover engine mismatch", null);
+            return _operator.Request(seatId, toController);
+        }
+
+        public HandoverResult Cancel(GameEngine engine, string seatId)
+        {
+            if (engine != null && !ReferenceEquals(engine, _engine))
+                return new HandoverResult(false, "handover engine mismatch", null);
+            return _operator.Cancel(seatId);
+        }
+
+        public bool PrepareSeatTurn(GameEngine engine, string seatId)
+        {
+            if (engine != null && !ReferenceEquals(engine, _engine)) return false;
+            return _engine.PrepareSeatTurn(seatId);
+        }
+    }
+
+    /// <summary>Fail-closed adapter used when handover is disabled (replay, spectator, or no eligible seats).</summary>
+    public sealed class DisabledHandoverAdapter : IHandoverEngineAdapter
+    {
+        public DisabledHandoverAdapter(string reason = "Handover is disabled in this mode.")
+        {
+            UnavailableReason = reason;
+        }
+
+        public bool IsAvailable => false;
+        public string UnavailableReason { get; }
+        public bool IsEligibleSeat(string seatId) => false;
+        public HandoverStatus GetStatus(GameEngine engine, string seatId) => engine?.GetHandoverStatus(seatId);
+
+        public HandoverResult Request(GameEngine engine, string seatId, string toController)
+            => new HandoverResult(false, UnavailableReason, null);
+
+        public HandoverResult Cancel(GameEngine engine, string seatId)
+            => new HandoverResult(false, UnavailableReason, null);
+
+        public bool PrepareSeatTurn(GameEngine engine, string seatId) => false;
     }
 
     /// <summary>

@@ -43,6 +43,19 @@ namespace LuanShi.Engine
         /// <summary>JSON completeness report of the most recently dispatched rich prompt, or null.</summary>
         public string LastContextReportJson { get; private set; }
 
+        /// <summary>Seat that owns <see cref="LastContextReportJson"/>, or null when cleared.</summary>
+        public string LastContextSeatId { get; private set; }
+
+        /// <summary>Returns the rich context completeness report produced for <paramref name="seatId"/> in its latest turn.</summary>
+        public string ContextReportJsonForSeat(string seatId)
+            => !string.IsNullOrEmpty(seatId) && _contextReportBySeat.TryGetValue(seatId, out var json)
+                ? json : null;
+
+        /// <summary>Returns the spatial truncation report produced for <paramref name="seatId"/> in its latest turn.</summary>
+        public SpatialTruncationReport SpatialTruncationForSeat(string seatId)
+            => !string.IsNullOrEmpty(seatId) && _spatialTruncationBySeat.TryGetValue(seatId, out var report)
+                ? report : null;
+
         /// <summary>
         /// Stable code of the ceiling or condition that ended the turn (for example
         /// <c>turn_requests_exhausted</c>, <c>session_output_tokens</c>, <c>session_seconds</c>), or
@@ -87,6 +100,7 @@ namespace LuanShi.Engine
             NotesSavedThisTurn = 0;
             InquiriesThisTurn = 0;
             LastContextReportJson = null;
+            LastContextSeatId = null;
             ResetPromptSizeState();
             _stopDetail = null;
             _pendingDeliberationEvent = null;
@@ -354,7 +368,14 @@ namespace LuanShi.Engine
             user = assembled.User;
             observationJson = assembled.ObservationJson;
             LastSpatialTruncation = assembled.SpatialTruncation;
+            LastSpatialSeatId = _seatId;
             LastContextReportJson = assembled.Report.ToJson();
+            LastContextSeatId = _seatId;
+            if (!string.IsNullOrEmpty(_seatId))
+            {
+                _spatialTruncationBySeat[_seatId] = assembled.SpatialTruncation;
+                _contextReportBySeat[_seatId] = LastContextReportJson;
+            }
             _lastRichSizeReport = assembled.SizeReport;
             if (assembled.Report.Fits) return true;
             LastPromptSizeJson = assembled.SizeReport != null

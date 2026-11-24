@@ -57,7 +57,7 @@ namespace LuanShi.Engine
                 {
                     result = _session.Runner.RequireVisibleMarchRoutes && !MovementPlanner.AllowsVisibleRoute(_engine, _seatId, cmd)
                         ? ValidationResult.Fail(FeedbackPolicy.DestinationNotReachable)
-                        : _engine.SubmitAs(_seatId, _token, cmd);
+                        : _engine.SubmitAs(_seatId, _token, ControllerType.Llm, cmd);
                 }
                 catch (Exception)
                 {

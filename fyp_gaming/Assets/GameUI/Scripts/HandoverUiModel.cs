@@ -8,189 +8,218 @@ using LuanShi.Engine;
 namespace LuanShi
 {
     /// <summary>
-    /// Pure-C# coordinator for pending between-turn handover/reclaim requests, operator seat
-    /// eligibility, and seat-isolated LLM episode capture.
+    /// Pure-C# coordinator bridging the UI to the single authoritative handover queue inside
+    /// <see cref="GameEngine"/> and capturing seat-isolated LLM episode state across transitions.
     /// </summary>
     public sealed class HandoverCoordinatorState
     {
         private readonly HashSet<string> _eligibleSeats = new HashSet<string>(StringComparer.Ordinal);
         private readonly List<string> _eligibleSeatOrder = new List<string>();
-        private readonly Dictionary<string, HandoverPendingRequest> _pendingBySeat =
-            new Dictionary<string, HandoverPendingRequest>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _lastKnownControllerBySeat =
+            new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Observation> _pendingPreBaselineBySeat =
+            new Dictionary<string, Observation>(StringComparer.Ordinal);
         private readonly Dictionary<string, HandoverDelegationEpisode> _episodesBySeat =
             new Dictionary<string, HandoverDelegationEpisode>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _lastActivitySeqBySeat =
             new Dictionary<string, int>(StringComparer.Ordinal);
 
+        private IHandoverEngineAdapter _adapter = new DisabledHandoverAdapter();
+
         public IReadOnlyList<string> EligibleSeats => _eligibleSeatOrder;
         public bool HasEligibleSeats => _eligibleSeatOrder.Count > 0;
+        public bool HasAnyEpisode() => _episodesBySeat.Count > 0;
 
         /// <summary>
-        /// Registers seats owned by the local human operator(s). Only seats explicitly listed in
-        /// <paramref name="humanSeats"/> that began as Human (or match an initial human faction) are
-        /// eligible; opponent AI/scripted seats cannot be hijacked.
+        /// Registers seats owned by the local human operator(s) and binds the authoritative
+        /// <see cref="EngineHandoverAdapter"/> once per match.
         /// </summary>
-        public void Initialize(IReadOnlyList<FactionState> factions, string[] humanSeats)
+        public void Initialize(GameEngine engine, string[] humanSeats, bool allowHandover = true,
+            IHandoverEngineAdapter adapterOverride = null)
         {
             _eligibleSeats.Clear();
             _eligibleSeatOrder.Clear();
-            _pendingBySeat.Clear();
+            _lastKnownControllerBySeat.Clear();
+            _pendingPreBaselineBySeat.Clear();
             _episodesBySeat.Clear();
             _lastActivitySeqBySeat.Clear();
 
-            if (factions == null) return;
+            if (!allowHandover || engine == null || engine.State == null)
+            {
+                _adapter = adapterOverride ?? new DisabledHandoverAdapter();
+                return;
+            }
+
             var configuredHumans = new HashSet<string>(StringComparer.Ordinal);
             if (humanSeats != null)
                 foreach (string id in humanSeats)
                     if (!string.IsNullOrEmpty(id)) configuredHumans.Add(id);
 
-            foreach (FactionState faction in factions)
+            foreach (FactionState faction in engine.State.Factions)
             {
                 if (faction == null || string.IsNullOrEmpty(faction.SeatId)) continue;
                 if (faction.Controller == ControllerType.Human
                     || (configuredHumans.Contains(faction.SeatId) && faction.Controller != ControllerType.ScriptedAi))
                 {
                     if (_eligibleSeats.Add(faction.SeatId))
+                    {
                         _eligibleSeatOrder.Add(faction.SeatId);
+                        _lastKnownControllerBySeat[faction.SeatId] = faction.Controller;
+                    }
                 }
             }
+
+            _adapter = adapterOverride ?? (_eligibleSeatOrder.Count > 0
+                ? (IHandoverEngineAdapter)new EngineHandoverAdapter(engine, _eligibleSeatOrder)
+                : new DisabledHandoverAdapter("No operator-owned human seats in this match."));
         }
 
         public bool IsEligibleSeat(string seatId)
-            => !string.IsNullOrEmpty(seatId) && _eligibleSeats.Contains(seatId);
+            => !string.IsNullOrEmpty(seatId) && _eligibleSeats.Contains(seatId) && _adapter.IsEligibleSeat(seatId);
 
-        public bool TryGetPending(string seatId, out HandoverPendingRequest request)
+        public bool TryGetPending(GameEngine engine, string seatId, out HandoverPendingRequest request)
         {
-            if (string.IsNullOrEmpty(seatId))
+            request = null;
+            if (string.IsNullOrEmpty(seatId)) return false;
+            HandoverStatus status = _adapter.GetStatus(engine, seatId);
+            if (status == null || !status.HasPending) return false;
+
+            FactionState fac = engine?.State.FindFaction(seatId);
+            request = new HandoverPendingRequest
             {
-                request = null;
-                return false;
-            }
-            return _pendingBySeat.TryGetValue(seatId, out request);
+                RequestId = status.PendingRequestId,
+                SeatId = seatId,
+                FactionName = fac?.Name ?? seatId,
+                TargetController = status.PendingToController,
+                Kind = status.PendingToController == ControllerType.Llm
+                    ? HandoverPendingKind.HandoverToAi
+                    : HandoverPendingKind.ReclaimToHuman,
+                RequestedSeason = status.PendingRequestedSeason,
+            };
+            return true;
         }
 
-        public bool HasAnyPendingReclaim()
+        public bool HasAnyPendingReclaim(GameEngine engine)
         {
-            foreach (var kv in _pendingBySeat)
-                if (kv.Value.Kind == HandoverPendingKind.ReclaimToHuman) return true;
+            for (int i = 0; i < _eligibleSeatOrder.Count; i++)
+            {
+                HandoverStatus status = _adapter.GetStatus(engine, _eligibleSeatOrder[i]);
+                if (status != null && status.HasPending && status.PendingToController == ControllerType.Human)
+                    return true;
+            }
             return false;
         }
 
-        public bool RequestHandoverToAi(string seatId, string factionName, string currentController,
-            bool isSeatTurnActive, int season, out string error)
+        public bool RequestHandoverToAi(GameEngine engine, string seatId, out string error)
         {
-            error = null;
-            if (!IsEligibleSeat(seatId))
-            {
-                error = "Only human-owned factions can be handed over.";
-                return false;
-            }
-            if (!string.Equals(currentController, ControllerType.Human, StringComparison.Ordinal))
-            {
-                error = "Faction is not currently human-controlled.";
-                return false;
-            }
-            if (_pendingBySeat.ContainsKey(seatId))
-            {
-                error = "A controller transfer request is already pending for this faction; cancel it first.";
-                return false;
-            }
-
-            _pendingBySeat[seatId] = new HandoverPendingRequest
-            {
-                SeatId = seatId,
-                FactionName = string.IsNullOrEmpty(factionName) ? seatId : factionName,
-                TargetController = ControllerType.Llm,
-                Kind = HandoverPendingKind.HandoverToAi,
-                Reason = "human_handover_to_ai",
-                RequestedSeason = season,
-                RequestedWhileActiveTurn = isSeatTurnActive,
-            };
-            return true;
+            HandoverResult result = _adapter.Request(engine, seatId, ControllerType.Llm);
+            error = result.Error;
+            return result.Ok;
         }
 
-        public bool RequestReclaimToHuman(string seatId, string factionName, string currentController,
-            bool isSeatTurnActive, int season, out string error)
+        public bool RequestReclaimToHuman(GameEngine engine, string seatId, out string error)
         {
-            error = null;
-            if (!IsEligibleSeat(seatId))
-            {
-                error = "Only operator-owned factions can be reclaimed.";
-                return false;
-            }
-            if (!string.Equals(currentController, ControllerType.Llm, StringComparison.Ordinal))
-            {
-                error = "Faction is not currently LLM-controlled.";
-                return false;
-            }
-            if (_pendingBySeat.ContainsKey(seatId))
-            {
-                error = "A controller transfer request is already pending for this faction; cancel it first.";
-                return false;
-            }
-
-            _pendingBySeat[seatId] = new HandoverPendingRequest
-            {
-                SeatId = seatId,
-                FactionName = string.IsNullOrEmpty(factionName) ? seatId : factionName,
-                TargetController = ControllerType.Human,
-                Kind = HandoverPendingKind.ReclaimToHuman,
-                Reason = "human_reclaim_control",
-                RequestedSeason = season,
-                RequestedWhileActiveTurn = isSeatTurnActive,
-            };
-            return true;
+            HandoverResult result = _adapter.Request(engine, seatId, ControllerType.Human);
+            error = result.Error;
+            return result.Ok;
         }
 
-        public bool CancelPending(string seatId, out string error)
+        public bool CancelPending(GameEngine engine, string seatId, out string error)
         {
-            error = null;
-            if (string.IsNullOrEmpty(seatId) || !_pendingBySeat.Remove(seatId))
-            {
-                error = "No pending controller transfer to cancel.";
-                return false;
-            }
-            return true;
+            HandoverResult result = _adapter.Cancel(engine, seatId);
+            error = result.Error;
+            if (result.Ok && !string.IsNullOrEmpty(seatId))
+                _pendingPreBaselineBySeat.Remove(seatId);
+            return result.Ok;
         }
 
         /// <summary>
-        /// Applies a pending transfer strictly for <paramref name="boundarySeatId"/> when no engine
-        /// turn gate is open. Another seat's turn end must never trigger this seat's transfer.
+        /// Snapshots the seat's pre-transfer observation right before <see cref="GameEngine.EndSeatTurn"/>
+        /// or <see cref="GameEngine.PrepareSeatTurn"/> when a Human -> AI handover is pending, so the
+        /// episode records exact pre-delegation resource baselines and sequence markers.
         /// </summary>
-        public HandoverTransferOutcome ApplyPendingAtSafeBoundary(
-            GameEngine engine,
-            string boundarySeatId,
-            string activeEngineSeatId,
-            IHandoverEngineAdapter adapter,
-            Observation boundarySeatObs)
+        public void CapturePreHandoverBaselineIfPending(GameEngine engine, string seatId, Observation seatObs)
         {
-            if (string.IsNullOrEmpty(boundarySeatId) || !_pendingBySeat.TryGetValue(boundarySeatId, out var req))
+            if (engine == null || string.IsNullOrEmpty(seatId) || seatObs == null) return;
+            HandoverStatus status = _adapter.GetStatus(engine, seatId);
+            if (status != null && status.HasPending
+                && status.Controller == ControllerType.Human
+                && status.PendingToController == ControllerType.Llm)
+            {
+                _pendingPreBaselineBySeat[seatId] = seatObs;
+            }
+        }
+
+        /// <summary>
+        /// Calls the engine's between-turn prepare hook for <paramref name="boundarySeatId"/> when no turn
+        /// gate is active, then synchronizes episode/briefing state if the engine transitioned controllers.
+        /// </summary>
+        public HandoverTransferOutcome PrepareAndSyncBoundary(
+            GameEngine engine, string boundarySeatId, Observation seatObs)
+        {
+            if (engine == null || string.IsNullOrEmpty(boundarySeatId))
                 return HandoverTransferOutcome.NonePending();
 
-            if (!string.IsNullOrEmpty(activeEngineSeatId))
-                return HandoverTransferOutcome.Failed(
-                    "Cannot transfer control mid-turn while " + activeEngineSeatId + " is active.");
-
-            IHandoverEngineAdapter effectiveAdapter = adapter ?? new BaselineDeferredHandoverAdapter();
-            HandoverTransferOutcome outcome = effectiveAdapter.TryTransferBetweenTurns(
-                engine, req.SeatId, req.TargetController, req.Reason);
-
-            if (outcome.Unsupported)
+            HandoverStatus before = _adapter.GetStatus(engine, boundarySeatId);
+            if (!string.IsNullOrEmpty(engine.ActiveSeatId))
             {
-                _pendingBySeat.Remove(boundarySeatId);
-                return outcome;
+                return before != null && before.HasPending
+                    ? HandoverTransferOutcome.Failed(
+                        "Cannot transfer control mid-turn while " + engine.ActiveSeatId + " is active.")
+                    : HandoverTransferOutcome.NonePending();
             }
 
-            if (!outcome.Applied)
-                return outcome;
+            _adapter.PrepareSeatTurn(engine, boundarySeatId);
+            return SyncBoundaryAfterEngineChange(engine, boundarySeatId, seatObs);
+        }
 
-            _pendingBySeat.Remove(boundarySeatId);
-            if (req.Kind == HandoverPendingKind.HandoverToAi)
-                StartDelegationEpisode(req.SeatId, req.FactionName, boundarySeatObs);
-            else if (req.Kind == HandoverPendingKind.ReclaimToHuman)
-                MarkReclaimBriefingReady(req.SeatId, req.FactionName, boundarySeatObs);
+        /// <summary>
+        /// Updates delegation episode / reclaim-briefing state after an engine boundary hook
+        /// (<see cref="GameEngine.EndSeatTurn"/> or <see cref="GameEngine.PrepareSeatTurn"/>) may
+        /// have transitioned <paramref name="seatId"/>'s effective controller.
+        /// </summary>
+        public HandoverTransferOutcome SyncBoundaryAfterEngineChange(
+            GameEngine engine, string seatId, Observation seatObs)
+        {
+            if (engine == null || string.IsNullOrEmpty(seatId))
+                return HandoverTransferOutcome.NonePending();
 
-            return outcome;
+            HandoverStatus status = _adapter.GetStatus(engine, seatId);
+            if (status == null) return HandoverTransferOutcome.NonePending();
+
+            if (!status.HasPending && status.Controller == ControllerType.Human)
+                _pendingPreBaselineBySeat.Remove(seatId);
+
+            if (!_lastKnownControllerBySeat.TryGetValue(seatId, out string previousController))
+            {
+                if (_eligibleSeats.Contains(seatId))
+                    _lastKnownControllerBySeat[seatId] = status.Controller;
+                _pendingPreBaselineBySeat.Remove(seatId);
+                return HandoverTransferOutcome.NonePending();
+            }
+
+            if (string.Equals(previousController, status.Controller, StringComparison.Ordinal))
+                return HandoverTransferOutcome.NonePending();
+
+            _lastKnownControllerBySeat[seatId] = status.Controller;
+            string factionName = seatObs?.Faction(seatId)?.Name ?? engine.State.FindFaction(seatId)?.Name ?? seatId;
+
+            if (previousController == ControllerType.Human && status.Controller == ControllerType.Llm)
+            {
+                _pendingPreBaselineBySeat.TryGetValue(seatId, out Observation baselineObs);
+                _pendingPreBaselineBySeat.Remove(seatId);
+                StartDelegationEpisode(seatId, factionName, baselineObs ?? seatObs);
+                return HandoverTransferOutcome.Succeeded($"{factionName} transferred to AI");
+            }
+
+            _pendingPreBaselineBySeat.Remove(seatId);
+            if (previousController == ControllerType.Llm && status.Controller == ControllerType.Human)
+            {
+                MarkReclaimBriefingReady(seatId, factionName, seatObs);
+                return HandoverTransferOutcome.Succeeded($"{factionName} reclaimed by Human");
+            }
+
+            return HandoverTransferOutcome.NonePending();
         }
 
         public void RecordLlmTurnForSeat(

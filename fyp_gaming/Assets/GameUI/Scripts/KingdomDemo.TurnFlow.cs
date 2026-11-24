@@ -12,9 +12,9 @@ namespace LuanShi
 
         bool SubmitHuman(ActionCommand cmd)
         {
-            cmd.ActorSeatId = currentSeat;
-            cmd.ControllerType = ControllerType.Human;
-            var r = engine.Submit(cmd);
+            if (replayMode || spectatorMode || engine == null || string.IsNullOrEmpty(currentSeat))
+                return false;
+            var r = engine.SubmitAs(currentSeat, activeTurnToken, ControllerType.Human, cmd);
             PushJson(cmd, r);
             if (r.Ok && cmd.Type == ActionType.March)
             {
@@ -106,8 +106,10 @@ namespace LuanShi
             string endedSeat = currentSeat;
             int token = activeTurnToken;
             activeTurnToken = 0;
+            Observation preObs = FilteredObservation(endedSeat);
+            handoverState.CapturePreHandoverBaselineIfPending(engine, endedSeat, preObs);
             if (token != 0) engine.EndSeatTurn(token);
-            ApplyPendingHandoverAtBoundary(endedSeat);
+            SyncHandoverBoundaryAfterSeatEnd(endedSeat, preObs);
             ContinueAfterSeat(endedSeat);
         }
 
@@ -219,14 +221,14 @@ namespace LuanShi
 
         void RunScriptedSeat(string seatId)
         {
-            if (engine.State.WinnerSeatId != null) return;
+            if (engine.State.WinnerSeatId != null || !string.IsNullOrEmpty(engine.ActiveSeatId)) return;
 
             int token = engine.BeginSeatTurn(seatId);
             try
             {
                 foreach (var cmd in ScriptedController.PlanTurn(engine.State, seatId))
                 {
-                    var r = engine.Submit(cmd);
+                    var r = engine.SubmitAs(seatId, token, ControllerType.ScriptedAi, cmd);
                     PushJson(cmd, r);
                     if (r.Ok && cmd.Type == ActionType.March) SyncArmyVisual(cmd.TargetId);
                     if (r.Ok && IsBattle(cmd.Type)) SyncBattleVisuals();
@@ -269,6 +271,7 @@ namespace LuanShi
             SafeClearArmyMoveTargets();
             jsonFeed.Clear();                     // one player's command feed is not the next one's
 
+            if (!string.IsNullOrEmpty(engine.ActiveSeatId)) return;
             activeTurnToken = engine.BeginSeatTurn(currentSeat);
             ReleaseControlLock();
             RefreshObservation();
@@ -347,7 +350,7 @@ namespace LuanShi
 
             // A scripted-only roster has nobody to open the next chair. Its one scripted pass is the
             // whole demo; stop at this boundary rather than resolving seasons recursively forever.
-            if (!RosterHasPlayableSeat() && !handoverState.HasAnyPendingReclaim())
+            if (!RosterHasPlayableSeat() && !handoverState.HasAnyPendingReclaim(engine))
             {
                 statusMsg = NoPlayableSeatStatus;
                 ReleaseControlLock();

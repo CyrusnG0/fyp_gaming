@@ -10,7 +10,6 @@ namespace LuanShi
     public partial class KingdomDemo : MonoBehaviour
     {
         private readonly HandoverCoordinatorState handoverState = new HandoverCoordinatorState();
-        private IHandoverEngineAdapter handoverAdapter = new BaselineDeferredHandoverAdapter();
         private HandoverReclaimBriefing activeReclaimBriefing;
         private bool reclaimBriefingShowing;
         private Vector2 reclaimBriefingScroll;
@@ -27,21 +26,7 @@ namespace LuanShi
             reclaimBriefingScroll = Vector2.zero;
             handoverStatusNote = null;
 
-            if (engine == null || replayMode || spectatorMode)
-            {
-                handoverState.Initialize(null, null);
-                return;
-            }
-            handoverState.Initialize(engine.State.Factions, humanSeats);
-        }
-
-        /// <summary>
-        /// Allows test or integration wiring to supply the engine-backed adapter once Claude's
-        /// handover-engine API is integrated. UI code never mutates FactionState.Controller directly.
-        /// </summary>
-        public void SetHandoverEngineAdapter(IHandoverEngineAdapter adapter)
-        {
-            handoverAdapter = adapter ?? new BaselineDeferredHandoverAdapter();
+            handoverState.Initialize(engine, humanSeats, !replayMode && !spectatorMode);
         }
 
         bool IsHandoverUiVisible()
@@ -87,15 +72,14 @@ namespace LuanShi
                 return false;
             }
 
-            FactionState fac = engine.State.FindFaction(seatId);
-            if (!handoverState.RequestHandoverToAi(
-                    seatId, fac?.Name, fac?.Controller, activeTurnToken != 0, engine.State.Season, out string error))
+            if (!handoverState.RequestHandoverToAi(engine, seatId, out string error))
             {
                 handoverStatusNote = error;
                 statusMsg = error;
                 return false;
             }
 
+            FactionState fac = engine.State.FindFaction(seatId);
             handoverStatusNote = null;
             statusMsg = $"{fac?.Name}: handover to AI pending at turn end";
             return true;
@@ -104,17 +88,15 @@ namespace LuanShi
         bool RequestReclaimToHumanForSeat(string seatId)
         {
             if (engine == null || replayMode || spectatorMode) return false;
-            FactionState fac = engine.State.FindFaction(seatId);
-            bool active = agentTurnActive && string.Equals(agentSeatId, seatId, StringComparison.Ordinal);
-
-            if (!handoverState.RequestReclaimToHuman(
-                    seatId, fac?.Name, fac?.Controller, active, engine.State.Season, out string error))
+            if (!handoverState.RequestReclaimToHuman(engine, seatId, out string error))
             {
                 handoverStatusNote = error;
                 statusMsg = error;
                 return false;
             }
 
+            FactionState fac = engine.State.FindFaction(seatId);
+            bool active = agentTurnActive && string.Equals(agentSeatId, seatId, StringComparison.Ordinal);
             handoverStatusNote = null;
             statusMsg = active
                 ? $"{fac?.Name}: take control pending (waiting for turn boundary)"
@@ -124,7 +106,7 @@ namespace LuanShi
 
         bool CancelPendingHandoverForSeat(string seatId)
         {
-            if (!handoverState.CancelPending(seatId, out string error))
+            if (!handoverState.CancelPending(engine, seatId, out string error))
             {
                 handoverStatusNote = error;
                 return false;
@@ -139,10 +121,23 @@ namespace LuanShi
         bool ApplyPendingHandoverAtBoundary(string boundarySeatId)
         {
             if (engine == null || replayMode || spectatorMode) return false;
-            string openEngineSeat = activeTurnToken != 0 ? currentSeat : (agentSeatToken != 0 ? agentSeatId : null);
-            HandoverTransferOutcome outcome = handoverState.ApplyPendingAtSafeBoundary(
-                engine, boundarySeatId, openEngineSeat, handoverAdapter, FilteredObservation(boundarySeatId));
+            Observation preObs = FilteredObservation(boundarySeatId);
+            handoverState.CapturePreHandoverBaselineIfPending(engine, boundarySeatId, preObs);
+            HandoverTransferOutcome outcome = handoverState.PrepareAndSyncBoundary(
+                engine, boundarySeatId, preObs);
+            return HandleBoundaryOutcome(boundarySeatId, outcome);
+        }
 
+        void SyncHandoverBoundaryAfterSeatEnd(string endedSeatId, Observation preObs)
+        {
+            if (engine == null || replayMode || spectatorMode) return;
+            HandoverTransferOutcome outcome = handoverState.SyncBoundaryAfterEngineChange(
+                engine, endedSeatId, preObs ?? FilteredObservation(endedSeatId));
+            HandleBoundaryOutcome(endedSeatId, outcome);
+        }
+
+        private bool HandleBoundaryOutcome(string seatId, HandoverTransferOutcome outcome)
+        {
             if (outcome.NoPending) return false;
 
             if (!outcome.Applied)
@@ -154,8 +149,8 @@ namespace LuanShi
 
             handoverStatusNote = null;
             if (!string.IsNullOrEmpty(currentSeat)) RefreshObservation();
-            string name = engine.State.FindFaction(boundarySeatId)?.Name ?? boundarySeatId;
-            string ctrl = ControllerLabel(engine.State.FindFaction(boundarySeatId)?.Controller);
+            string name = engine.State.FindFaction(seatId)?.Name ?? seatId;
+            string ctrl = ControllerLabel(engine.State.FindFaction(seatId)?.Controller);
             statusMsg = $"{name}: control transferred to {ctrl}";
             return true;
         }
@@ -173,8 +168,8 @@ namespace LuanShi
                 agentRunner.FailureReason,
                 agentRunner.RequestsThisTurn,
                 agentRunner.ActionsThisTurn,
-                agentRunner.LastContextReportJson,
-                agentRunner.LastSpatialTruncation,
+                agentRunner.ContextReportJsonForSeat(seatId),
+                agentRunner.SpatialTruncationForSeat(seatId),
                 PromptBuilder.MaxPromptObservationEvents);
         }
 
@@ -203,7 +198,7 @@ namespace LuanShi
 
         string TopBarPendingSuffix(string seatId)
         {
-            if (!handoverState.TryGetPending(seatId, out var req)) return "";
+            if (engine == null || !handoverState.TryGetPending(engine, seatId, out var req)) return "";
             return req.Kind == HandoverPendingKind.HandoverToAi
                 ? " (AI pending)"
                 : " (Human pending)";
@@ -251,7 +246,7 @@ namespace LuanShi
                 FactionState fac = engine.State.FindFaction(seatId);
                 if (fac == null) continue;
 
-                bool hasPending = handoverState.TryGetPending(seatId, out var pending);
+                bool hasPending = handoverState.TryGetPending(engine, seatId, out var pending);
                 bool isHuman = fac.Controller == ControllerType.Human;
                 bool isLlm = fac.Controller == ControllerType.Llm;
                 bool isActiveHumanTurn = isHuman && !uiInputLocked && string.Equals(currentSeat, seatId, StringComparison.Ordinal);

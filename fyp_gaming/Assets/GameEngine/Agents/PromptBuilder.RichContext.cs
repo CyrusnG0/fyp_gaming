@@ -160,7 +160,8 @@ namespace LuanShi.Engine
             string movementSection, IReadOnlyList<LlmMemory> memories, string inquiryResult,
             LlmPersona persona, string attackNotice, int maxEvents)
             => BuildUserPrompt(observation, options, history, requestsLeft, actionsLeft, version,
-                movementSection, memories, inquiryResult, persona, attackNotice, null, null, maxEvents);
+                movementSection, memories, inquiryResult, persona, attackNotice, null, null, maxEvents,
+                omitEventTruncationNote: true);
 
         private static string Left(long value) => value < 0 ? "no ceiling" : Num(value);
         private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);

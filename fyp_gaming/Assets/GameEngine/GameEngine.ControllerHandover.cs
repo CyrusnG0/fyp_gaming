@@ -100,13 +100,13 @@ namespace LuanShi.Engine
         }
 
         /// <summary>
-        /// Host hook, call before planning <paramref name="seatId"/>'s turn: applies a pending request when the
-        /// seat is not mid-turn. A no-op during that seat's own active turn and for other seats' boundaries.
+        /// Host hook, call before planning <paramref name="seatId"/>'s turn: applies a pending request when no
+        /// turn gate is open. A no-op during any active turn and for already-applied boundaries.
         /// Returns true when the controller changed.
         /// </summary>
         public bool PrepareSeatTurn(string seatId)
         {
-            if (seatId == null || string.Equals(seatId, activeSeatId, StringComparison.Ordinal)) return false;
+            if (seatId == null || activeSeatId != null) return false;
             return ApplyPendingHandover(seatId, "before_turn");
         }
 
@@ -161,6 +161,7 @@ namespace LuanShi.Engine
         /// <summary>Applies the seat's pending request, if any. The caller guarantees the seat is between turns.</summary>
         private bool ApplyPendingHandover(string seatId, string via)
         {
+            if (State.WinnerSeatId != null) return false;
             if (!pendingHandovers.TryGetValue(seatId, out var p)) return false;
             var fac = State.FindFaction(seatId);
             if (fac == null) return false;

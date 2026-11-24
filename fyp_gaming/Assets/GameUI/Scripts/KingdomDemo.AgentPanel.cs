@@ -30,14 +30,28 @@ namespace LuanShi
                 || !string.IsNullOrEmpty(runner.LastResult);
         }
 
+        bool CanExposeAgentDetailsForSeat(string seatId)
+        {
+            if (spectatorMode) return true;
+            if (string.IsNullOrEmpty(seatId)) return false;
+            if (string.Equals(seatId, currentSeat, System.StringComparison.Ordinal))
+                return showAgentDetails || handoverState.IsEligibleSeat(seatId);
+            bool hotseat = engine != null && SeatRotation.HumanSeats(engine.State).Count > 1;
+            if (hotseat || handoverState.EligibleSeats.Count > 1
+                || handoverState.HasAnyEpisode() || handoverState.IsEligibleSeat(seatId))
+                return false;
+            return showAgentDetails;
+        }
+
         bool ShouldMaskForeignAgentDetails()
         {
-            if (IsAgentRunning() || string.IsNullOrEmpty(agentSeatId) || string.IsNullOrEmpty(currentSeat))
+            if (string.IsNullOrEmpty(agentSeatId) || string.IsNullOrEmpty(currentSeat))
                 return false;
             if (string.Equals(agentSeatId, currentSeat, System.StringComparison.Ordinal))
                 return false;
             bool hotseat = engine != null && SeatRotation.HumanSeats(engine.State).Count > 1;
-            return !showAgentDetails || hotseat || handoverState.GetEpisode(currentSeat) != null;
+            return !showAgentDetails || hotseat || handoverState.EligibleSeats.Count > 1
+                || handoverState.HasAnyEpisode() || handoverState.IsEligibleSeat(agentSeatId);
         }
 
         partial void DrawAgentPanel(Rect area)
@@ -118,10 +132,13 @@ namespace LuanShi
                           EllipsizeToWidth(uiSmall, "Result: " + AgentPublicResultLabel(), width), uiSmall);
             }
 
-            GUI.Label(new Rect(x, area.y + AgentTokensRowY, width, AgentRowHeight),
-                      AgentTokensLabel(), uiSmall);
-            GUI.Label(new Rect(x, area.y + AgentCostRowY, width, AgentRowHeight),
-                      AgentCostLabel(), uiSmall);
+            if (!maskForeign)
+            {
+                GUI.Label(new Rect(x, area.y + AgentTokensRowY, width, AgentRowHeight),
+                          AgentTokensLabel(), uiSmall);
+                GUI.Label(new Rect(x, area.y + AgentCostRowY, width, AgentRowHeight),
+                          AgentCostLabel(), uiSmall);
+            }
 
             string footer = AgentRecorderLabel();
             if (showAgentDetails && !maskForeign) footer = "Observer detail (demo transparency)  ·  " + footer;
