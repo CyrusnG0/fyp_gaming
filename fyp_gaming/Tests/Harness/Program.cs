@@ -104,6 +104,7 @@ internal static partial class Harness
         RunReportText();
         RunHistoryExport();
         RunTurnGate();
+        RunHandover();
         RunTurnFlowPlanner();
         RunLlmParse();
         RunLlmRunner();

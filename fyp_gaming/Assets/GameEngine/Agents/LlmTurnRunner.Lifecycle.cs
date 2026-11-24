@@ -24,6 +24,8 @@ namespace LuanShi.Engine
                 throw new InvalidOperationException("cancel the active turn before resetting the session");
             _histories.Clear();
             _activity.Clear();
+            _contextReportBySeat.Clear();
+            _spatialTruncationBySeat.Clear();
             _history = new List<string>();
             _historySeed = null;
             _gameId = null;
@@ -39,6 +41,8 @@ namespace LuanShi.Engine
             LastSummary = null;
             LastCommandJson = null;
             LastResult = null;
+            LastSpatialTruncation = null;
+            LastSpatialSeatId = null;
             FailureReason = null;
             EndReason = EndReason.None;
             _season = 0;

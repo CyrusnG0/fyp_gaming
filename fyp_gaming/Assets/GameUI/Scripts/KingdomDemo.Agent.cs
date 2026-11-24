@@ -71,7 +71,15 @@ namespace LuanShi
 
             agentHasSeat = false;
             agentSeatId = null;
-            if (llmSeats == null || llmSeats.Length == 0) return;
+            if (llmSeats == null || llmSeats.Length == 0)
+            {
+                // A match starting with no preconfigured LLM seat may still delegate a human faction
+                // later; prepare config and fake/keyed runner upfront without marking an LLM chair yet.
+                LoadAgentConfig();
+                if (FakeTransportRequested || (agentLoadedConfig != null && agentLoadedConfig.HasApiKey))
+                    RebuildAgentRunner();
+                return;
+            }
 
             // Validate the whole roster entry list, then drive the first usable seat. A malformed
             // entry must be visible in the log rather than silently becoming a dead chair later.
@@ -169,7 +177,7 @@ namespace LuanShi
         {
             bool tick = replayMode ? _replaySession != null : spectatorMode
                 ? spectatorSession != null
-                : agentHasSeat || agentResumeAfterInterrupt;
+                : agentHasSeat || agentResumeAfterInterrupt || handoverState.HasEligibleSeats;
             if (tick && agentTickLoop == null) agentTickLoop = StartCoroutine(AgentTickLoop());
         }
         IEnumerator AgentTickLoop()
@@ -222,6 +230,12 @@ namespace LuanShi
             }
             agentTurnActive = false;
             agentResumePending = false;
+            try
+            {
+                RecordCompletedAgentTurnForHandover(endedSeat);
+                SyncHandoverBoundaryAfterSeatEnd(endedSeat, FilteredObservation(endedSeat));
+            }
+            catch (Exception) { }
             ReleaseControlLock();
             if (!string.IsNullOrEmpty(endedSeat) && engine != null)
             {
@@ -232,10 +246,10 @@ namespace LuanShi
         /// <summary>Opens the LLM gate and starts one bounded runner turn; returns without blocking.</summary>
         void BeginLlmTurn(string seatId)
         {
-            if (!agentHasSeat || engine == null)
+            if (engine == null || (!agentHasSeat && !EnsureAgentRunnerReady(out _)))
             {
                 string reason = string.IsNullOrEmpty(agentUnavailableReason)
-                    ? "no LLM seat is configured" : agentUnavailableReason;
+                    ? "no LLM runner is available" : agentUnavailableReason;
                 PushAgentFeed("[LLM] agent unavailable: " + reason);
                 ReleaseControlLock();
                 ContinueAfterSeat(seatId);
@@ -254,6 +268,7 @@ namespace LuanShi
                 ContinueAfterSeat(seatId);
                 return;
             }
+            agentHasSeat = true;
             var faction = seatObs.Faction(seatId);
             if (faction != null && !string.IsNullOrEmpty(faction.Name)) agentFactionName = faction.Name;
 
@@ -264,6 +279,12 @@ namespace LuanShi
             if (FakeTransportRequested != agentFakeMode
                 || fakeGarrisonRehearsal != agentGarrisonRehearsalActive)
                 RebuildAgentRunner();
+            if (!string.IsNullOrEmpty(engine.ActiveSeatId))
+            {
+                PushAgentFeed("[LLM] turn gate busy (" + engine.ActiveSeatId + "); skipping duplicate begin");
+                ReleaseControlLock();
+                return;
+            }
             int token;
             try { token = engine.BeginSeatTurn(seatId); }
             catch (Exception)
@@ -286,12 +307,13 @@ namespace LuanShi
                 agentTurnActive = false; agentSeatToken = 0;
                 agentLastElapsed = Time.unscaledTime - agentTurnStartedAt; agentTurnStartedAt = 0f;
                 PushAgentFeed("[LLM] agent unavailable: " + agentUnavailableReason);
+                SyncHandoverBoundaryAfterSeatEnd(seatId, FilteredObservation(seatId));
                 ReleaseControlLock(); RefreshObservation(); ContinueAfterSeat(seatId);
                 return;
             }
             uiInputLocked = true;
             uiLockReason = $"{agentFactionName} (LLM) is playing...";
-            var host = new AgentTurnHost(this, seatId);
+            var host = new AgentTurnHost(this, seatId, token);
             if (agentFake != null) EnqueueFakeTurn(seatId, seatObs, host);
             try { agentRunner.Begin(host, token, seatId, randomSeed); }
             catch (Exception)
@@ -333,10 +355,12 @@ namespace LuanShi
                     || agentRunner.State == RunnerState.Cancelled)))
                 CompleteAgentSeatTurn();
         }
-        /// <summary>Closes the LLM gate, refreshes the observation and resumes the rotation walk.</summary>
+        /// <summary>Closes the LLM gate, captures seat-filtered turn telemetry, syncs authoritative
+        /// between-turn reclaim/handover, refreshes the observation and resumes the rotation walk.</summary>
         void CompleteAgentSeatTurn()
         {
             if (!agentTurnActive) return;
+            string endedSeat = agentSeatId;
             agentTurnActive = false;
             agentResumePending = false;
             agentLastElapsed = Time.unscaledTime - agentTurnStartedAt;
@@ -344,13 +368,15 @@ namespace LuanShi
             int token = agentSeatToken;
             agentSeatToken = 0;
             if (token != 0) engine.EndSeatTurn(token);
+            RecordCompletedAgentTurnForHandover(endedSeat);
+            SyncHandoverBoundaryAfterSeatEnd(endedSeat, FilteredObservation(endedSeat));
             ReleaseControlLock();
             RefreshObservation();
-            ContinueAfterSeat(agentSeatId);
+            ContinueAfterSeat(endedSeat);
         }
         void CancelAgentTurn()
         {
-            if (!agentTurnActive || agentRunner == null) return;
+            if (!CanCancelAgentTurn()) return;
             if (agentRunner.State != RunnerState.Requesting && agentRunner.State != RunnerState.Executing) return;
             agentRunner.Cancel("user cancelled");
             agentResumePending = false;
@@ -361,10 +387,10 @@ namespace LuanShi
         {
             if (agentTurnActive) agentResumePending = true;
         }
-        ValidationResult SubmitAgentCommand(string seatId, ActionCommand cmd)
+        ValidationResult SubmitAgentCommand(string seatId, int token, ActionCommand cmd)
         {
-            ValidationResult result = engine.SubmitAs(seatId, agentSeatToken, cmd);
-            agentLastActionType = cmd != null ? cmd.Type : null;
+            ValidationResult result = engine.SubmitAs(seatId, token, ControllerType.Llm, cmd);
+            if (result.Ok) agentLastActionType = cmd != null ? cmd.Type : null;
             // A model march must move the same banner and refresh the same fog/tint view a human
             // march does, and a model battle must leave the same map a human battle does: destroyed
             // armies lose their banner, routed survivors and the occupying winner are re-placed, and
@@ -390,12 +416,9 @@ namespace LuanShi
                 selArmy = null;
                 RefreshObservation();
             }
-            if (showAgentDetails)
-                jsonFeed.Add((result.Ok ? "✓ " : "✗ ") + "[LLM] " + (cmd != null ? cmd.ToJson() : "null"));
-            else
-                jsonFeed.Add("[LLM] " + (cmd != null ? cmd.Type : "?") + " -> " +
-                             (result.Ok ? "ok" : "rejected"));
-            if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
+            string feedLine = HandoverUiPrivacy.FormatLiveAgentFeedLine(
+                CanExposeAgentDetailsForSeat(seatId), cmd, result);
+            if (!string.IsNullOrEmpty(feedLine)) PushAgentFeed(feedLine);
             return result;
         }
         Observation ObserveAgentSeat(string seatId) => FilteredObservation(seatId);
@@ -434,14 +457,14 @@ namespace LuanShi
         private sealed class AgentTurnHost : IAttackPlanningHost, IPersonaHost, ISpatialPlanningHost
         {
             private readonly SingleLlmTurnHost _inner;
-            public AgentTurnHost(KingdomDemo owner, string seatId)
+            public AgentTurnHost(KingdomDemo owner, string seatId, int token)
             {
                 _inner = new SingleLlmTurnHost(
                     owner.engine,
                     owner.agentConfig,
                     seatId,
                     () => owner.ObserveAgentSeat(seatId),
-                    cmd => owner.SubmitAgentCommand(seatId, cmd),
+                    cmd => owner.SubmitAgentCommand(seatId, token, cmd),
                     owner.AgentEndTurnRequested);
             }
             public string FactionKey => _inner.FactionKey;

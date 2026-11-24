@@ -79,10 +79,10 @@ namespace LuanShi
             DrawCityLabels();
             DrawSelectedArmyLabel();
 
-            // selection + location popup (map view only; the court report is a modal over it)
+            // selection + location popup (map view only; the court report / reclaim briefing are modals over it)
             if (activeTab == "map")
             {
-                if (!reportShowing)
+                if (!reportShowing && !reclaimBriefingShowing)
                 {
                     if (replayMode) DrawReplayPanel();
                     else if (spectatorMode)
@@ -104,16 +104,18 @@ namespace LuanShi
             // A locked LLM turn may never expose a tab body. ShowTab also refuses to switch, but the
             // draw path keeps the invariant even if some other code changes activeTab.
             bool tabBodyAllowed = !(uiInputLocked && !spectatorMode && !replayMode);
-            if (activeTab != "map" && !reportShowing && tabBodyAllowed)
+            if (activeTab != "map" && !reportShowing && !reclaimBriefingShowing && tabBodyAllowed)
                 DrawTabPanel(uiBody, uiButton, uiTitle, uiMono);
             if (reportShowing) DrawReport(uiBody, uiButton, uiTitle);
+            else if (reclaimBriefingShowing) DrawReclaimBriefingModal();
 
-            // HUD overlay, not the map-tab branch: the Cancel button must stay reachable even if a
-            // tab was open when the agent turn began. DrawAgentPanel adds/removes its uiRects entry.
-            if (!spectatorMode && !replayMode && !reportShowing && agentHasSeat)
+            // HUD overlay, not the map-tab branch: Cancel / Take control stay reachable even while locked.
+            if (!spectatorMode && !replayMode && !reportShowing && !reclaimBriefingShowing && agentHasSeat)
                 DrawAgentPanel(AgentPanelArea());
 
-            if (!reportShowing && !replayMode) DrawAgentChat();
+            if (!reportShowing && !reclaimBriefingShowing && !replayMode) DrawAgentChat();
+
+            if (!reportShowing && !reclaimBriefingShowing) DrawFactionControlPanel();
 
             HandleClicks();
 

@@ -105,6 +105,14 @@ namespace LuanShi.Engine
             string resultError = null;
             _captureExplanation = null;
 
+            if (!string.Equals(flight.SeatId, _seatId, StringComparison.Ordinal) || flight.TurnToken != _turnToken)
+            {
+                LastResult = "stale response discarded";
+                AddActivity("validation", "Stale response discarded: turn token or seat changed.");
+                WriteRecord(flight, response, false, null, null, "stale response discarded");
+                return;
+            }
+
             // Terminal stop: a winner declared while this request was in flight makes the response
             // stale. Discard it (never parse or execute it) and stop before any new dispatch.
             if (HasPlanningHost && PlanningHost.IsGameOver)

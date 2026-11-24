@@ -46,6 +46,8 @@ namespace LuanShi.Engine
             public string SchemaHash;
             public int MaxOutputTokens;
             public SpatialTruncationReport SpatialTruncation;
+            public string SeatId;
+            public int TurnToken;
             /// <summary>Ledger reservation held for this provider round-trip (null when deliberation is off).</summary>
             public string DeliberationReservationId;
         }
@@ -60,6 +62,10 @@ namespace LuanShi.Engine
         // pilot, so switching seats must never leak one seat's action history into the other's prompt.
         private readonly Dictionary<string, List<string>> _histories =
             new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _contextReportBySeat =
+            new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, SpatialTruncationReport> _spatialTruncationBySeat =
+            new Dictionary<string, SpatialTruncationReport>(StringComparer.Ordinal);
         private List<string> _history = new List<string>();
 
         private ITurnHost _host;
@@ -93,6 +99,7 @@ namespace LuanShi.Engine
         public string FailureReason { get; private set; }
         public EndReason EndReason { get; private set; }
         public SpatialTruncationReport LastSpatialTruncation { get; private set; }
+        public string LastSpatialSeatId { get; private set; }
         public int RequestsThisTurn { get; private set; }
         public int ActionsThisTurn { get; private set; }
         public int InvalidThisTurn { get; private set; }
@@ -148,6 +155,7 @@ namespace LuanShi.Engine
             _memories.Clear();
             _pendingInquiryResult = null;
             LastSpatialTruncation = null;
+            LastSpatialSeatId = null;
             ResetDeliberationTurnState();
             ResetExperimentTurnState();
             // History is scoped to the seat and the game seed. Reusing one runner for both LLM
@@ -157,8 +165,12 @@ namespace LuanShi.Engine
             {
                 _histories.Clear();
                 _activity.Clear();
+                _contextReportBySeat.Clear();
+                _spatialTruncationBySeat.Clear();
                 _historySeed = seed;
             }
+            _contextReportBySeat.Remove(seatId);
+            _spatialTruncationBySeat.Remove(seatId);
             if (!_histories.TryGetValue(seatId, out _history))
             {
                 _history = new List<string>();
@@ -435,6 +447,8 @@ namespace LuanShi.Engine
                         requestsLeft, actionsLeft, relevantMemories, inquiryResult,
                         inquiry, persona, research);
                 LastSpatialTruncation = spatialReport;
+                LastSpatialSeatId = _seatId;
+                if (!string.IsNullOrEmpty(_seatId)) _spatialTruncationBySeat[_seatId] = spatialReport;
             }
             // The bounded diplomacy section sits before the candidate list, so the model reads the
             // untrusted text immediately next to the legal orders. It is added after the builder (and
@@ -449,6 +463,7 @@ namespace LuanShi.Engine
                 LastSpatialTruncation.SystemChars = system.Length;
                 LastSpatialTruncation.UserChars = user.Length;
                 LastSpatialTruncation.TotalChars = system.Length + user.Length;
+                if (!string.IsNullOrEmpty(_seatId)) _spatialTruncationBySeat[_seatId] = LastSpatialTruncation;
             }
             if (system.Length + user.Length > promptLimit)
             {
@@ -515,6 +530,8 @@ namespace LuanShi.Engine
                 // Match the transport's effective fallback when the configured cap is zero.
                 MaxOutputTokens = _config.MaxOutputTokens > 0 ? _config.MaxOutputTokens : 400,
                 SpatialTruncation = requestSpatialTruncation,
+                SeatId = _seatId,
+                TurnToken = _turnToken,
                 DeliberationReservationId = requestAdmission?.ReservationId,
             };
             State = RunnerState.Requesting;

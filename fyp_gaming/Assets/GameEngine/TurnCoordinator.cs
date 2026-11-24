@@ -20,6 +20,7 @@ namespace LuanShi.Engine
         private bool turnGateEnabled;
         private string activeSeatId;
         private int turnToken;
+        private string turnController;   // the seat's controller when the active turn began
 
         /// <summary>The seat whose turn it is, or null when the gate is off or no seat is active.</summary>
         public string ActiveSeatId => activeSeatId;
@@ -37,6 +38,7 @@ namespace LuanShi.Engine
 
             turnGateEnabled = true;
             activeSeatId = seatId;
+            turnController = State.FindFaction(seatId).Controller;
             return ++turnToken;
         }
 
@@ -48,7 +50,11 @@ namespace LuanShi.Engine
         public void EndSeatTurn(int token)
         {
             if (!turnGateEnabled || token != turnToken) return;
+            string closed = activeSeatId;
             activeSeatId = null;
+            turnController = null;
+            // The only same-turn handover hook: a request waits for the seat's own turn to close.
+            if (closed != null) ApplyPendingHandover(closed, "after_turn");
         }
 
         /// <summary>
@@ -64,6 +70,36 @@ namespace LuanShi.Engine
             if (cmd == null) return Submit(null);
 
             cmd.ActorSeatId = seatId;
+            return Submit(cmd);
+        }
+
+        /// <summary>
+        /// Controller-bound host submission. <paramref name="controllerType"/> is the kind of controller the
+        /// host is running (llm for the runner). It must equal both the controller the active turn began with
+        /// and the seat's current controller, so a reply that outlived a handover can never be stamped as, or
+        /// executed for, the new controller. The command's own controller claim is overwritten.
+        /// </summary>
+        public ValidationResult SubmitAs(string seatId, int token, string controllerType, ActionCommand cmd)
+        {
+            if (cmd != null)
+            {
+                // Host-bound identity: a discarded reply is recorded against the seat, never with a controller claim.
+                cmd.ControllerType = null;
+                cmd.ActorSeatId = seatId;
+            }
+            if (!turnGateEnabled || token != turnToken)
+                return Reject(cmd, "stale turn token");
+            if (activeSeatId == null || !string.Equals(seatId, activeSeatId, StringComparison.Ordinal))
+                return Reject(cmd, "not this seat's turn");
+            if (cmd == null) return Submit(null);
+            var fac = State.FindFaction(seatId);
+            if (fac == null || controllerType != fac.Controller || controllerType != turnController)
+            {
+                cmd.ActorSeatId = seatId;
+                return Reject(cmd, "controller mismatch");
+            }
+            cmd.ActorSeatId = seatId;
+            cmd.ControllerType = controllerType;
             return Submit(cmd);
         }
 
