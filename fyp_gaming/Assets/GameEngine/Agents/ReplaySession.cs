@@ -424,7 +424,8 @@ namespace LuanShi.Engine
                         {
                             reasonMatch = string.Equals(replayedError, req.ResultError, StringComparison.Ordinal)
                                 || (isLlmController && string.Equals(
-                                    FeedbackPolicy.ForModel(replayedError, parsedCmd, obs, _engine.State.RequireAssaultTroopRatio),
+                                    FeedbackPolicy.ForModel(replayedError, parsedCmd, obs, _engine.State.RequireAssaultTroopRatio,
+                                        PromptBuilder.IsUnitTypesPromptVersion(req.PromptVersion)),
                                     req.ResultError, StringComparison.Ordinal));
                         }
 
