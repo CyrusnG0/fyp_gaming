@@ -50,8 +50,9 @@ namespace LuanShi
             }
             else
             {
+                string pendingSuffix = TopBarPendingSuffix(currentSeat);
                 header =
-                    $"{fac.Name} - {ControllerLabel(controller)}  |  " +
+                    $"{fac.Name} - {ControllerLabel(controller)}{pendingSuffix}  |  " +
                     $"Season {engine.State.Season} ({BalanceConfig.SeasonName(engine.State.Season)})  |  " +
                     $"Orders {orders}/{BalanceConfig.CommandPointsPerSeason}";
                 detail =
@@ -110,7 +111,9 @@ namespace LuanShi
         {
             PrepareUiTheme();
             // A spectator may browse every tab (read-only); order buttons inside stay locked by uiInputLocked.
-            bool interactive = (spectatorMode || replayMode) ? !reportShowing : (!uiInputLocked && !reportShowing);
+            bool interactive = (spectatorMode || replayMode)
+                ? (!reportShowing && !reclaimBriefingShowing)
+                : (!uiInputLocked && !reportShowing && !reclaimBriefingShowing);
 
             for (int i = 0; i < Tabs.GetLength(0); i++)
             {
@@ -134,7 +137,7 @@ namespace LuanShi
             var rect = new Rect(EndTurnX, EndTurnY, EndTurnWidth, EndTurnHeight);
             uiRects.Add(rect);
 
-            bool interactive = !uiInputLocked && !reportShowing;
+            bool interactive = !uiInputLocked && !reportShowing && !reclaimBriefingShowing;
             string label = uiInputLocked ? "Waiting..." : hotseat ? $"End {fac.Name}'s turn" : "End turn";
             if (GUI.Button(rect, label, interactive ? uiButton : uiButtonDisabled) && interactive)
             {

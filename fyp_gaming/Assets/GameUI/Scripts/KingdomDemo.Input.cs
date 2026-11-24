@@ -18,7 +18,7 @@ namespace LuanShi
             var e = Event.current;
             if (e.type != EventType.MouseDown) return;
             // a concept tab is modal over the map, exactly like the court report
-            if (!ready || reportShowing || battleResultShowing || handoverShowing || activeTab != "map") return;
+            if (!ready || reportShowing || battleResultShowing || handoverShowing || reclaimBriefingShowing || activeTab != "map") return;
             if (PointerOverUI(e.mousePosition)) return;
 
             // While a controller owns the turn, map input is inert as a whole. Selection is intentionally

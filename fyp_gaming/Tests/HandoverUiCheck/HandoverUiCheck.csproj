@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LuanShi.HandoverUiCheck</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../Assets/GameEngine/**/*.cs" />
+    <Compile Include="../../Assets/GameUI/Scripts/HandoverUiTypes.cs" />
+    <Compile Include="../../Assets/GameUI/Scripts/HandoverUiModel.cs" />
+    <Compile Include="../../Assets/GameUI/Scripts/HandoverBriefingBuilder.cs" />
+  </ItemGroup>
+</Project>

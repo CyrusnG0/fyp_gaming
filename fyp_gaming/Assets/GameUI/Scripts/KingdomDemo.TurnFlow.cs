@@ -71,6 +71,7 @@ namespace LuanShi
         // ------------------------------------------------------------- hotseat seat flow
 
         private int activeTurnToken;   // engine turn token held by the human seat currently in the chair
+        private string reportTargetSeat;
         private const string NoPlayableSeatStatus = "No human or LLM seat - nothing to play";
 
         /// <summary>
@@ -94,7 +95,7 @@ namespace LuanShi
         {
             if (replayMode || spectatorMode) return;   // SpectatorSession owns every turn
             if (!ready || engine == null || string.IsNullOrEmpty(currentSeat)) return;
-            if (reportShowing || handoverShowing) return;
+            if (reportShowing || handoverShowing || reclaimBriefingShowing) return;
             if (agentTurnActive || agentResumePending) return;   // repeat clicks while Shu is playing
             if (!SeatRotation.IsHuman(engine.State, currentSeat)) return;
             if (engine.State.WinnerSeatId != null) return;
@@ -102,10 +103,24 @@ namespace LuanShi
             selCity = null; selArmy = null;
             SafeClearArmyMoveTargets();
 
+            string endedSeat = currentSeat;
             int token = activeTurnToken;
             activeTurnToken = 0;
             if (token != 0) engine.EndSeatTurn(token);
-            ContinueAfterSeat(currentSeat);
+            ApplyPendingHandoverAtBoundary(endedSeat);
+            ContinueAfterSeat(endedSeat);
+        }
+
+        TurnFlowStep ApplyBoundaryTransferForStep(TurnFlowStep step)
+        {
+            if (!step.IsSeat || engine == null) return step;
+            if (!ApplyPendingHandoverAtBoundary(step.SeatId)) return step;
+            FactionState fac = engine.State.FindFaction(step.SeatId);
+            if (fac == null) return step;
+            TurnFlowAction action = fac.Controller == ControllerType.Human ? TurnFlowAction.HumanSeat
+                : fac.Controller == ControllerType.Llm ? TurnFlowAction.LlmSeat
+                : TurnFlowAction.ScriptedSeat;
+            return new TurnFlowStep(action, step.SeatId);
         }
 
         /// <summary>
@@ -125,6 +140,7 @@ namespace LuanShi
         /// </summary>
         void StartPlannedTurn(TurnFlowStep step)
         {
+            step = ApplyBoundaryTransferForStep(step);
             switch (step.Action)
             {
                 case TurnFlowAction.GameOver:
@@ -166,7 +182,7 @@ namespace LuanShi
 
             while (true)
             {
-                TurnFlowStep step = TurnFlowPlanner.NextAfter(engine.State, endedSeat);
+                TurnFlowStep step = ApplyBoundaryTransferForStep(TurnFlowPlanner.NextAfter(engine.State, endedSeat));
                 switch (step.Action)
                 {
                     case TurnFlowAction.GameOver:
@@ -257,11 +273,18 @@ namespace LuanShi
             ReleaseControlLock();
             RefreshObservation();
 
+            if (!string.Equals(reportTargetSeat, currentSeat, System.StringComparison.Ordinal))
+                pendingReport = false;
+
             handoverShowing = SeatRotation.HumanSeats(engine.State).Count > 1;
             if (handoverShowing) return;
 
             if (pendingReport) { pendingReport = false; reportShowing = true; }
-            else statusMsg = SeatTurnPrompt();
+            else
+            {
+                TryOpenPendingReclaimBriefing(currentSeat);
+                statusMsg = SeatTurnPrompt();
+            }
         }
 
         private bool warnedGridIndicatorClear;
@@ -324,7 +347,7 @@ namespace LuanShi
 
             // A scripted-only roster has nobody to open the next chair. Its one scripted pass is the
             // whole demo; stop at this boundary rather than resolving seasons recursively forever.
-            if (!RosterHasPlayableSeat())
+            if (!RosterHasPlayableSeat() && !handoverState.HasAnyPendingReclaim())
             {
                 statusMsg = NoPlayableSeatStatus;
                 ReleaseControlLock();
@@ -337,6 +360,7 @@ namespace LuanShi
             RefreshObservation();
 
             BuildReport(report);
+            reportTargetSeat = currentSeat;
             pendingReport = true;
             handoverShowing = false;
             if (replayMode || spectatorMode) return;   // SpectatorSession owns the next season too
@@ -353,7 +377,7 @@ namespace LuanShi
         public void DebugEndTurn()
         {
             if (replayMode || spectatorMode) return;   // a spectator may never advance a model seat
-            if (!ready || engine == null || uiInputLocked || reportShowing || handoverShowing) return;
+            if (!ready || engine == null || uiInputLocked || reportShowing || handoverShowing || reclaimBriefingShowing) return;
             if (engine.State.WinnerSeatId != null) return;
             locationChoiceOpen = false;
             EndTurn();

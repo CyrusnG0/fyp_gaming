@@ -71,7 +71,15 @@ namespace LuanShi
 
             agentHasSeat = false;
             agentSeatId = null;
-            if (llmSeats == null || llmSeats.Length == 0) return;
+            if (llmSeats == null || llmSeats.Length == 0)
+            {
+                // A match starting with no preconfigured LLM seat may still delegate a human faction
+                // later; prepare config and fake/keyed runner upfront without marking an LLM chair yet.
+                LoadAgentConfig();
+                if (FakeTransportRequested || (agentLoadedConfig != null && agentLoadedConfig.HasApiKey))
+                    RebuildAgentRunner();
+                return;
+            }
 
             // Validate the whole roster entry list, then drive the first usable seat. A malformed
             // entry must be visible in the log rather than silently becoming a dead chair later.
@@ -169,7 +177,7 @@ namespace LuanShi
         {
             bool tick = replayMode ? _replaySession != null : spectatorMode
                 ? spectatorSession != null
-                : agentHasSeat || agentResumeAfterInterrupt;
+                : agentHasSeat || agentResumeAfterInterrupt || handoverState.HasEligibleSeats;
             if (tick && agentTickLoop == null) agentTickLoop = StartCoroutine(AgentTickLoop());
         }
         IEnumerator AgentTickLoop()
@@ -232,10 +240,10 @@ namespace LuanShi
         /// <summary>Opens the LLM gate and starts one bounded runner turn; returns without blocking.</summary>
         void BeginLlmTurn(string seatId)
         {
-            if (!agentHasSeat || engine == null)
+            if (engine == null || (!agentHasSeat && !EnsureAgentRunnerReady(out _)))
             {
                 string reason = string.IsNullOrEmpty(agentUnavailableReason)
-                    ? "no LLM seat is configured" : agentUnavailableReason;
+                    ? "no LLM runner is available" : agentUnavailableReason;
                 PushAgentFeed("[LLM] agent unavailable: " + reason);
                 ReleaseControlLock();
                 ContinueAfterSeat(seatId);
@@ -254,6 +262,7 @@ namespace LuanShi
                 ContinueAfterSeat(seatId);
                 return;
             }
+            agentHasSeat = true;
             var faction = seatObs.Faction(seatId);
             if (faction != null && !string.IsNullOrEmpty(faction.Name)) agentFactionName = faction.Name;
 
@@ -333,10 +342,12 @@ namespace LuanShi
                     || agentRunner.State == RunnerState.Cancelled)))
                 CompleteAgentSeatTurn();
         }
-        /// <summary>Closes the LLM gate, refreshes the observation and resumes the rotation walk.</summary>
+        /// <summary>Closes the LLM gate, captures seat-filtered turn telemetry, checks safe between-turn
+        /// reclaim/handover, refreshes the observation and resumes the rotation walk.</summary>
         void CompleteAgentSeatTurn()
         {
             if (!agentTurnActive) return;
+            string endedSeat = agentSeatId;
             agentTurnActive = false;
             agentResumePending = false;
             agentLastElapsed = Time.unscaledTime - agentTurnStartedAt;
@@ -344,9 +355,11 @@ namespace LuanShi
             int token = agentSeatToken;
             agentSeatToken = 0;
             if (token != 0) engine.EndSeatTurn(token);
+            RecordCompletedAgentTurnForHandover(endedSeat);
+            ApplyPendingHandoverAtBoundary(endedSeat);
             ReleaseControlLock();
             RefreshObservation();
-            ContinueAfterSeat(agentSeatId);
+            ContinueAfterSeat(endedSeat);
         }
         void CancelAgentTurn()
         {

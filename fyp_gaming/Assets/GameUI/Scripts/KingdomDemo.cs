@@ -11,6 +11,7 @@
 //   .Presentation.cs    observation-authorized labels, seams, framing, text fitting
 //   .AgentPanel.cs      docked LLM agent details
 //   .AgentStatus.cs     agent status helpers and play-mode lifecycle
+//   .Handover.cs        between-turn Human <-> LLM handover UI and reclaim briefing
 //   .Report.cs    court report, handover/victory screens, formatting helpers
 //   .Tabs.cs      Domestic / Diplomacy / Intel / Research / History tab panels
 
@@ -183,6 +184,7 @@ namespace LuanShi
             try
             {
                 InitGame();
+                InitializeHandoverState();
                 InitializeAgent();
                 SyncSharedMatchRules();
                 InitializeSpectator();

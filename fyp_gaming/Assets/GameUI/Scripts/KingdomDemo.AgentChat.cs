@@ -24,8 +24,10 @@ namespace LuanShi
         void DrawAgentChat()
         {
             // Single-LLM transparency is an explicit opt-in. Spectator chat is a researcher view.
+            // A reclaimed seat's own delegation trace stays viewable for that seat only.
             if (agentRunner == null) return;
-            if (!spectatorMode && (!agentHasSeat || !showAgentDetails)) return;
+            bool hasOwnEpisode = !IsAgentRunning() && handoverState.GetEpisode(currentSeat) != null;
+            if (!spectatorMode && !hasOwnEpisode && (!agentHasSeat || !showAgentDetails)) return;
 
             float top = (spectatorMode ? SpectatorPanelArea() : AgentPanelArea()).yMax;
             float available = ChatBottomY - top - ChatGap;
@@ -239,7 +241,16 @@ namespace LuanShi
 
         private IReadOnlyList<LlmActivity> ChatEntries()
         {
-            if (!spectatorMode) return agentRunner.ActivityForSeat(agentSeatId);
+            if (!spectatorMode)
+            {
+                if (IsAgentRunning()) return agentRunner.ActivityForSeat(agentSeatId);
+                if (!string.IsNullOrEmpty(currentSeat)
+                    && (handoverState.GetEpisode(currentSeat) != null
+                        || !showAgentDetails
+                        || (engine != null && SeatRotation.HumanSeats(engine.State).Count > 1)))
+                    return handoverState.GetEpisodeActivities(currentSeat);
+                return agentRunner.ActivityForSeat(agentSeatId);
+            }
             return string.IsNullOrEmpty(agentChatFilterSeat)
                 ? agentRunner.Activity
                 : agentRunner.ActivityForSeat(agentChatFilterSeat);

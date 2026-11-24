@@ -30,6 +30,16 @@ namespace LuanShi
                 || !string.IsNullOrEmpty(runner.LastResult);
         }
 
+        bool ShouldMaskForeignAgentDetails()
+        {
+            if (IsAgentRunning() || string.IsNullOrEmpty(agentSeatId) || string.IsNullOrEmpty(currentSeat))
+                return false;
+            if (string.Equals(agentSeatId, currentSeat, System.StringComparison.Ordinal))
+                return false;
+            bool hotseat = engine != null && SeatRotation.HumanSeats(engine.State).Count > 1;
+            return !showAgentDetails || hotseat || handoverState.GetEpisode(currentSeat) != null;
+        }
+
         partial void DrawAgentPanel(Rect area)
         {
             if (!agentHasSeat) { uiRects.Remove(area); return; }   // nothing drawn = no swallowed click
@@ -42,6 +52,7 @@ namespace LuanShi
             float width = area.width - PanelPadX * 2f;
             bool running = IsAgentRunning();
             bool turnRows = AgentTurnRowsVisible();
+            bool maskForeign = ShouldMaskForeignAgentDetails();
 
             float titleX = area.x + PanelHeaderPadX;
             float titleWidth = Mathf.Max(80f, area.width - AgentCancelWidth - PanelHeaderPadX * 2f - 8f);
@@ -70,7 +81,12 @@ namespace LuanShi
 
             if (!turnRows) return;
 
-            if (showAgentDetails)
+            if (maskForeign)
+            {
+                GUI.Label(new Rect(x, area.y + AgentDecisionRowY, width, AgentRowHeight),
+                          EllipsizeToWidth(uiSmall, "Other faction details hidden for seat privacy.", width), uiSmall);
+            }
+            else if (showAgentDetails)
             {
                 string summary = agentRunner != null ? agentRunner.LastSummary : null;
                 float decisionHeight = Mathf.Max(AgentLineHeight, TextLineHeight(uiSmallWrap))
@@ -108,12 +124,12 @@ namespace LuanShi
                       AgentCostLabel(), uiSmall);
 
             string footer = AgentRecorderLabel();
-            if (showAgentDetails) footer = "Observer detail (demo transparency)  ·  " + footer;
+            if (showAgentDetails && !maskForeign) footer = "Observer detail (demo transparency)  ·  " + footer;
             DrawFittedLabel(new Rect(x, area.y + AgentRecorderRowY, width, AgentRowHeight),
                             EllipsizeToWidth(uiMono, footer, width), uiMono, agentRecorderShort);
 
             string failure = AgentFailureReason();
-            if (showAgentDetails && !string.IsNullOrEmpty(failure))
+            if (showAgentDetails && !maskForeign && !string.IsNullOrEmpty(failure))
                 GUI.Label(new Rect(x, area.y + AgentFailureRowY, width, AgentRowHeight),
                           EllipsizeToWidth(uiReason, "failure: " + failure, width), uiReason);
         }

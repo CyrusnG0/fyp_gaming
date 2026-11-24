@@ -122,6 +122,7 @@ namespace LuanShi
         {
             reportShowing = false;
             reportScroll = Vector2.zero;
+            TryOpenPendingReclaimBriefing(currentSeat);
             statusMsg = SeatTurnPrompt();
         }
 
@@ -147,6 +148,7 @@ namespace LuanShi
                 statusMsg = SeatTurnPrompt();
                 e.Use();
                 if (pendingReport) { pendingReport = false; reportShowing = true; }
+                else TryOpenPendingReclaimBriefing(currentSeat);
                 return;
             }
 
