@@ -20,6 +20,7 @@ namespace LuanShi
         private string _replayLastViewedSeat;
         private int _replaySyncedRequestIndex = -1;
         private bool _replayFinalReportLogged;
+        private ReplayPresetSet _replayPresets;
 
         void InitializeReplay()
         {
@@ -32,36 +33,55 @@ namespace LuanShi
             locationChoiceOpen = false;
             statusMsg = "Offline match replay — zero model calls; controls are docked on the right";
 
-            string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : ReplayLoader.VerifiedDemoRunId;
-            if (!ReplayLoader.TryResolveRunFiles(runKey, out string sPath, out string jPath, out string ePath, out string err))
+            _replayPresets = ReplayCatalog.LoadPresets();
+            string runKey = !string.IsNullOrEmpty(replayRunId) ? replayRunId : ReplayCatalog.TreatyAttackRunId;
+            _replayRunInput = runKey;
+            OpenReplayRun(runKey);
+        }
+
+        /// <summary>
+        /// Opens a recorded run through <see cref="ReplayCatalog"/>: discovery, validation and the LLM-only
+        /// check. A failure keeps any run that is already loaded and says why; it never loads a guess.
+        /// </summary>
+        void OpenReplayRun(string runKey)
+        {
+            ReplayOpenResult open = ReplayCatalog.Open(runKey, _replayPresets != null ? _replayPresets.SearchRoots : null,
+                engine != null ? engine.State.Map : null);
+            _replayOpenMessage = open.Message;
+            _replayOpenOk = open.Ok;
+            if (!open.Ok)
             {
-                _replayInitError = "Run files not found: " + err;
-                Debug.LogWarning("[Replay] " + _replayInitError);
+                if (_replaySession == null)
+                {
+                    _replayInitError = open.Message;
+                    _replayChooserOpen = true;
+                }
+                Debug.LogWarning("[Replay] " + open.Status + ": " + open.Message);
                 return;
             }
 
-            try
+            if (_replaySession != null) _replaySession.OnEventReplayed -= HandleReplayEvent;
+            _replayInitError = null;
+            _replayBundle = open.Bundle;
+            _replayOpenNotes = open.Notes;
+            if (_replayBundle.Summary != null)
             {
-                _replayBundle = ReplayLoader.Load(sPath, jPath, ePath);
-                if (_replayBundle.Summary != null)
-                {
-                    randomSeed = _replayBundle.Summary.Seed;
-                    if (!string.IsNullOrEmpty(_replayBundle.Summary.BalanceProfileKey))
-                        balanceProfile = _replayBundle.Summary.BalanceProfileKey;
-                }
-                _replaySession = new ReplaySession(_replayBundle, engine != null ? engine.State.Map : null);
-                _replaySession.OnEventReplayed += HandleReplayEvent;
-                engine = _replaySession.Engine;
-                _replayLastViewedSeat = "seat-0";
-                RefreshReplayView();
-                SyncSpectatorArmyVisuals();
-                Debug.Log("[Replay] initialized with " + _replayBundle.Requests.Count + " requests from " + runKey);
+                randomSeed = _replayBundle.Summary.Seed;
+                if (!string.IsNullOrEmpty(_replayBundle.Summary.BalanceProfileKey))
+                    balanceProfile = _replayBundle.Summary.BalanceProfileKey;
             }
-            catch (Exception ex)
-            {
-                _replayInitError = "Failed to load replay: " + ex.Message;
-                Debug.LogWarning("[Replay] " + _replayInitError);
-            }
+            _replaySession = open.Session;
+            _replaySession.OnEventReplayed += HandleReplayEvent;
+            engine = _replaySession.Engine;
+            jsonFeed.Clear();
+            _replayLastViewedSeat = "seat-0";
+            _replaySyncedRequestIndex = -1;
+            _replayFinalReportLogged = false;
+            _replayShowProviderReasoning = false;
+            _replayChooserOpen = false;
+            RefreshReplayView();
+            SyncSpectatorArmyVisuals();
+            Debug.Log("[Replay] initialized with " + _replayBundle.Requests.Count + " requests from " + runKey);
         }
 
         void TickReplay()
@@ -95,6 +115,7 @@ namespace LuanShi
         void HandleReplayKeyboardControls()
         {
             if (pauseMenuOpen || reportShowing || battleResultShowing || handoverShowing) return;
+            if (_replayChooserOpen) return;   // typing a run id must not trigger playback keys
 
             if (Input.GetKeyDown(KeyCode.Space))
             {
@@ -154,7 +175,7 @@ namespace LuanShi
             int season = _replaySession.CurrentSeason;
             int total = _replaySession.TotalSeasons;
             string state = _replaySession.IsCompleted ? "Completed" : _replaySession.IsPlaying ? "Playing" : "Paused";
-            return "OFFLINE REPLAY  |  Season " + season + "/" + total + "  |  " + state + " (viewing " + viewed + ")";
+            return "OFFLINE REPLAY (LLM-only)  |  Season " + season + "/" + total + "  |  " + state + " (viewing " + viewed + ")";
         }
 
         string ReplayDetailLine()
@@ -214,8 +235,9 @@ namespace LuanShi
             if (evt == null) return;
             string okMark = evt.ResultOk ? "✓ " : "✗ ";
             string line = $"{okMark}[Replay S{evt.Season} {evt.Faction}] {evt.ActionSummary}";
-            if (!string.IsNullOrEmpty(evt.Explanation))
-                line += $" — \"{evt.Explanation}\"";
+            // The explanation is what the model wrote, shown as its statement; the token count is the
+            // provider's own figure. Neither is verified private reasoning.
+            line += " — " + evt.StatementText();
             jsonFeed.Add(line);
             if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
         }

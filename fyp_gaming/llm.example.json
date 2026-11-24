@@ -1,0 +1,19 @@
+{
+  "provider": "deepseek",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-flash",
+  "api_key_env": "LUANSHI_LLM_API_KEY",
+  "json_mode": true,
+  "max_requests_per_turn": 6,
+  "max_actions_per_turn": 5,
+  "max_invalid_per_turn": 3,
+  "max_total_requests": 20,
+  "request_timeout_ms": 60000,
+  "enable_manual_lookup": false,
+  "enable_attack": false,
+  "enable_research": false,
+  "enable_diplomacy": false,
+  "enable_garrison_conversion": false,
+  "enable_action_reference": false,
+  "enable_unit_types": false
+}

@@ -480,6 +480,7 @@ namespace LuanShi.Engine
                 ResultOk = isEndTurn ? (req.ParseOk && req.ResultOk) : replayedOk,
                 ResultText = resText,
                 Explanation = req.RecordedExplanation,
+                ReasoningTokens = req.ReasoningTokensReported,
                 ObservationHash = req.ObservationHash
             };
             _eventFeed.Add(feedEvt);

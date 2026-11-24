@@ -140,6 +140,19 @@ namespace LuanShi.Engine
         public string ProviderRequestId;
         public string FinishReason;
         public int ReasoningTokens;
+        /// <summary>
+        /// Provider-reported reasoning-token count exactly as recorded; null when the provider reported
+        /// none (ReasoningTokens reads 0 in that case, which is not a measurement).
+        /// </summary>
+        public int? ReasoningTokensReported;
+        /// <summary>Recorded length of the provider's separate reasoning stream; null when absent.</summary>
+        public int? ReasoningContentChars;
+        /// <summary>
+        /// Debug only. The provider's own reasoning stream, when the exchange record carried it in its raw
+        /// body and it parsed. It is not the model's explanation, is unverified, and may contain seat-private
+        /// context, so no default view shows it. Null when not recorded.
+        /// </summary>
+        public string ProviderReasoningText;
         public int TotalTokens;
         public int HttpStatus;
         public int TotalRequests;
@@ -170,8 +183,25 @@ namespace LuanShi.Engine
         public string CommandJson;
         public bool ResultOk;
         public string ResultText;
+        /// <summary>The model's own written explanation: a statement, not verified private reasoning.</summary>
         public string Explanation;
+        /// <summary>Provider-reported reasoning-token count for the request; null when none was reported.</summary>
+        public int? ReasoningTokens;
         public string ObservationHash;
+
+        /// <summary>
+        /// The one-line display of the model's statement and the provider's reasoning-token count, always
+        /// labelled as a statement. It never presents either as verified private reasoning.
+        /// </summary>
+        public string StatementText()
+        {
+            string tokens = ReasoningTokens.HasValue
+                ? "reasoning tokens: " + ReasoningTokens.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : "reasoning tokens: not reported";
+            return string.IsNullOrEmpty(Explanation) || Explanation == "unknown"
+                ? "model statement: none recorded [" + tokens + "]"
+                : "model statement: \"" + Explanation + "\" [" + tokens + "]";
+        }
     }
 
     public sealed class ReplayBundle

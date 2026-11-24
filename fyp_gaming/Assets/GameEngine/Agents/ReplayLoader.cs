@@ -18,6 +18,9 @@ namespace LuanShi.Engine
             public string ContentText;
             public string Explanation;
             public bool HasResultEvent;
+            public int? ReasoningTokens;
+            public int? ReasoningChars;
+            public string ReasoningText;
         }
 
         public static bool TryResolveRunFiles(string runId, out string summaryPath, out string jsonlPath, out string exchangesPath, out string error)
@@ -98,7 +101,7 @@ namespace LuanShi.Engine
                     return true;
                 }
 
-                if (s != null || j != null || e != null || b != null || (rootSpecified && dir == searchDirs[searchDirs.Count - 1]))
+                if (s != null || j != null || e != null || b != null)
                 {
                     var missing = new List<string>();
                     if (s == null) missing.Add("missing summary");
@@ -248,6 +251,9 @@ namespace LuanShi.Engine
                         rec.HasResultEvent = true;
                         string ct = GetString(resObj, "content_text");
                         rec.ContentText = ct;
+                        rec.ReasoningTokens = GetNullableInt(resObj, "reasoning_tokens");
+                        rec.ReasoningChars = GetNullableInt(resObj, "reasoning_content_chars");
+                        rec.ReasoningText = ExtractProviderReasoning(GetString(resObj, "raw_body", null));
                         if (!string.IsNullOrEmpty(ct) && StrictJson.TryParse(ct, out JsonNode ctNode, out _) && ctNode is JsonObject ctObj)
                         {
                             string summary = GetString(ctObj, "summary", null);
@@ -455,11 +461,15 @@ namespace LuanShi.Engine
                             ? ex.Explanation
                             : ExtractExplanationFromJson(rec.CommandJson) ?? ExtractExplanationFromJson(rec.RawModelText);
                         rec.RecordedExplanation = !string.IsNullOrEmpty(expl) ? expl : "unknown";
+                        rec.ReasoningTokensReported = GetNullableInt(obj, "reasoning_tokens") ?? ex.ReasoningTokens;
+                        rec.ReasoningContentChars = ex.ReasoningChars;
+                        rec.ProviderReasoningText = ex.ReasoningText;
                     }
                     else
                     {
                         rec.ResponseContentText = rec.RawModelText;
                         rec.RecordedExplanation = ExtractExplanationFromJson(rec.CommandJson) ?? ExtractExplanationFromJson(rec.RawModelText);
+                        rec.ReasoningTokensReported = GetNullableInt(obj, "reasoning_tokens");
                     }
                     list.Add(rec);
                 }

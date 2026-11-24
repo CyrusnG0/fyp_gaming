@@ -94,6 +94,8 @@ internal static partial class Harness
         RunBalanceProfile();
         RunActionReference();
         RunUnitParity();
+        RunReplayCatalog();
+        RunTeammatePackage();
         RunDemoProfileIntegration();
         RunLlmPersona();
         RunDiplomacySmoke();

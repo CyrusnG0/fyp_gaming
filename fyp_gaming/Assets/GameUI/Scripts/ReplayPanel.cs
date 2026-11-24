@@ -33,12 +33,17 @@ namespace LuanShi
             float y = area.y + 10f;
 
             // Header & Metadata
-            GUI.Label(new Rect(x, y, width, 20f), "OFFLINE REPLAY — ZERO API CALLS", uiPanelTitle);
+            GUI.Label(new Rect(x, y, width - 96f, 20f), "OFFLINE REPLAY — ZERO API CALLS", uiPanelTitle);
+            if (GUI.Button(new Rect(x + width - 90f, y, 90f, 20f), _replayChooserOpen ? "Back" : "Load run...", uiButton))
+                ToggleReplayChooser();
             y += 22f;
 
             ReplaySummaryData sum = _replayBundle != null ? _replayBundle.Summary : null;
             string runId = sum != null && !string.IsNullOrEmpty(sum.RunId) ? sum.RunId : "unknown";
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Run: " + runId, width), uiSmall);
+            y += 15f;
+            GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall,
+                "LLM-only recording. Mixed human/LLM replay is not yet supported.", width), uiSmall);
             y += 15f;
 
             string sSeed = (sum != null && sum.Seed != 0) ? sum.Seed.ToString() : "unknown";
@@ -58,9 +63,9 @@ namespace LuanShi
             GUI.Label(new Rect(x, y, width, 14f), "historical personas: " + personaInfo, uiSmall);
             y += 18f;
 
-            if (_replaySession == null)
+            if (_replayChooserOpen || _replaySession == null)
             {
-                GUI.Label(new Rect(x, y, width, 30f), "Replay unavailable: " + (_replayInitError ?? "loading..."), uiReason);
+                DrawReplayChooser(x, y, width, area);
                 return;
             }
 
@@ -139,21 +144,42 @@ namespace LuanShi
                 GUI.Label(new Rect(x, y, width, 14f), "Action: " + cmdAction, uiSmall);
                 y += 16f;
 
+                // The explanation is the model's own written statement, shown as such. It is not verified
+                // private reasoning; the reasoning-token figure is the provider's reported count.
                 string sExp = (rec != null && !string.IsNullOrEmpty(rec.RecordedExplanation)) ? rec.RecordedExplanation : "unknown";
-                GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Recorded model explanation: " + sExp, width), uiSmall);
-                y += 16f;
+                string stmt = "MODEL STATEMENT (written by the model; not verified reasoning): \"" + sExp + "\"";
+                float stmtH = Mathf.Clamp(uiSmallWrap.CalcHeight(new GUIContent(stmt), width), 16f, 44f);
+                GUI.Label(new Rect(x, y, width, stmtH), stmt, uiSmallWrap);
+                y += stmtH + 2f;
 
                 string sLatency = (rec != null && rec.LatencyMs > 0) ? $"{rec.LatencyMs}ms" : "unknown";
                 string sInTok = (rec != null && rec.InputTokens > 0) ? rec.InputTokens.ToString() : "unknown";
                 string sOutTok = (rec != null && rec.OutputTokens > 0) ? rec.OutputTokens.ToString() : "unknown";
-                GUI.Label(new Rect(x, y, width, 14f), $"Tokens: in {sInTok} | out {sOutTok}  |  Latency: {sLatency}", uiSmall);
+                string sReasonTok = rec != null && rec.ReasoningTokensReported.HasValue
+                    ? rec.ReasoningTokensReported.Value.ToString() : "not reported";
+                GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall,
+                    $"Reasoning tokens (provider count): {sReasonTok}  |  in {sInTok} | out {sOutTok}  |  {sLatency}", width), uiSmall);
                 y += 16f;
 
-                // Saved Prompt Excerpt (scrollable box)
-                GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
-                y += 15f;
-                string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
+                // Debug only: the provider's recorded reasoning stream, off by default and never part of the
+                // main view. Shown only when the recording actually carries it.
+                bool hasReasoning = rec != null && !string.IsNullOrEmpty(rec.ProviderReasoningText);
+                string debugLabel = hasReasoning
+                    ? (_replayShowProviderReasoning ? "Hide debug: provider reasoning" : "Show debug: provider reasoning")
+                    : "Debug: no provider reasoning recorded";
+                if (GUI.Button(new Rect(x, y, width, 18f), debugLabel, hasReasoning ? uiButton : uiButtonDisabled) && hasReasoning)
+                    _replayShowProviderReasoning = !_replayShowProviderReasoning;
+                y += 22f;
+
                 float innerWidth = Mathf.Max(80f, width - 20f);
+                bool showDebugReasoning = hasReasoning && _replayShowProviderReasoning;
+                // Saved Prompt Excerpt (scrollable box), or the debug reasoning stream in its place
+                GUI.Label(new Rect(x, y, width, 14f), showDebugReasoning
+                    ? "DEBUG - PROVIDER REASONING AS RECORDED (unverified; may hold private seat context):"
+                    : "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
+                y += 15f;
+                string promptText = showDebugReasoning ? rec.ProviderReasoningText
+                    : rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
                 float promptH = Mathf.Max(180f, uiMonoWrap.CalcHeight(new GUIContent(promptText), innerWidth) + 8f);
                 Rect promptRect = new Rect(x, y, width, 55f);
                 _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, innerWidth, promptH));
@@ -333,8 +359,7 @@ namespace LuanShi
 
                 if (evt.RequestIndex > 0)
                 {
-                    string exp = !string.IsNullOrEmpty(evt.Explanation) ? evt.Explanation : "unknown";
-                    string expLine = $"Recorded model explanation: \"{exp}\"";
+                    string expLine = evt.StatementText();
                     GUI.Label(new Rect(4f, rowY + 26f, width - 28f, 14f), EllipsizeToWidth(uiHint, expLine, width - 28f), uiHint);
                 }
             }
