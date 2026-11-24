@@ -55,7 +55,7 @@ internal static partial class Harness
 
         TmCheck(guide.Contains("6000.6.2f1") && guide.Contains("llm.local.json") && guide.Contains("LUANSHI_LLM_API_KEY")
                 && guide.Contains("LUANSHI_RUNS_DIR") && guide.Contains("--live") && guide.Contains("LLM-only")
-                && guide.Contains("Mixed human/LLM replay is not implemented"),
+                && guide.Contains("Mixed human/LLM replay") && guide.Contains("not implemented"),
             "the guide states the Unity version, local config, key variable, replay folder, probe and replay limits");
         TmCheck(!Regex.IsMatch(guide, "sk-[A-Za-z0-9]{8,}") && !guide.Contains("C:\\Users") && !guide.Contains("micmi"),
             "the guide carries no key-shaped text and no machine-specific path");

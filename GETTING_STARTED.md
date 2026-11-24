@@ -12,6 +12,7 @@ key until the step that says so.
 | Git | Any recent version. |
 | Unity | **6000.6.2f1** exactly (Unity Hub: install by version). |
 | .NET SDK | Any current SDK. The engine tests build with the SDK's own target framework; `dotnet --version` must work. |
+| Python 3 | Only for the static audits (`run-audits.sh`). |
 | Disk | The first Unity import creates a large, untracked `Library/` folder. |
 | An API key | Only for real-model matches. Not needed for the fake provider, the harness or replay. |
 
