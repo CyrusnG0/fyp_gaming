@@ -208,6 +208,69 @@ internal static partial class Harness
             {
                 Console.WriteLine("  [REPLAY-PAID] skipped external run-20261122140759713-c8b0fcfc (not found from working directory)");
             }
+
+            // 3. Worktree-root searchRoot resolution + paid demo run run-20261123090426264-1890d898
+            string demoRunId = "run-20261123090426264-1890d898";
+            string worktreeRoot = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), ".."));
+            if (ReplayLoader.TryResolveRunFiles(demoRunId, worktreeRoot, out string ds, out string dj, out string de, out string db, out _))
+            {
+                ReplayBundle demoBundle = ReplayLoader.Load(ds, dj, de, demoRunId, db);
+                Check(demoBundle.Bootstrap != null && demoBundle.Requests.Count == 86
+                    && demoBundle.Summary.BalanceProfileKey == "food-easy",
+                    $"[REPLAY-PAID] demo run 1890d898 resolved from worktree root and loaded 86 reqs (profile={demoBundle.Summary.BalanceProfileKey})");
+
+                var demoReplay = new ReplaySession(demoBundle) { PauseOnDivergence = false };
+                // Step to Req 48 (just before S6 Wei R1 proposal), verify Req 49 -> 54..56 -> consequences.
+                for (int step = 0; step < 48; step++) demoReplay.StepRequest();
+                Check(demoReplay.CurrentSeason == 6 && demoReplay.CurrentSeatId == "seat-0"
+                    && demoReplay.CurrentRequestRecord?.TotalRequests == 49,
+                    "[REPLAY-PAID] 1890d898 Req 48 opens S6 Wei R1 (propose_treaty)");
+
+                demoReplay.StepRequest(); // executes totReq 49: propose_treaty seat-1 nap 4
+                var evt49 = demoReplay.EventFeed[48];
+                Check(evt49.ResultOk && evt49.ActionSummary == "propose_treaty seat-1 (nap, 4s)",
+                    $"[REPLAY-PAID] 1890d898 Req 49 feed summarizes '{evt49.ActionSummary}'");
+
+                while (demoReplay.CurrentRequestIndex < 53) demoReplay.StepRequest();
+                Observation shuSeeOffer = demoReplay.Engine.Observe("seat-1");
+                Check(demoReplay.CurrentSeatId == "seat-1"
+                    && shuSeeOffer.Proposals.Count == 1
+                    && shuSeeOffer.Proposals[0].FromSeatId == "seat-0"
+                    && shuSeeOffer.Proposals[0].Type == TreatyType.Nap
+                    && shuSeeOffer.Proposals[0].DurationSeasons == 4,
+                    "[REPLAY-PAID] 1890d898 Req 53 (before S6 Shu R1) shows Wei's NAP (4s) proposal in Shu observation");
+
+                demoReplay.StepRequest(); // totReq 54: research military
+                demoReplay.StepRequest(); // totReq 55: march army-shu-1 -> (3,7)
+                demoReplay.StepRequest(); // totReq 56: attack_army army-shu-1 -> (2,6)
+                var evt54 = demoReplay.EventFeed[53];
+                var evt55 = demoReplay.EventFeed[54];
+                var evt56 = demoReplay.EventFeed[55];
+                Check(evt54.ActionSummary == "research military"
+                    && evt55.ActionSummary == "march army-shu-1 -> (3,7)"
+                    && evt56.ActionSummary == "attack_army army-shu-1 -> (2,6)",
+                    "[REPLAY-PAID] 1890d898 S6 Shu actions render targets cleanly in EventFeed");
+
+                Observation postAttackShu = demoReplay.Engine.Observe("seat-1");
+                var relAfter = postAttackShu.Relation("seat-0");
+                Check(relAfter != null && relAfter.AtWar
+                    && relAfter.TheirTrust == -40 && relAfter.MyTrust == 0
+                    && postAttackShu.Prestige == 38
+                    && postAttackShu.Faction("seat-0")?.Prestige == 53,
+                    "[REPLAY-PAID] 1890d898 Req 56 sneak attack records AtWar=true, Wei->Shu trust=-40, Shu prestige=38, Wei prestige=53");
+
+                demoReplay.RunToCompletion();
+                var demoRpt = demoReplay.FinalReport;
+                Check(demoReplay.IsCompleted && demoReplay.AcceptedActionsReplayed == 81
+                    && demoReplay.InvalidResponsesReplayed == 3 && demoReplay.ProviderFailuresReplayed == 1
+                    && demoReplay.EngineRejectionsReplayed == 0 && demoReplay.ActionOutcomeMismatches == 0
+                    && demoReplay.SeasonSummaries.Count == 10 && demoReplay.SeasonSummaries[5].Wei.AcceptedActions == 5,
+                    $"[REPLAY-PAID] 1890d898 end-to-end: acc={demoReplay.AcceptedActionsReplayed}/81 inv={demoReplay.InvalidResponsesReplayed}/3 prov={demoReplay.ProviderFailuresReplayed}/1 mis={demoRpt.ActionOutcomeMismatches}");
+            }
+            else
+            {
+                Console.WriteLine("  [REPLAY-PAID] skipped external run-20261123090426264-1890d898 (not found from working directory)");
+            }
         }
         finally
         {

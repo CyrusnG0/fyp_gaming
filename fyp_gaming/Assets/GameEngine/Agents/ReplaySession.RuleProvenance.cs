@@ -308,7 +308,7 @@ namespace LuanShi.Engine
                 actSummary = isEndTurn
                     ? "Voluntary end of turn"
                     : (replayedParseOk && cmd != null
-                        ? $"{cmd.Type} {cmd.TargetId ?? ""}".Trim()
+                        ? FormatActionSummary(cmd.Type, cmd.TargetId, cmd.ParamA, cmd.ParamB, cmd.Args)
                         : (!string.IsNullOrEmpty(req.CommandJson) ? req.CommandJson : "unknown"));
                 return;
             }
@@ -337,8 +337,45 @@ namespace LuanShi.Engine
             actSummary = isEndTurn
                 ? "Voluntary end of turn"
                 : (replayedParseOk
-                    ? $"{parsed.Action.Type} {parsed.Action.TargetId ?? ""}".Trim()
+                    ? FormatActionSummary(parsed.Action.Type, parsed.Action.TargetId,
+                        parsed.Action.ParamA, parsed.Action.ParamB, parsed.Action.Args)
                     : DescribeRequestAction(req));
+        }
+
+        private static string FormatActionSummary(string type, string targetId, int paramA, int paramB,
+            IReadOnlyDictionary<string, string> args)
+        {
+            string head = $"{type} {targetId ?? ""}".Trim();
+            if (string.Equals(type, ActionType.ProposeTreaty, StringComparison.Ordinal))
+            {
+                string treaty = args != null && args.TryGetValue("treaty_type", out string tt) ? tt : null;
+                string dur = args != null && args.TryGetValue("duration", out string ds) ? ds : null;
+                if (!string.IsNullOrEmpty(treaty))
+                    return string.IsNullOrEmpty(dur) ? $"{head} ({treaty})" : $"{head} ({treaty}, {dur}s)";
+            }
+            if (string.Equals(type, ActionType.RespondTreaty, StringComparison.Ordinal))
+            {
+                if (args != null && args.TryGetValue("response", out string resp) && !string.IsNullOrEmpty(resp))
+                    return $"{head} ({resp})";
+            }
+            if (string.Equals(type, ActionType.March, StringComparison.Ordinal)
+                || string.Equals(type, ActionType.AttackArmy, StringComparison.Ordinal)
+                || string.Equals(type, ActionType.AttackCity, StringComparison.Ordinal))
+            {
+                return $"{head} -> ({paramA},{paramB})";
+            }
+            if (string.Equals(type, ActionType.Research, StringComparison.Ordinal))
+            {
+                if (args != null && args.TryGetValue("line", out string line) && !string.IsNullOrEmpty(line))
+                    return $"{head} {line}".Trim();
+            }
+            if ((string.Equals(type, ActionType.ConvertGarrison, StringComparison.Ordinal)
+                 || string.Equals(type, ActionType.GarrisonArmy, StringComparison.Ordinal))
+                && paramA > 0)
+            {
+                return $"{head} ({paramA})";
+            }
+            return head;
         }
 
         private static bool TryParseCommandJson(string json, out ActionCommand cmd, out string error)

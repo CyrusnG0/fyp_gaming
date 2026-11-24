@@ -153,9 +153,11 @@ namespace LuanShi
                 GUI.Label(new Rect(x, y, width, 14f), "SAVED PROMPT EXCERPT (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
                 y += 15f;
                 string promptText = rec != null && !string.IsNullOrEmpty(rec.PromptExcerpt) ? rec.PromptExcerpt : "(no prompt recorded)";
+                float innerWidth = Mathf.Max(80f, width - 20f);
+                float promptH = Mathf.Max(180f, uiMonoWrap.CalcHeight(new GUIContent(promptText), innerWidth) + 8f);
                 Rect promptRect = new Rect(x, y, width, 55f);
-                _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, width - 20f, 180f));
-                GUI.TextArea(new Rect(0, 0, width - 20f, 180f), promptText, uiMono);
+                _replayPromptScroll = GUI.BeginScrollView(promptRect, _replayPromptScroll, new Rect(0, 0, innerWidth, promptH));
+                GUI.TextArea(new Rect(0, 0, innerWidth, promptH), promptText, uiMonoWrap);
                 GUI.EndScrollView();
                 y += 60f;
 
@@ -163,9 +165,10 @@ namespace LuanShi
                 GUI.Label(new Rect(x, y, width, 14f), "SAVED MODEL RESPONSE (RECORDED MATERIAL — NO MODEL CALL):", uiSmall);
                 y += 15f;
                 string respText = rec != null && !string.IsNullOrEmpty(rec.ResponseContentText) ? rec.ResponseContentText : (rec?.RawModelText ?? "-");
+                float respH = Mathf.Max(120f, uiMonoWrap.CalcHeight(new GUIContent(respText), innerWidth) + 8f);
                 Rect respRect = new Rect(x, y, width, 40f);
-                _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, width - 20f, 120f));
-                GUI.TextArea(new Rect(0, 0, width - 20f, 120f), respText, uiMono);
+                _replayResponseScroll = GUI.BeginScrollView(respRect, _replayResponseScroll, new Rect(0, 0, innerWidth, respH));
+                GUI.TextArea(new Rect(0, 0, innerWidth, respH), respText, uiMonoWrap);
                 GUI.EndScrollView();
                 y += 45f;
             }

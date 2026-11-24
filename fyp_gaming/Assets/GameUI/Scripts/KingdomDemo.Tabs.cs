@@ -17,9 +17,9 @@ namespace LuanShi
         /// so scripted demos and screenshot passes can drive the UI without a mouse.</summary>
         public void ShowTab(string key)
         {
-            // Single-LLM mode freezes the whole tab layer during the agent's turn. Spectators may
-            // browse read-only; their tab buttons stay available.
-            if (uiInputLocked && !spectatorMode)
+            // Single-LLM mode freezes the whole tab layer during the agent's turn. Spectators and
+            // offline replays may browse read-only; their tab buttons stay available.
+            if (uiInputLocked && !spectatorMode && !replayMode)
             {
                 activeTab = "map";
                 return;
@@ -34,7 +34,7 @@ namespace LuanShi
 
         void DrawTabPanel(GUIStyle body, GUIStyle btn, GUIStyle title, GUIStyle mono)
         {
-            if (uiInputLocked && !spectatorMode) return;   // single-LLM lock: no tab body at all
+            if (uiInputLocked && !spectatorMode && !replayMode) return;   // single-LLM lock: no tab body at all
             float height = TabPanelHeight();
             // The side dock owns the right of the map area, so a docked tab body stays left of it. The
             // width is anchored: at 120% the visible design viewport is narrower than 1600 units.

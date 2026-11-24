@@ -73,10 +73,10 @@ namespace LuanShi
         public int spectatorSeasons = 3;
 
         [Header("Offline Match Replay (Zero API Calls)")]
-        [Tooltip("Third demo mode: offline playback of recorded 5-season match with zero live model calls. Overrides spectatorMode and human/LLM seats.")]
+        [Tooltip("Third demo mode: offline playback of recorded match with zero live model calls. Overrides spectatorMode and human/LLM seats.")]
         public bool replayMode;
         [Tooltip("The run ID or directory containing recorded match evidence.")]
-        public string replayRunId = "run-20261109082434809-51b7ebd5";
+        public string replayRunId = "run-20261123090426264-1890d898";
 
         private GameEngine engine;
         private bool ready;

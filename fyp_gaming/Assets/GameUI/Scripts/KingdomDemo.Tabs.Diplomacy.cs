@@ -23,7 +23,10 @@ namespace LuanShi
 
             // Envoy message: type here, then press Send message on a faction row to submit it.
             GUI.Label(new Rect(p.x + 36, y, 120, 22), "Envoy message", body);
+            bool prevEnabled = GUI.enabled;
+            if (uiInputLocked) GUI.enabled = false;
             envoyText = GUI.TextField(new Rect(p.x + 160, y, 604, 24), envoyText, 120, uiField);
+            GUI.enabled = prevEnabled;
             if (envoyConfirmationUntil > Time.unscaledTime)
             {
                 var toast = new Rect(p.x + 270, y + 34, 300, 52);

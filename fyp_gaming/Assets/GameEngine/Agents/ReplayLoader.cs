@@ -98,7 +98,7 @@ namespace LuanShi.Engine
                     return true;
                 }
 
-                if (s != null || j != null || e != null || b != null || rootSpecified)
+                if (s != null || j != null || e != null || b != null || (rootSpecified && dir == searchDirs[searchDirs.Count - 1]))
                 {
                     var missing = new List<string>();
                     if (s == null) missing.Add("missing summary");
