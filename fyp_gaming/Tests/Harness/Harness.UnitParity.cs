@@ -103,6 +103,8 @@ internal static partial class Harness
         UnitParityMalformedAndFeatureOff();
         UnitParityFeedback();
         UnitParityPromptIdentity();
+        UnitParityPromptConsistency();
+        UnitParityCombatFactsMatchEngine();
         UnitParityReplay();
         UnitParityAttackComposition();
         UnitParityCrowdedPrompt();
@@ -231,12 +233,12 @@ internal static partial class Harness
             // Combat facts come from the same UnitTypes values the battle code calls.
             Check(addendum.Contains("x" + UtDec(BalanceConfig.UnitCounterBonus)) && addendum.Contains("x" + UtDec(BalanceConfig.UnitCounterPenalty))
                   && addendum.Contains("Siege is x" + UtDec(BalanceConfig.SiegeFieldPenalty))
-                  && addendum.Contains("siege is x" + UtDec(BalanceConfig.SiegeVsCityBonus))
+                  && addendum.Contains("siege attacker is x" + UtDec(BalanceConfig.SiegeVsCityBonus))
                   && addendum.Contains("up to " + UnitTypes.AttackRange(UnitTypes.Archer) + " hexes")
-                  && addendum.Contains("archer garrison defends its city at x" + UtDec(BalanceConfig.ArcherSiegeDefenseBonus))
-                  && addendum.Contains("Cavalry may march " + UnitTypes.MarchesPerSeason(UnitTypes.Cavalry) + " times")
-                  && addendum.Contains("plains at x" + UtDec(BalanceConfig.CavalryPlainsChargeBonus))
-                  && addendum.Contains("Infantry takes x" + UtDec(UnitTypes.LossTakenMultiplier(UnitTypes.Infantry))),
+                  && addendum.Contains("garrison of archers defends at x" + UtDec(BalanceConfig.ArcherSiegeDefenseBonus))
+                  && addendum.Contains("cavalry may march " + UnitTypes.MarchesPerSeason(UnitTypes.Cavalry) + " times")
+                  && addendum.Contains("cavalry army also gets x" + UtDec(BalanceConfig.CavalryPlainsChargeBonus))
+                  && addendum.Contains("takes x" + UtDec(UnitTypes.LossTakenMultiplier(UnitTypes.Infantry))),
                 "[UNITS] " + tag + "combat facts equal the UnitTypes and BalanceConfig values");
             UtCheck(UnitTypes.FieldCombatMultiplier("infantry", "archer") == BalanceConfig.UnitCounterBonus
                     && UnitTypes.FieldCombatMultiplier("cavalry", "infantry") == BalanceConfig.UnitCounterBonus

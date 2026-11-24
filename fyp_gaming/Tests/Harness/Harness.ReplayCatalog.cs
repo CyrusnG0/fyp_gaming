@@ -47,6 +47,8 @@ internal static partial class Harness
             CatalogPresets(root);
             CatalogDiscovery(root);
             CatalogReasoningExtraction();
+            CatalogProvenance(root);
+            CatalogVisualPlan(root);
             CatalogRecordedRoundTrip(root);
             CatalogExternalRuns();
         }
@@ -179,7 +181,7 @@ internal static partial class Harness
         string summaryPath = SpectatorSummary.Write(root, session, cfg, transport, runner);
         CatCheck(File.ReadAllText(summaryPath).Contains("\"unit_types_enabled\":true")
                  && File.ReadAllText(summaryPath).Contains(PromptBuilder.UnitTypesVersionSuffix),
-            "the run summary records unit types and the +unit-types-1 prompt identity");
+            "the run summary records unit types and the +unit-types-2 prompt identity");
 
         ReplayOpenResult open = ReplayCatalog.Open(runId, new[] { root });
         CatCheck(open.Ok && open.Status == ReplayOpenStatus.Ready && open.Session != null,
@@ -223,6 +225,8 @@ internal static partial class Harness
             "feed events carry the statement and token count shown in the main view");
         CatCheck(replay.EventFeed.All(e => !e.StatementText().Contains("RZ-")),
             "the main-view statement never includes the provider reasoning text");
+
+        CatalogProvenanceOnDisk(root, runId);
 
         // The same files with the unit-types identity stripped do not silently replay under the new vocabulary.
         string oldId = runId + "-old";

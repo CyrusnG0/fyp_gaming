@@ -45,6 +45,8 @@ namespace LuanShi.Engine
         public string Message;
         public ReplayBundle Bundle;
         public ReplaySession Session;
+        /// <summary>Who controlled the seats, as far as the recording can show; null before the files loaded.</summary>
+        public ReplayProvenance Provenance;
         /// <summary>Honest labels about what this replay is and is not, in display order.</summary>
         public List<string> Notes = new List<string>();
         public bool Ok => Status == ReplayOpenStatus.Ready && Session != null;
@@ -244,13 +246,17 @@ namespace LuanShi.Engine
                 return result;
             }
 
-            int nonLlm = CountNonLlmRequests(bundle);
-            if (nonLlm > 0)
+            // The request log never holds a person's actions, so "no non-LLM request" proves nothing by itself.
+            ReplayProvenance provenance = ReplayProvenanceCheck.Assess(bundle);
+            result.Provenance = provenance;
+            if (!provenance.Accepted)
             {
                 result.Status = ReplayOpenStatus.Unsupported;
                 result.Bundle = bundle;
-                result.Message = "This recording contains " + nonLlm + " request(s) from a non-LLM controller. "
-                    + "Mixed human/LLM replay is not supported, so it was not opened.";
+                result.Message = provenance.Level == ReplayProvenanceLevel.NotLlmOnly
+                    ? "This recording is not LLM-only: " + provenance.Reason + ". Mixed human/LLM replay is not supported, so it was not opened."
+                    : "Who controlled the seats of this recording is unknown: " + provenance.Reason
+                      + ". A person's actions are not in the request log, so it was not opened as an LLM-only replay.";
                 return result;
             }
 
@@ -269,6 +275,7 @@ namespace LuanShi.Engine
             result.Session = session;
             result.Message = "Ready: " + bundle.Requests.Count + " recorded request(s).";
             result.Notes.Add(LlmOnlyLabel);
+            result.Notes.Add("Controllers " + provenance.Reason + ".");
             result.Notes.Add("Recorded material only: the replay re-executes recorded actions through the engine and makes no model call.");
             if (bundle.Summary != null && !string.IsNullOrEmpty(bundle.Summary.Provider))
                 result.Notes.Add("Recorded with " + bundle.Summary.Provider

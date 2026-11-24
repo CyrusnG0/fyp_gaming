@@ -281,6 +281,7 @@ namespace LuanShi
             Debug.Log("BalanceProfile " + engine.Balance.ToJson());
             engine.CombatDebugLogger = message => Debug.Log(message);
             engine.State.Map = map;
+            _replaySceneMap = map;   // the scene's own terrain, kept for checking a replay against it
             InitializeFogOverlays(nodes, w, h);
             BuildGridSeamUnderlay();
 

@@ -117,7 +117,8 @@ internal static partial class Harness
                     && off.System.Contains("recruit (args.unit_type must be \"infantry\")")
                     && off.User.Split('\n').Count(l => l.StartsWith("- type=recruit")) == 2,
                 tag + "flag off: no unit-type text, infantry-only contract, one recruit candidate per city");
-            string offBody = off.System.Substring(0, off.System.Length - PromptBuilder.GarrisonConversionAddendum.Length);
+            string offBody = off.System.Substring(0, off.System.Length - PromptBuilder.GarrisonConversionAddendum.Length)
+                .Replace(UtOrderOld, UtOrderNew).Replace(UtArgsOld, UtArgsNew);
             UtCheck(off.System.EndsWith(PromptBuilder.GarrisonConversionAddendum, StringComparison.Ordinal)
                     && on.System.StartsWith(offBody, StringComparison.Ordinal)
                     && on.System.Substring(offBody.Length).StartsWith("\n\nUNIT TYPES", StringComparison.Ordinal)
@@ -127,7 +128,7 @@ internal static partial class Harness
             UtCheck(versionOn == versionOff.Replace(PromptBuilder.GarrisonConversionVersionSuffix,
                         PromptBuilder.UnitTypesVersionSuffix + PromptBuilder.GarrisonConversionVersionSuffix)
                     && PromptBuilder.IsUnitTypesPromptVersion(versionOn) && !PromptBuilder.IsUnitTypesPromptVersion(versionOff),
-                tag + "the version gains +unit-types-1 before the garrison suffix (" + versionOn + ")");
+                tag + "the version gains +unit-types-2 before the garrison suffix (" + versionOn + ")");
             UtCheck(PromptBuilder.IsGarrisonConversionPromptVersion(versionOn) && PromptBuilder.IsAttackPromptVersion(versionOn),
                 tag + "garrison and attack identity detection still work with the suffix");
             UtCheck(PromptBuilder.GarrisonConversionHash(on.System) != PromptBuilder.GarrisonConversionHash(off.System),
@@ -164,7 +165,7 @@ internal static partial class Harness
                 && both2.System.Contains("ACTION REFERENCE") && both2.System.Contains("UNIT TYPES"),
             "with the action reference the order is actions, assault text, unit types, garrison (" + v + ")");
         string withRef = both2.System;
-        UtCheck(withRef.IndexOf("ACTION REFERENCE", StringComparison.Ordinal) < withRef.IndexOf("UNIT TYPES", StringComparison.Ordinal)
+        UtCheck(withRef.IndexOf("ACTION REFERENCE", StringComparison.Ordinal) < withRef.IndexOf("UNIT TYPES (opt-in", StringComparison.Ordinal)
                 && withRef.EndsWith(PromptBuilder.GarrisonConversionAddendum, StringComparison.Ordinal),
             "the action reference precedes the unit-type block and the garrison addendum stays last");
 
@@ -199,7 +200,7 @@ internal static partial class Harness
         UtCheck(on.IsCompleted && on.AcceptedActionsReplayed == 1 && on.UnexpectedRejections == 0
                 && on.ActionOutcomeMismatches == 0
                 && on.Engine.Log.Records.Any(r => r.EventType == "recruit" && r.Payload["unit_type"] == "archer"),
-            "a +unit-types-1 recording replays its archer recruitment through the engine");
+            "a +unit-types-2 recording replays its archer recruitment through the engine");
 
         // Historical recordings (no suffix) keep their recorded outcome: the old parser refused archer, so
         // a recording that says it was accepted can never be replayed as accepted. A recorded refusal stays refused.
@@ -239,7 +240,7 @@ internal static partial class Harness
             string[] lines = System.IO.File.Exists(recorder.FilePath) ? System.IO.File.ReadAllLines(recorder.FilePath) : new string[0];
             UtCheck(lines.Length >= 3 && lines.All(l => l.Contains(PromptBuilder.UnitTypesVersionSuffix))
                     && lines[0].Contains("\\\"unit_type\\\":\\\"cavalry\\\""),
-                "the run log records +unit-types-1 and the typed recruit on every request");
+                "the run log records +unit-types-2 and the typed recruit on every request");
         }
         finally { try { System.IO.Directory.Delete(root, true); } catch (Exception) { } }
     }

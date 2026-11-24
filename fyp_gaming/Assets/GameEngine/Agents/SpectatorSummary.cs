@@ -123,14 +123,15 @@ namespace LuanShi.Engine
             bool reference = config != null && config.EnableActionReference;
             if (reference)
             {
-                system += PromptBuilder.ActionReferenceAddendum(session.Balance, attack, research, diplomacy, conversion, historicalRule);
+                system += PromptBuilder.ActionReferenceAddendum(session.Balance, attack, research, diplomacy, conversion, historicalRule,
+                    config.EnableUnitTypes);
                 version += PromptBuilder.ActionReferenceVersionSuffix;
             }
             if (attack && !historicalRule) version += PromptBuilder.AssaultTextVersionSuffix;
             bool unitTypes = config != null && config.EnableUnitTypes;
             if (unitTypes)
             {
-                system += PromptBuilder.UnitTypesAddendum(session.Balance, attack, conversion, historicalRule);
+                system = PromptBuilder.ApplyUnitTypes(system, session.Balance, attack, conversion, historicalRule);
                 version += PromptBuilder.UnitTypesVersionSuffix;
             }
             if (conversion) { version += PromptBuilder.GarrisonConversionVersionSuffix; system += PromptBuilder.GarrisonConversionAddendum; }

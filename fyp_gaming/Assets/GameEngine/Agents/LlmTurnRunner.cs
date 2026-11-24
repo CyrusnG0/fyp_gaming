@@ -362,7 +362,7 @@ namespace LuanShi.Engine
             if (actionReference)
             {
                 system += PromptBuilder.ActionReferenceAddendum(observation?.Balance, attackOn, research,
-                    diplomacy, _config.EnableGarrisonConversion, assaultRatioRule);
+                    diplomacy, _config.EnableGarrisonConversion, assaultRatioRule, UnitTypesActive);
                 promptVersion += PromptBuilder.ActionReferenceVersionSuffix;
                 schemaHash = PromptBuilder.ActionReferenceHash(system);
             }
@@ -375,7 +375,7 @@ namespace LuanShi.Engine
             bool unitTypes = UnitTypesActive;
             if (unitTypes)
             {
-                system += PromptBuilder.UnitTypesAddendum(observation?.Balance, attackOn,
+                system = PromptBuilder.ApplyUnitTypes(system, observation?.Balance, attackOn,
                     _config.EnableGarrisonConversion, assaultRatioRule);
                 promptVersion += PromptBuilder.UnitTypesVersionSuffix;
                 schemaHash = PromptBuilder.GarrisonConversionHash(system);

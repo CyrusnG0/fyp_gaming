@@ -159,6 +159,13 @@ shows the recorded model statements. It makes no model call and does not accept 
   `pilot-<id>-summary.json`, `<id>.jsonl`, `<id>-exchanges.ndjson` and `<id>-bootstrap.json`. The panel says
   *files not found*, *incomplete files* (and which are missing) or *failed validation* with the reason.
   Typing an id does not mean it can be replayed.
+- **Who controlled the seats must be shown.** The request log holds only model requests, so a person's
+  actions are never in it. A recording opens only if it declares an LLM-only host and LLM seats, or (an
+  older recording) every seat made requests in every finished season and every command is attributed to the
+  LLM; the panel says which. Otherwise it is refused as *unknown* or *not LLM-only*.
+- **Switching runs.** Opening the run list pauses playback and it stays paused when you close the list. A run
+  on a different map than the loaded scene is refused with the reason; the run already open is kept. City,
+  tower and army markers are rebuilt for a run on the same map.
 - **Rules are the recording's.** A run replays under the rules it was recorded with. If a recording does
   not say which city-assault rule it used, the panel says its provenance is unestablished instead of
   claiming an exact match.

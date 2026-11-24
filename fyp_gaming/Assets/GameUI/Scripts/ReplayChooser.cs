@@ -25,7 +25,13 @@ namespace LuanShi
         void ToggleReplayChooser()
         {
             _replayChooserOpen = !_replayChooserOpen;
-            if (_replayChooserOpen) RefreshReplayPresetStatus();
+            if (_replayChooserOpen)
+            {
+                // Opening the list pauses playback; closing it leaves playback paused, so the run never
+                // moves while a person is choosing and never restarts by itself. Play resumes it.
+                ReplayPause();
+                RefreshReplayPresetStatus();
+            }
         }
 
         void RefreshReplayPresetStatus()
@@ -47,9 +53,11 @@ namespace LuanShi
 
             GUI.Label(new Rect(x, y, width, 18f), "LOAD A RECORDED RUN", uiPanelTitle);
             y += 22f;
-            GUI.Label(new Rect(x, y, width, 28f),
-                ReplayCatalog.LlmOnlyLabel + " A run opens only if its local files are found and valid.", uiSmallWrap);
-            y += 32f;
+            GUI.Label(new Rect(x, y, width, 42f),
+                ReplayCatalog.LlmOnlyLabel + " A run opens only if its local files are found and valid. "
+                + "Playback is paused while this list is open and stays paused when it closes; press Play to continue.",
+                uiSmallWrap);
+            y += 46f;
 
             GUI.Label(new Rect(x, y + 2f, 54f, 20f), "Run ID", uiSmall);
             _replayRunInput = GUI.TextField(new Rect(x + 56f, y, width - 56f - 64f, 24f), _replayRunInput ?? "", 96, uiField);
@@ -91,7 +99,7 @@ namespace LuanShi
             if (!string.IsNullOrEmpty(_replayPresets.Message))
                 GUI.Label(new Rect(x, y, width, 30f), _replayPresets.Message, uiHint);
             if (_replaySession != null && GUI.Button(new Rect(x + width - 80f, area.yMax - 30f, 80f, 22f), "Close", uiButton))
-                _replayChooserOpen = false;
+                _replayChooserOpen = false;   // stays paused: see ToggleReplayChooser
         }
     }
 }

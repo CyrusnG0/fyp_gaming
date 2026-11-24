@@ -14,7 +14,20 @@ namespace LuanShi.Engine
     public static partial class PromptBuilder
     {
         /// <summary>Sits after the assault-text suffix and before the garrison-conversion suffix.</summary>
-        public const string UnitTypesVersionSuffix = "+unit-types-1";
+        public const string UnitTypesVersionSuffix = "+unit-types-2";
+
+        /// <summary>First unit-types identity. Its prompt still carried the base infantry-only recruit
+        /// sentences, so new runs never use it; recorded requests that do are still read as unit-types.</summary>
+        public const string LegacyUnitTypesVersionSuffix = "+unit-types-1";
+
+        internal static bool EndsWithUnitTypesSuffix(string version, out int suffixLength)
+        {
+            suffixLength = 0;
+            if (string.IsNullOrEmpty(version)) return false;
+            if (version.EndsWith(UnitTypesVersionSuffix, StringComparison.Ordinal)) suffixLength = UnitTypesVersionSuffix.Length;
+            else if (version.EndsWith(LegacyUnitTypesVersionSuffix, StringComparison.Ordinal)) suffixLength = LegacyUnitTypesVersionSuffix.Length;
+            return suffixLength > 0;
+        }
 
         public static bool IsUnitTypesPromptVersion(string version)
         {
@@ -22,7 +35,24 @@ namespace LuanShi.Engine
             if (IsGarrisonConversionPromptVersion(version))
                 version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
                     ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
-            return version.EndsWith(UnitTypesVersionSuffix, StringComparison.Ordinal);
+            return EndsWithUnitTypesSuffix(version, out _);
+        }
+
+        private const string BaseRecruitOrderText = "recruit (args.unit_type must be \"infantry\")";
+        private const string BaseRecruitArgsText = "only recruit accepts it, with unit_type = \"infantry\".";
+
+        /// <summary>
+        /// The complete unit-types system prompt: the base text with its two infantry-only recruit
+        /// statements replaced (not contradicted by a later override), then the UNIT TYPES block.
+        /// Called after any action-reference block, which was built with the same flag.
+        /// </summary>
+        public static string ApplyUnitTypes(string system, BalanceProfile profile, bool attack,
+            bool garrisonConversion, bool assaultRatioEnforced)
+        {
+            system = (system ?? "")
+                .Replace(BaseRecruitOrderText, "recruit (args.unit_type: infantry, archer, cavalry or siege; see UNIT TYPES)")
+                .Replace(BaseRecruitArgsText, "only recruit accepts it, with unit_type as listed under UNIT TYPES.");
+            return system + UnitTypesAddendum(profile, attack, garrisonConversion, assaultRatioEnforced);
         }
 
         public static string UnitTypesAddendum(BalanceProfile profile, bool attack, bool garrisonConversion,
@@ -34,8 +64,7 @@ namespace LuanShi.Engine
             sb.Append("\n\nUNIT TYPES (opt-in; values are for balance profile \"").Append(profile.Key)
               .Append("\"; the engine is authoritative):\n");
             sb.Append("- recruit accepts args.unit_type \"infantry\", \"archer\", \"cavalry\" or \"siege\". For recruit " +
-                      "only, this overrides the base OUTPUT CONTRACT's infantry-only rule. If args is omitted the engine " +
-                      "recruits infantry. Any other value is rejected.\n");
+                      "only. If args is omitted the engine recruits infantry. Any other value is rejected.\n");
             sb.Append("- Each recruit order costs ").Append(Number(BalanceConfig.CommandPointCost(ActionType.Recruit)))
               .Append(" command point(s) and ").Append(Number(BalanceConfig.RecruitPopCost))
               .Append(" population, and adds ").Append(Number(troops))
@@ -64,18 +93,28 @@ namespace LuanShi.Engine
 
         private static void AppendUnitCombatFacts(StringBuilder sb, bool assaultRatioEnforced)
         {
-            sb.Append("- Unit rules in combat: infantry beats archer, cavalry beats infantry and archer beats cavalry " +
-                      "(attacker's strength x").Append(Decimal(BalanceConfig.UnitCounterBonus))
-              .Append(" against the type it beats, x").Append(Decimal(BalanceConfig.UnitCounterPenalty))
-              .Append(" against the type that beats it). Siege is x").Append(Decimal(BalanceConfig.SiegeFieldPenalty))
-              .Append(" in field battles and has no counter relation; against a city's defense siege is x")
-              .Append(Decimal(BalanceConfig.SiegeVsCityBonus)).Append(". Archers may attack an army up to ")
+            // Field battle: the engine multiplies each side's own strength by its own factor, so the same
+            // pair of types is stated from both sides. Siege never takes part in the counter cycle.
+            sb.Append("- Field battle (attack_army): each side's strength is multiplied by its own type factor, so a matchup affects both armies. ")
+              .Append("infantry vs archer: infantry x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Infantry, UnitTypes.Archer)))
+              .Append(", archer x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Archer, UnitTypes.Infantry)))
+              .Append("; cavalry vs infantry: cavalry x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Cavalry, UnitTypes.Infantry)))
+              .Append(", infantry x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Infantry, UnitTypes.Cavalry)))
+              .Append("; archer vs cavalry: archer x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Archer, UnitTypes.Cavalry)))
+              .Append(", cavalry x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Cavalry, UnitTypes.Archer)))
+              .Append("; same type x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Infantry, UnitTypes.Infantry)))
+              .Append(" each. Siege is x").Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Siege, UnitTypes.Infantry)))
+              .Append(" for itself in any field battle, attacking or defending, and an army fighting siege is x")
+              .Append(Decimal(UnitTypes.FieldCombatMultiplier(UnitTypes.Infantry, UnitTypes.Siege))).Append(".\n");
+            sb.Append("- Other type effects: an attacking cavalry army also gets x").Append(Decimal(BalanceConfig.CavalryPlainsChargeBonus))
+              .Append(" when the army it attacks stands on plains (the defender gets no charge bonus); infantry, attacking or defending, takes x")
+              .Append(Decimal(BalanceConfig.InfantryLossTakenMult)).Append(" losses in field battles; archers may attack an army up to ")
               .Append(Number(UnitTypes.AttackRange(UnitTypes.Archer))).Append(" hexes away (other types ")
-              .Append(Number(UnitTypes.AttackRange(UnitTypes.Infantry))).Append("), and an archer garrison defends its city at x")
-              .Append(Decimal(BalanceConfig.ArcherSiegeDefenseBonus)).Append(". Cavalry may march ")
-              .Append(Number(BalanceConfig.CavalryMarchesPerSeason)).Append(" times per season and attacks an army on plains at x")
-              .Append(Decimal(BalanceConfig.CavalryPlainsChargeBonus)).Append(". Infantry takes x")
-              .Append(Decimal(BalanceConfig.InfantryLossTakenMult)).Append(" losses in field battles.");
+              .Append(Number(UnitTypes.AttackRange(UnitTypes.Infantry))).Append("); cavalry may march ")
+              .Append(Number(BalanceConfig.CavalryMarchesPerSeason)).Append(" times per season.\n");
+            sb.Append("- City assault (attack_city): a siege attacker is x").Append(Decimal(BalanceConfig.SiegeVsCityBonus))
+              .Append(" against the city's defense; no other attacking type has a type factor there. A garrison of archers defends at x")
+              .Append(Decimal(BalanceConfig.ArcherSiegeDefenseBonus)).Append("; no other garrison type has one.");
             if (assaultRatioEnforced)
                 sb.Append(" A siege army is exempt from the minimum troop ratio for assaulting a city.");
             sb.Append('\n');

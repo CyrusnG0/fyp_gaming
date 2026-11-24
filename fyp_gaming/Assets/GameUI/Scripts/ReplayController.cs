@@ -47,6 +47,18 @@ namespace LuanShi
         {
             ReplayOpenResult open = ReplayCatalog.Open(runKey, _replayPresets != null ? _replayPresets.SearchRoots : null,
                 engine != null ? engine.State.Map : null);
+            if (open.Ok)
+            {
+                // The files are valid; can this scene draw them? Terrain cannot be rebuilt while playing.
+                string cannotShow = CheckReplayVisuals(open);
+                if (cannotShow != null)
+                {
+                    open.Status = ReplayOpenStatus.Unsupported;
+                    open.Session = null;
+                    open.Message = "This recording cannot be shown on the loaded scene: " + cannotShow
+                        + (_replaySession != null ? ". The run already open was not changed." : ".");
+                }
+            }
             _replayOpenMessage = open.Message;
             _replayOpenOk = open.Ok;
             if (!open.Ok)
@@ -79,6 +91,7 @@ namespace LuanShi
             _replayFinalReportLogged = false;
             _replayShowProviderReasoning = false;
             _replayChooserOpen = false;
+            ApplyReplayVisuals();
             RefreshReplayView();
             SyncSpectatorArmyVisuals();
             Debug.Log("[Replay] initialized with " + _replayBundle.Requests.Count + " requests from " + runKey);
@@ -90,7 +103,8 @@ namespace LuanShi
 
             HandleReplayKeyboardControls();
 
-            if (_replaySession.IsPlaying)
+            // Playback is paused while the chooser is open (see ToggleReplayChooser); never advance behind it.
+            if (_replaySession.IsPlaying && !_replayChooserOpen)
             {
                 _replaySession.Tick(Time.deltaTime);
             }
@@ -226,6 +240,7 @@ namespace LuanShi
             engine = _replaySession.Engine;
             _replaySyncedRequestIndex = -1;
             _replayFinalReportLogged = false;
+            ApplyReplayVisuals();
             RefreshReplayView();
             SyncSpectatorArmyVisuals();
         }

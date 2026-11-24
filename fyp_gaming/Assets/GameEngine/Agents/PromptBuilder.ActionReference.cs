@@ -47,8 +47,8 @@ namespace LuanShi.Engine
                 version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
                     ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
             // The unit-types suffix sits between the assault-text and garrison suffixes.
-            if (!string.IsNullOrEmpty(version) && version.EndsWith(UnitTypesVersionSuffix, StringComparison.Ordinal))
-                version = version.Substring(0, version.Length - UnitTypesVersionSuffix.Length);
+            if (EndsWithUnitTypesSuffix(version, out int unitTypesLength))
+                version = version.Substring(0, version.Length - unitTypesLength);
             return !string.IsNullOrEmpty(version) && version.EndsWith(AssaultTextVersionSuffix, StringComparison.Ordinal)
                 ? version.Substring(0, version.Length - AssaultTextVersionSuffix.Length)
                 : version;
@@ -118,7 +118,7 @@ namespace LuanShi.Engine
         }
 
         public static string ActionReferenceAddendum(BalanceProfile profile, bool attack, bool research,
-            bool diplomacy, bool garrisonConversion, bool assaultRatioEnforced = false)
+            bool diplomacy, bool garrisonConversion, bool assaultRatioEnforced = false, bool unitTypes = false)
         {
             if (profile == null) profile = BalanceProfile.Standard;
             string cp = Number(BalanceConfig.CommandPointsPerSeason);
@@ -149,7 +149,7 @@ namespace LuanShi.Engine
             sb.Append("- fortify: city defense +1 (max ").Append(Number(BalanceConfig.DefenseMax))
               .Append("); a garrison defends at x(1 + defense x ")
               .Append(Percent(BalanceConfig.CombatDefenseBonusPerLevel)).Append(").\n");
-            AppendRecruitChain(sb, profile, recruitGold, pop, troops, march, attack, garrisonConversion);
+            AppendRecruitChain(sb, profile, recruitGold, pop, troops, march, attack, garrisonConversion, unitTypes);
             AppendMarchRules(sb, profile, march);
             if (attack) AppendAttackRules(sb, assaultRatioEnforced);
             if (research)
@@ -165,14 +165,22 @@ namespace LuanShi.Engine
         }
 
         private static void AppendRecruitChain(StringBuilder sb, BalanceProfile profile, string recruitGold,
-            string pop, string troops, string march, bool attack, bool garrisonConversion)
+            string pop, string troops, string march, bool attack, bool garrisonConversion, bool unitTypes)
         {
             string upkeep = Decimal(profile.TroopFoodUpkeep(BalanceConfig.RecruitTroopGain, UnitTypes.Infantry));
-            string foodNeed = "Garrison and field troops eat food every season (1,000 infantry eat about " + upkeep
+            string foodNeed = unitTypes
+                ? "Garrison and field troops eat food every season; the amount per unit type is under UNIT TYPES below."
+                : "Garrison and field troops eat food every season (1,000 infantry eat about " + upkeep
                 + " food per season in this profile).";
             sb.Append("RECRUITING AND ARMIES:\n");
-            sb.Append("- recruit (target_id = your city, args.unit_type \"infantry\"): costs ").Append(recruitGold)
-              .Append(" gold and ").Append(pop).Append(" population from that city and adds ").Append(troops)
+            if (unitTypes)
+                sb.Append("- recruit (target_id = your city, args.unit_type \"infantry\", \"archer\", \"cavalry\" or \"siege\"): the gold cost " +
+                          "and any research requirement depend on the type and are listed under UNIT TYPES below. Each order costs ")
+                  .Append(pop);
+            else
+                sb.Append("- recruit (target_id = your city, args.unit_type \"infantry\"): costs ").Append(recruitGold)
+                  .Append(" gold and ").Append(pop);
+            sb.Append(" population from that city and adds ").Append(troops)
               .Append(" troops to that city's garrison. It needs that much gold and population in the city, and the " +
                       "garrison's unit type must match. The population is not returned when the troops later move or fall. ")
               .Append("Population supplies the city's tax gold (").Append(Decimal(BalanceConfig.TaxGoldPerPop))
