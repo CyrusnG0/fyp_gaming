@@ -160,7 +160,8 @@ namespace LuanShi.Engine
             }
 
             ParseResult parsed = LlmActionParser.Parse(response.Text, AttackActive,
-                _config.EnableResearch, _config.EnableDiplomacy, _config.EnableGarrisonConversion);
+                _config.EnableResearch, _config.EnableDiplomacy, _config.EnableGarrisonConversion,
+                UnitTypesActive);
             if (!parsed.Ok)
             {
                 InvalidThisTurn++;

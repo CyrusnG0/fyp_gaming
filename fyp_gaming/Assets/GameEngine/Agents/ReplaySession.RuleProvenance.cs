@@ -326,7 +326,8 @@ namespace LuanShi.Engine
             ParseResult parsed = !req.ParseOk
                 ? ParseResult.Failure(req.ResultError ?? "recorded invalid response")
                 : LlmActionParser.Parse(req.RawModelText, allowAttack, allowResearch,
-                    allowDiplomacy, allowGarrisonConversion);
+                    allowDiplomacy, allowGarrisonConversion,
+                    PromptBuilder.IsUnitTypesPromptVersion(req.PromptVersion));
             isEndTurn = parsed.Ok && parsed.Action != null && parsed.Action.EndTurn;
             replayedParseOk = parsed.Ok && parsed.Action != null;
             parseError = replayedParseOk ? null : (parsed.Error ?? "parse_failure");

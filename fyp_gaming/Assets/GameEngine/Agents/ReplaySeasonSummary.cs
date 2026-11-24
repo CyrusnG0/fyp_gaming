@@ -195,7 +195,7 @@ namespace LuanShi.Engine
                         || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion);
 
                     ParseResult p = LlmActionParser.Parse(req.RawModelText, allowAttack, allowResearch,
-                        allowDiplomacy, allowGarrison);
+                        allowDiplomacy, allowGarrison, PromptBuilder.IsUnitTypesPromptVersion(req.PromptVersion));
                     if (!p.Ok || p.Action == null) { lookupsKnown = false; side.InvalidRequests++; continue; }
                     if (p.Action.EndTurn) { side.EndTurns++; continue; }
 

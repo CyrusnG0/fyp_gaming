@@ -93,6 +93,7 @@ internal static partial class Harness
         RunEconomySmoke();
         RunBalanceProfile();
         RunActionReference();
+        RunUnitParity();
         RunDemoProfileIntegration();
         RunLlmPersona();
         RunDiplomacySmoke();

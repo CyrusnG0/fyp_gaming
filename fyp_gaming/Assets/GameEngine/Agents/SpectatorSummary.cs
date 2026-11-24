@@ -80,6 +80,8 @@ namespace LuanShi.Engine
                 sb.Append(",\"garrison_conversion_enabled\":true");
             if (config != null && config.EnableActionReference)
                 sb.Append(",\"action_reference_enabled\":true");
+            if (config != null && config.EnableUnitTypes)
+                sb.Append(",\"unit_types_enabled\":true");
             sb.Append(",\"diplomacy_enabled\":")
               .Append(config != null && config.EnableDiplomacy ? "true" : "false");
             sb.Append(",\"visible_march_routes_enforced\":")
@@ -125,6 +127,12 @@ namespace LuanShi.Engine
                 version += PromptBuilder.ActionReferenceVersionSuffix;
             }
             if (attack && !historicalRule) version += PromptBuilder.AssaultTextVersionSuffix;
+            bool unitTypes = config != null && config.EnableUnitTypes;
+            if (unitTypes)
+            {
+                system += PromptBuilder.UnitTypesAddendum(session.Balance, attack, conversion, historicalRule);
+                version += PromptBuilder.UnitTypesVersionSuffix;
+            }
             if (conversion) { version += PromptBuilder.GarrisonConversionVersionSuffix; system += PromptBuilder.GarrisonConversionAddendum; }
             Field(sb, "prompt_version",
                 version,
@@ -132,7 +140,7 @@ namespace LuanShi.Engine
             // Persona text changes by faction, so a single hash would misrepresent the run.
             Field(sb, "schema_hash",
                 personas ? "per-request"
-                    : conversion || reference || historicalRule ? PromptBuilder.GarrisonConversionHash(system)
+                    : conversion || reference || unitTypes || historicalRule ? PromptBuilder.GarrisonConversionHash(system)
                     : PromptBuilder.CombinedSchemaHashFor(true, inquiry, null, attack, deliberation, rich, research, spatial, diplomacy),
                 config, true);
             Field(sb, "config_redacted", redacted, config, true);

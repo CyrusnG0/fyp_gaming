@@ -370,6 +370,17 @@ namespace LuanShi.Engine
             // switched to the legacy attack version above.
             if (planning && attackOn && !assaultRatioRule)
                 promptVersion += PromptBuilder.AssaultTextVersionSuffix;
+            // Opt-in unit types: facts for the four recruitable types, one candidate entry per type.
+            // After the assault-text suffix and before the garrison suffix, which stays last.
+            bool unitTypes = UnitTypesActive;
+            if (unitTypes)
+            {
+                system += PromptBuilder.UnitTypesAddendum(observation?.Balance, attackOn,
+                    _config.EnableGarrisonConversion, assaultRatioRule);
+                promptVersion += PromptBuilder.UnitTypesVersionSuffix;
+                schemaHash = PromptBuilder.GarrisonConversionHash(system);
+                options = ActionCatalogue.ExpandRecruitTypes(options, observation);
+            }
             if (_config.EnableGarrisonConversion)
             {
                 system += PromptBuilder.GarrisonConversionAddendum;
@@ -402,7 +413,7 @@ namespace LuanShi.Engine
             else
             {
                 SpatialTruncationReport spatialReport = null;
-                user = _config.EnableGarrisonConversion || actionReference
+                user = _config.EnableGarrisonConversion || actionReference || unitTypes
                     ? PromptBuilder.UserPromptWithFinalBudget(observation, options, _history,
                         requestsLeft, actionsLeft, movement, spatialOn ? movement.SpatialContext : null,
                         spatialOn ? spatialOpts : null, promptLimit, promptVersion, system.Length,
@@ -431,9 +442,9 @@ namespace LuanShi.Engine
             // fails closed on the size check below. The version line is then aligned with the system
             // prompt and the run record, because the shared builders carry no diplomacy flag.
             if (diplomacy) user = PromptBuilder.InsertDiplomacySection(user, diplomacySection);
-            if (diplomacy || _config.EnableGarrisonConversion || actionReference)
+            if (diplomacy || _config.EnableGarrisonConversion || actionReference || unitTypes)
                 user = PromptBuilder.ApplyDiplomacyVersion(user, promptVersion);
-            if ((_config.EnableGarrisonConversion || actionReference) && LastSpatialTruncation != null)
+            if ((_config.EnableGarrisonConversion || actionReference || unitTypes) && LastSpatialTruncation != null)
             {
                 LastSpatialTruncation.SystemChars = system.Length;
                 LastSpatialTruncation.UserChars = user.Length;

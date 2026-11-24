@@ -48,6 +48,8 @@ namespace LuanShi.Engine
             sb.Append(",\"research\":").Append(B(config != null && config.EnableResearch));
             if (config != null && config.EnableGarrisonConversion)
                 sb.Append(",\"garrison_conversion\":true");
+            if (config != null && config.EnableUnitTypes)
+                sb.Append(",\"unit_types\":true");
             sb.Append(",\"diplomacy\":").Append(B(config != null && config.EnableDiplomacy));
             sb.Append(",\"manual_lookup\":").Append(B(config != null && config.EnableManualLookup));
             sb.Append(",\"deliberation\":").Append(B(config != null && config.EnableDeliberation));

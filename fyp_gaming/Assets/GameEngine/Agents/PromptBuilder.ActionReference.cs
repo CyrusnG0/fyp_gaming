@@ -46,6 +46,9 @@ namespace LuanShi.Engine
             if (IsGarrisonConversionPromptVersion(version))
                 version = version.Substring(0, version.Length - (version.EndsWith(GarrisonConversionVersionSuffix, StringComparison.Ordinal)
                     ? GarrisonConversionVersionSuffix.Length : LegacyGarrisonConversionVersionSuffix.Length));
+            // The unit-types suffix sits between the assault-text and garrison suffixes.
+            if (!string.IsNullOrEmpty(version) && version.EndsWith(UnitTypesVersionSuffix, StringComparison.Ordinal))
+                version = version.Substring(0, version.Length - UnitTypesVersionSuffix.Length);
             return !string.IsNullOrEmpty(version) && version.EndsWith(AssaultTextVersionSuffix, StringComparison.Ordinal)
                 ? version.Substring(0, version.Length - AssaultTextVersionSuffix.Length)
                 : version;

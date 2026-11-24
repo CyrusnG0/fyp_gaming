@@ -19,6 +19,12 @@ namespace LuanShi.Engine
         /// Attack and assault orders are advertised, parsed and submitted only when the config opts in
         /// AND the host can plan them. Either missing means the march-only behaviour, exactly as before.
         /// </summary>
+        /// <summary>
+        /// Unit-type recruitment is advertised, parsed and submitted only when the config opts in AND the
+        /// host is a planning host (the same hosts that receive the action reference).
+        /// </summary>
+        private bool UnitTypesActive => _config.EnableUnitTypes && _host is IPlanningHost;
+
         private bool AttackActive => _config.EnableAttack && _host is IAttackPlanningHost;
 
         /// <summary>

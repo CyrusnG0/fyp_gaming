@@ -101,6 +101,15 @@ namespace LuanShi.Engine
 
         public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch,
             bool allowDiplomacy, bool allowGarrisonConversion)
+            => Parse(modelText, allowAttack, allowResearch, allowDiplomacy, allowGarrisonConversion, false);
+
+        /// <summary>
+        /// As above, plus <paramref name="allowUnitTypes"/>: recruit may name any of the four
+        /// <see cref="UnitTypes"/>. Without it only "infantry" is accepted, exactly as before. The
+        /// parser checks the vocabulary only; research, garrison and cost limits stay with the engine.
+        /// </summary>
+        public static ParseResult Parse(string modelText, bool allowAttack, bool allowResearch,
+            bool allowDiplomacy, bool allowGarrisonConversion, bool allowUnitTypes)
         {
             if (!UnwrapFence(modelText, out string json, out string error))
                 return ParseResult.Failure(error);
@@ -251,7 +260,8 @@ namespace LuanShi.Engine
                         return ParseResult.Failure("unsupported argument");
                     if (!TryArgValue(type, arg.Key, arg.Value, out string argValue, out error))
                         return ParseResult.Failure(error);
-                    if (type == ActionType.Recruit && argValue != UnitTypes.Infantry)
+                    if (type == ActionType.Recruit && argValue != UnitTypes.Infantry
+                        && !(allowUnitTypes && UnitTypes.IsValid(argValue)))
                         return ParseResult.Failure("unsupported unit type");
                     if (researchType && !ResearchLine.IsValid(argValue))
                         return ParseResult.Failure("unsupported research line");

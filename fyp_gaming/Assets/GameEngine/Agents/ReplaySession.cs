@@ -608,7 +608,8 @@ namespace LuanShi.Engine
                 allowAttack || PromptBuilder.IsAttackPromptVersion(req.PromptVersion),
                 allowResearch || PromptBuilder.IsResearchPromptVersion(req.PromptVersion),
                 allowDiplomacy || PromptBuilder.IsDiplomacyPromptVersion(req.PromptVersion),
-                allowGarrisonConversion || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion));
+                allowGarrisonConversion || PromptBuilder.IsGarrisonConversionPromptVersion(req.PromptVersion),
+                PromptBuilder.IsUnitTypesPromptVersion(req.PromptVersion));
             return p.Ok && p.Action != null && p.Action.EndTurn;
         }
 
