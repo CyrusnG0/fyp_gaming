@@ -198,9 +198,10 @@ namespace LuanShi.Engine
             string tokens = ReasoningTokens.HasValue
                 ? "reasoning tokens: " + ReasoningTokens.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : "reasoning tokens: not reported";
+            // The count leads so it survives a narrow, ellipsized status line.
             return string.IsNullOrEmpty(Explanation) || Explanation == "unknown"
-                ? "model statement: none recorded [" + tokens + "]"
-                : "model statement: \"" + Explanation + "\" [" + tokens + "]";
+                ? "[" + tokens + "] model statement: none recorded"
+                : "[" + tokens + "] model statement: \"" + Explanation + "\"";
         }
     }
 

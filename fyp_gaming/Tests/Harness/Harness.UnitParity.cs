@@ -103,6 +103,7 @@ internal static partial class Harness
         UnitParityMalformedAndFeatureOff();
         UnitParityPromptIdentity();
         UnitParityReplay();
+        UnitParityAttackComposition();
         UnitParityCrowdedPrompt();
     }
 
@@ -656,6 +657,65 @@ internal static partial class Harness
                 "the run log records +unit-types-1 and the typed recruit on every request");
         }
         finally { try { System.IO.Directory.Delete(root, true); } catch (Exception) { } }
+    }
+
+    // ---- recruited types compose with the attack path: the unit rule decides, not the transport --------------
+    private static int[] UtHexAtDistance(GameEngine engine, int fromX, int fromZ, int distance)
+    {
+        MapData map = engine.State.Map;
+        var seen = new Dictionary<int, int> { { map.Index(fromX, fromZ), 0 } };
+        var queue = new Queue<int>();
+        queue.Enqueue(map.Index(fromX, fromZ));
+        while (queue.Count > 0)
+        {
+            int at = queue.Dequeue();
+            if (seen[at] == distance && map.Walkable[at])
+                return new[] { at % map.Width, at / map.Width };
+            if (seen[at] >= distance) continue;
+            foreach (int next in map.Neighbors[at])
+                if (!seen.ContainsKey(next)) { seen[next] = seen[at] + 1; queue.Enqueue(next); }
+        }
+        return null;
+    }
+
+    private static void UnitParityAttackComposition()
+    {
+        foreach (string type in new[] { "infantry", "archer" })
+        {
+            GameEngine engine = UtEngine(BalanceProfile.Standard, 0);
+            CityState city = engine.State.FindCity("city-wei-2");
+            int[] target = UtHexAtDistance(engine, city.X, city.Z, 2);
+            ArmyState enemy = engine.State.FindArmy("army-shu-1");
+            enemy.X = target[0]; enemy.Z = target[1];
+            enemy.UnitType = "infantry";
+            var fake = new FakeLlmTransport();
+            fake.EnqueueSuccess(UtRecruit("city-wei-2", type), 0, 100, 10);
+            fake.EnqueueSuccess("{\"type\":\"convert_garrison\",\"target_id\":\"city-wei-2\",\"param_a\":1000,\"param_b\":0}", 0, 100, 10);
+            fake.EnqueueDynamic(req =>
+            {
+                ArmyState formed = engine.State.Armies.Find(a => a.OwnerSeatId == "seat-0" && a.X == city.X && a.Z == city.Z);
+                return "{\"type\":\"attack_army\",\"target_id\":\"" + (formed == null ? "none" : formed.Id)
+                    + "\",\"param_a\":" + target[0] + ",\"param_b\":" + target[1] + "}";
+            }, 0, 100, 10);
+            fake.EnqueueSuccess("{\"type\":\"end_turn\"}", 0, 100, 10);
+            fake.EnqueueSuccess("{\"type\":\"end_turn\"}", 0, 100, 10);
+            var runner = new LlmTurnRunner(fake, UtConfig(true), null, null, new MemoryLlmStrategicNoteStore());
+            int token = engine.BeginSeatTurn("seat-0");
+            var host = new SingleLlmTurnHost(engine, UtConfig(true), "seat-0", () => engine.Observe("seat-0"),
+                cmd => engine.SubmitAs("seat-0", token, cmd), () => { });
+            runner.Begin(host, token, "seat-0", 777);
+            for (int i = 0; i < 2000 && (runner.State == RunnerState.Requesting || runner.State == RunnerState.Executing); i++)
+            { runner.Tick(); System.Threading.Thread.Sleep(1); }
+            engine.EndSeatTurn(token);
+            List<EventRecord> battles = UtEvents(engine, "battle_field");
+            if (type == "archer")
+                UtCheck(battles.Count == 1 && battles[0].Payload["attacker_unit_type"] == "archer"
+                        && battles[0].ControllerType == ControllerType.Llm && UtEvents(engine, "action_rejected").Count == 0,
+                    "an LLM-recruited archer army attacks an enemy army two hexes away through the attack path");
+            else
+                UtCheck(battles.Count == 0 && UtEvents(engine, "action_rejected").Count == 1,
+                    "the same order from an infantry army two hexes away is refused by the validator (range rule)");
+        }
     }
 
     // ---- worst-case prompt size: every optional section on, unit types included ---------------------------

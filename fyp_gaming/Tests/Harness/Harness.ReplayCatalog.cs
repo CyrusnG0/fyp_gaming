@@ -143,8 +143,8 @@ internal static partial class Harness
             "very long reasoning is capped and marked");
         var evt = new ReplayFeedEvent { Explanation = "raise food", ReasoningTokens = 595 };
         var none = new ReplayFeedEvent { Explanation = "unknown" };
-        CatCheck(evt.StatementText() == "model statement: \"raise food\" [reasoning tokens: 595]"
-                 && none.StatementText() == "model statement: none recorded [reasoning tokens: not reported]",
+        CatCheck(evt.StatementText() == "[reasoning tokens: 595] model statement: \"raise food\""
+                 && none.StatementText() == "[reasoning tokens: not reported] model statement: none recorded",
             "the displayed statement is labelled as a model statement with the provider's token count or 'not reported'");
         CatCheck(!evt.StatementText().ToLowerInvariant().Contains("thought") && !evt.StatementText().ToLowerInvariant().Contains("verified reasoning"),
             "the statement line makes no claim to be the model's reasoning");
@@ -218,8 +218,8 @@ internal static partial class Harness
             "the replayed engine recruited archers through the same validator");
         CatCheck(replay.EventFeed.Count == 4 && replay.EventFeed[0].ReasoningTokens == 111
                  && replay.EventFeed[2].ReasoningTokens == null
-                 && replay.EventFeed[0].StatementText() == "model statement: \"raise archers\" [reasoning tokens: 111]"
-                 && replay.EventFeed[2].StatementText().EndsWith("[reasoning tokens: not reported]"),
+                 && replay.EventFeed[0].StatementText() == "[reasoning tokens: 111] model statement: \"raise archers\""
+                 && replay.EventFeed[2].StatementText().StartsWith("[reasoning tokens: not reported]"),
             "feed events carry the statement and token count shown in the main view");
         CatCheck(replay.EventFeed.All(e => !e.StatementText().Contains("RZ-")),
             "the main-view statement never includes the provider reasoning text");
