@@ -101,6 +101,7 @@ internal static partial class Harness
         UnitParityGatesAndAfford();
         UnitParityGarrisonAndConversion();
         UnitParityMalformedAndFeatureOff();
+        UnitParityFeedback();
         UnitParityPromptIdentity();
         UnitParityReplay();
         UnitParityAttackComposition();

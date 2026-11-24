@@ -27,6 +27,10 @@ namespace LuanShi.Engine
         public const string GameOver = "game over";
         public const string ArmyMoraleBroken = "army morale broken";
         public const string AssaultRatioTooLow = "assault ratio too low"; // legacy historical replay only
+        // Recruit rejections that name only the seat's own research level or its own garrison. Offered to the
+        // model only when unit-type recruitment is enabled (see the unitTypes argument of ForModel).
+        public const string UnitResearchLocked = "unit type needs more military research";
+        public const string GarrisonTypeDiffers = "garrison holds a different unit type";
         public const string Generic = "action rejected";
 
         private static readonly string[] AllCategories =
@@ -34,7 +38,7 @@ namespace LuanShi.Engine
             NotEnoughGold, NotEnoughFood, NotEnoughPopulation, NoOrdersLeft, CapReached,
             AlreadyMarched, AlreadyAtDestination, DestinationNotReachable, DestinationNotVisible,
             DestinationBlocked, InvalidTarget, UnsupportedAction, GameOver,
-            ArmyMoraleBroken, Generic,
+            ArmyMoraleBroken, UnitResearchLocked, GarrisonTypeDiffers, Generic,
         };
 
         private static readonly ReadOnlyCollection<string> AllCategoriesView =
@@ -132,9 +136,19 @@ namespace LuanShi.Engine
         /// keeps the generic answer.
         /// </summary>
         public static string ForModel(string engineError, ActionCommand command, Observation observation,
-            bool legacyAssaultRatioRule = false)
+            bool legacyAssaultRatioRule = false, bool unitTypes = false)
         {
             string category = ForModel(engineError);
+            // Unit-type recruitment (opt-in): the engine checks the seat's own city first, so these two refusals
+            // describe only the seat's own research level and its own garrison. Off, they stay generic.
+            if (unitTypes && category == Generic && command != null && command.Type == ActionType.Recruit
+                && !string.IsNullOrEmpty(engineError))
+            {
+                if (Contains(engineError, " needs Military ") && Contains(engineError, " research"))
+                    return UnitResearchLocked;
+                if (Starts(engineError, "garrison is ") && Contains(engineError, "recruit the same type"))
+                    return GarrisonTypeDiffers;
+            }
             if (category != Generic || string.IsNullOrEmpty(engineError)
                 || command == null || observation == null) return category;
             bool field = command.Type == ActionType.AttackArmy, city = command.Type == ActionType.AttackCity;

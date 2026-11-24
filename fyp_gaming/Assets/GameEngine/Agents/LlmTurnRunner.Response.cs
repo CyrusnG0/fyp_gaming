@@ -285,7 +285,7 @@ namespace LuanShi.Engine
                 // Deny-by-default feedback: raw engine text can distinguish a hidden-but-existing
                 // id from a nonexistent one, so only the typed allowlist reaches the model.
                 resultError = accepted ? null
-                    : FeedbackPolicy.ForModel(validation.Error, command, flight.Observation);
+                    : FeedbackPolicy.ForModel(validation.Error, command, flight.Observation, false, UnitTypesActive);
             }
             catch (Exception)
             {

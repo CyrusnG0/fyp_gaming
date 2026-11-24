@@ -54,6 +54,42 @@ internal static partial class Harness
             "a host without planning support gets no unit-type text and still refuses non-infantry");
     }
 
+    // ---- what the model is told when the engine refuses a typed recruit -------------------------------
+    private static void UnitParityFeedback()
+    {
+        string researchWord = FeedbackPolicy.UnitResearchLocked, garrisonWord = FeedbackPolicy.GarrisonTypeDiffers;
+        GameEngine gated = UtEngine(BalanceProfile.Standard, 0);
+        UtRunResult g = UtRun(gated, UtConfig(true), UtRecruit("city-wei-2", "cavalry"));
+        UtCheck(g.Fake.Requests.Count >= 2 && g.Fake.Requests[1].User.Contains(researchWord),
+            "flag on: a research-gated recruit tells the model its research is the reason");
+        GameEngine conflict = UtEngine(BalanceProfile.Standard, 3, 600, "archer");
+        UtRunResult c = UtRun(conflict, UtConfig(true), UtRecruit("city-wei-2", "infantry"));
+        UtCheck(c.Fake.Requests.Count >= 2 && c.Fake.Requests[1].User.Contains(garrisonWord),
+            "flag on: a garrison-type conflict tells the model the garrison holds a different type");
+        GameEngine poor = UtEngine(BalanceProfile.Standard, 3, 0, "infantry", 10);
+        UtRunResult p = UtRun(poor, UtConfig(true), UtRecruit("city-wei-2", "siege"));
+        UtCheck(p.Fake.Requests.Count >= 2 && p.Fake.Requests[1].User.Contains(FeedbackPolicy.NotEnoughGold)
+                && !p.Fake.Requests[1].User.Contains(researchWord),
+            "flag on: an unaffordable recruit still reports the existing gold category");
+
+        // Off: the same infantry conflict keeps today's generic answer; nothing new is shown.
+        GameEngine off = UtEngine(BalanceProfile.Standard, 3, 600, "archer");
+        UtRunResult o = UtRun(off, UtConfig(false), UtRecruit("city-wei-2", "infantry"));
+        UtCheck(o.Fake.Requests.Count >= 2 && o.Fake.Requests[1].User.Contains(FeedbackPolicy.Generic)
+                && !o.Fake.Requests[1].User.Contains(garrisonWord) && !o.Fake.Requests[1].User.Contains(researchWord),
+            "flag off: the same refusal keeps the generic feedback");
+        UtCheck(FeedbackPolicy.ForModel("garrison is archer; recruit the same type or empty the garrison first",
+                    new ActionCommand { Type = ActionType.Recruit }, null) == FeedbackPolicy.Generic
+                && FeedbackPolicy.ForModel("garrison is archer; recruit the same type or empty the garrison first",
+                    new ActionCommand { Type = ActionType.LevyTax }, null, false, true) == FeedbackPolicy.Generic
+                && FeedbackPolicy.ForModel("unknown city 'x'", new ActionCommand { Type = ActionType.Recruit }, null, false, true)
+                    == FeedbackPolicy.InvalidTarget,
+            "the new categories apply only to a recruit with the flag on; target existence answers are unchanged");
+        UtCheck(FeedbackPolicy.IsSafeCategory(researchWord) && FeedbackPolicy.IsSafeCategory(garrisonWord)
+                && !researchWord.Contains("level") && !researchWord.Any(char.IsDigit),
+            "the new categories are on the allowlist and carry no number or opponent fact");
+    }
+
     // ---- prompt text, version, hash and candidate list as dispatched -----------------------------------
     private static LlmRequest UtFirstRequest(LlmConfig config, BalanceProfile profile)
     {
