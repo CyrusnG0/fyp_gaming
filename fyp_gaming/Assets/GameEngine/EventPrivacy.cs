@@ -170,6 +170,12 @@ namespace LuanShi.Engine
                 case "spy_exposed":
                 case "message_sent":
                     return null;
+
+                // Handover: the controller is already public in the factions list, so the effective change is
+                // public news of who now controls the seat. Request ids, the previous controller and the request
+                // season stay with the seat; requested/cancelled/rejected are owner_only.
+                case "controller_handover_effective":
+                    return Pick(rec, "seat_id", "to_controller");
             }
             // Unknown/new event types are private by default: never hand the canonical payload to a
             // non-party recipient just because the event type has not been classified yet.
