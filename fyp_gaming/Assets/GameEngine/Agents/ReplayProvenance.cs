@@ -7,8 +7,6 @@ namespace LuanShi.Engine
     {
         /// <summary>The recording declares an LLM-only host and every seat as an LLM controller.</summary>
         DeclaredLlmOnly,
-        /// <summary>Not declared (an older recording), but the request log leaves no room for another controller.</summary>
-        InferredLlmOnly,
         /// <summary>The files do not say enough to tell whether a person played a seat. Not opened.</summary>
         Unknown,
         /// <summary>The recording declares a non-LLM controller or a host that has one. Not opened.</summary>
@@ -20,17 +18,31 @@ namespace LuanShi.Engine
         public ReplayProvenanceLevel Level;
         /// <summary>Why the level was chosen, in plain language (also the label shown for accepted runs).</summary>
         public string Reason;
-        public bool Accepted => Level == ReplayProvenanceLevel.DeclaredLlmOnly || Level == ReplayProvenanceLevel.InferredLlmOnly;
+        public bool Accepted => Level == ReplayProvenanceLevel.DeclaredLlmOnly;
     }
 
     /// <summary>
     /// Decides whether a recording may be presented as LLM-only. The request log holds only model requests,
     /// so an action taken by a person never appears in it: an absent controller field is not evidence that
-    /// the controller was an LLM. A recording is accepted only when it says so itself (declared host and
-    /// seat controllers) or, for an older one, when every seat has requests in every completed season and
-    /// every executed command is attributed to the LLM. Anything else is reported as unknown and refused,
-    /// never certified.
+    /// the controller was an LLM, and a seat that has model requests in every season may still have had a
+    /// person act in it. A recording is accepted only when it says so itself (a spectator host, every seat
+    /// declared an LLM, every executed command attributed to the LLM). An older recording that does not
+    /// declare this is reported as unknown and refused: request coverage is never treated as proof, and
+    /// there is no inspection path that shows it as LLM-only or as a complete controller timeline.
     /// </summary>
+    /// <summary>The provenance wording the chooser and the replay panel show (kept here so tests read the same text).</summary>
+    public static class ReplayProvenanceLabels
+    {
+        public static string ChooserHeader =>
+            ReplayCatalog.LlmOnlyLabel + " Only a recording that declares a spectator host with every seat an LLM opens; "
+            + "an older recording that does not declare its controllers is refused, because a person's actions are not in its log.";
+
+        public static string PanelLine(ReplayProvenance provenance)
+            => provenance != null && provenance.Accepted
+                ? "LLM-only recording (declared). Mixed human/LLM replay is not yet supported."
+                : "Controllers not established: this recording is not shown as LLM-only.";
+    }
+
     public static class ReplayProvenanceCheck
     {
         public const string SpectatorHost = "spectator";
@@ -88,15 +100,16 @@ namespace LuanShi.Engine
                 return Make(ReplayProvenanceLevel.DeclaredLlmOnly,
                     "declared: host mode '" + SpectatorHost + "' and all " + seats.Count + " seats are LLM controllers");
 
-            // Older recording: no declared host or no declared seat controllers. Require that every seat made
-            // requests in every season that finished, so a seat played by a person would show as a gap.
+            // Older recording: it does not declare a spectator host with every seat an LLM. The request log holds
+            // only model requests, so even full per-seat coverage cannot show that nobody else acted in a seat.
             string gap = FirstCoverageGap(bundle, seats);
-            if (gap != null)
-                return Make(ReplayProvenanceLevel.Unknown,
-                    "it does not declare its controllers and " + gap + ", so a person may have played that seat");
-            return Make(ReplayProvenanceLevel.InferredLlmOnly,
-                "inferred, not declared: the recording does not " + (string.IsNullOrEmpty(host) ? "name its host mode" : "declare every seat's controller")
-                + ", but all " + seats.Count + " seats made requests in every completed season and every command is attributed to the LLM");
+            return Make(ReplayProvenanceLevel.Unknown,
+                "it does not declare its controllers (" + (string.IsNullOrEmpty(host) ? "no host mode" : "host mode '" + host + "'")
+                + (undeclared > 0 ? ", " + undeclared + " of " + seats.Count + " seats without a controller" : "") + "); "
+                + (gap == null
+                    ? "every seat has model requests in every completed season, but that cannot show that no person also acted in a seat"
+                    : gap)
+                + ". Any human actions are missing from the log");
         }
 
         // A request with no command (a failed or unparsable reply) and a voluntary end_turn, which the runner

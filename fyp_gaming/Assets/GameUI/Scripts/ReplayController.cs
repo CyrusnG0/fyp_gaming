@@ -76,6 +76,7 @@ namespace LuanShi
             _replayInitError = null;
             _replayBundle = open.Bundle;
             _replayOpenNotes = open.Notes;
+            _replayProvenance = open.Provenance;
             if (_replayBundle.Summary != null)
             {
                 randomSeed = _replayBundle.Summary.Seed;

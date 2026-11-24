@@ -18,6 +18,7 @@ namespace LuanShi
         private string _replayOpenMessage;
         private bool _replayOpenOk;
         private List<string> _replayOpenNotes;
+        private ReplayProvenance _replayProvenance;
         private bool _replayShowProviderReasoning;
         private Vector2 _replayChooserScroll;
         private readonly Dictionary<string, string> _replayPresetStatus = new Dictionary<string, string>();
@@ -53,11 +54,11 @@ namespace LuanShi
 
             GUI.Label(new Rect(x, y, width, 18f), "LOAD A RECORDED RUN", uiPanelTitle);
             y += 22f;
-            GUI.Label(new Rect(x, y, width, 42f),
-                ReplayCatalog.LlmOnlyLabel + " A run opens only if its local files are found and valid. "
+            GUI.Label(new Rect(x, y, width, 70f),
+                ReplayProvenanceLabels.ChooserHeader + " A run opens only if its local files are found and valid. "
                 + "Playback is paused while this list is open and stays paused when it closes; press Play to continue.",
                 uiSmallWrap);
-            y += 46f;
+            y += 74f;
 
             GUI.Label(new Rect(x, y + 2f, 54f, 20f), "Run ID", uiSmall);
             _replayRunInput = GUI.TextField(new Rect(x + 56f, y, width - 56f - 64f, 24f), _replayRunInput ?? "", 96, uiField);

@@ -43,7 +43,7 @@ namespace LuanShi
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall, "Run: " + runId, width), uiSmall);
             y += 15f;
             GUI.Label(new Rect(x, y, width, 14f), EllipsizeToWidth(uiSmall,
-                "LLM-only recording. Mixed human/LLM replay is not yet supported.", width), uiSmall);
+                ReplayProvenanceLabels.PanelLine(_replayProvenance), width), uiSmall);
             y += 15f;
 
             string sSeed = (sum != null && sum.Seed != 0) ? sum.Seed.ToString() : "unknown";

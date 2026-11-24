@@ -5,8 +5,8 @@ using System.Linq;
 using LuanShi.Engine;
 
 // [CATALOG] (continued) Who controlled the seats. The request log never holds a person's actions, so an
-// absent controller field proves nothing: a recording is LLM-only only when it says so or, for an older
-// one, when every seat-turn and every command can be accounted for.
+// absent controller field proves nothing, and per-seat request coverage cannot show that a person did not also
+// act in a seat: a recording is LLM-only only when it declares so; an older one is refused as unknown.
 
 internal static partial class Harness
 {
@@ -52,12 +52,13 @@ internal static partial class Harness
             "declared LLM-only: spectator host with every seat declared llm is accepted (" + declared.Reason + ")");
 
         ReplayProvenance legacy = ReplayProvenanceCheck.Assess(CatProvenanceBundle(null, undeclared, 3, 3, everyone));
-        CatCheck(legacy.Level == ReplayProvenanceLevel.InferredLlmOnly && legacy.Accepted && legacy.Reason.StartsWith("inferred, not declared"),
-            "legacy: no host mode and no seat controllers, but every seat has requests in every season and every command is LLM: accepted as inferred, and labelled so");
+        CatCheck(legacy.Level == ReplayProvenanceLevel.Unknown && !legacy.Accepted
+                 && legacy.Reason.Contains("cannot show that no person also acted") && legacy.Reason.Contains("human actions are missing"),
+            "REGRESSION legacy: every seat has LLM requests in every season, yet a person may also have acted in a seat and those actions are not in the log: refused as unknown, never LLM-only (" + legacy.Reason + ")");
 
         ReplayProvenance legacySpectator = ReplayProvenanceCheck.Assess(CatProvenanceBundle("spectator", undeclared, 3, 3, everyone));
-        CatCheck(legacySpectator.Level == ReplayProvenanceLevel.InferredLlmOnly,
-            "a spectator host whose seats do not declare controllers is still only inferred, not declared");
+        CatCheck(legacySpectator.Level == ReplayProvenanceLevel.Unknown && !legacySpectator.Accepted,
+            "a spectator host whose seats do not declare controllers is refused as unknown, not inferred");
 
         ReplayProvenance gap = ReplayProvenanceCheck.Assess(CatProvenanceBundle(null, undeclared, 3, 3, seat1MissesSeason2));
         CatCheck(gap.Level == ReplayProvenanceLevel.Unknown && !gap.Accepted && gap.Reason.Contains("seat-1") && gap.Reason.Contains("season 2"),
@@ -69,8 +70,8 @@ internal static partial class Harness
         // An incomplete run is judged only on the seasons that finished.
         ReplayProvenance partialOk = ReplayProvenanceCheck.Assess(
             CatProvenanceBundle(null, undeclared, 3, 2, (s, n) => !(s == "seat-1" && n == 3)));
-        CatCheck(partialOk.Level == ReplayProvenanceLevel.InferredLlmOnly,
-            "a run stopped during season 3 is not penalised for the seat that had not yet played it");
+        CatCheck(partialOk.Level == ReplayProvenanceLevel.Unknown && !partialOk.Accepted,
+            "a partly played legacy run is refused too, however complete its coverage looks");
         ReplayProvenance partialGap = ReplayProvenanceCheck.Assess(
             CatProvenanceBundle(null, undeclared, 3, 3, (s, n) => !(s == "seat-1" && n == 3)));
         CatCheck(partialGap.Level == ReplayProvenanceLevel.Unknown,
@@ -114,6 +115,10 @@ internal static partial class Harness
         string marker = "\"host_mode\":\"spectator\"";
         CatCheck(original.Contains(marker), "the recorded bootstrap declares its host mode");
         ReplayOpenResult declared = ReplayCatalog.Open(runId, new[] { root });
+        CatCheck(ReplayProvenanceLabels.PanelLine(declared.Provenance).StartsWith("LLM-only recording (declared)")
+                 && ReplayProvenanceLabels.ChooserHeader.Contains("declares a spectator host")
+                 && ReplayProvenanceLabels.ChooserHeader.Contains("refused"),
+            "the chooser header and the panel line for the declared spectator run state what is declared, and the header says older runs are refused");
         CatCheck(declared.Ok && declared.Provenance != null && declared.Provenance.Level == ReplayProvenanceLevel.DeclaredLlmOnly
                  && declared.Notes.Any(n => n.StartsWith("Controllers declared")),
             "the recorded spectator run opens as declared LLM-only and the open result says so");
@@ -131,10 +136,15 @@ internal static partial class Harness
                 "an unrecognised host mode is Unsupported with the controllers reported as unknown");
             File.WriteAllText(path, original.Replace(marker + ",", "").Replace(marker, ""));
             ReplayOpenResult legacy = ReplayCatalog.Open(runId, new[] { root });
-            CatCheck(legacy.Status == ReplayOpenStatus.Ready
-                     ? legacy.Provenance.Level == ReplayProvenanceLevel.InferredLlmOnly && legacy.Notes.Any(n => n.Contains("inferred, not declared"))
-                     : legacy.Status == ReplayOpenStatus.Unsupported && legacy.Provenance.Level == ReplayProvenanceLevel.Unknown,
-                "with no host mode the recording opens only as inferred (and says so) or is refused as unknown (" + legacy.Status + ")");
+            CatCheck(legacy.Status == ReplayOpenStatus.Unsupported && legacy.Session == null
+                     && legacy.Provenance.Level == ReplayProvenanceLevel.Unknown && legacy.Message.Contains("unknown")
+                     && legacy.Message.Contains("not opened"),
+                "REGRESSION the real recording with its host mode removed is refused as unknown and no session is created (" + legacy.Status + ")");
+            CatCheck(!legacy.Notes.Any(n => n.Contains("LLM-only")),
+                "a refused recording carries no LLM-only note");
+            CatCheck(ReplayProvenanceLabels.PanelLine(legacy.Provenance).Contains("not shown as LLM-only")
+                     && !ReplayProvenanceLabels.PanelLine(legacy.Provenance).Contains("LLM-only recording"),
+                "the panel line for a refused recording does not claim LLM-only");
         }
         finally { File.WriteAllText(path, original); }
     }

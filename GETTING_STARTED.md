@@ -160,9 +160,10 @@ shows the recorded model statements. It makes no model call and does not accept 
   *files not found*, *incomplete files* (and which are missing) or *failed validation* with the reason.
   Typing an id does not mean it can be replayed.
 - **Who controlled the seats must be shown.** The request log holds only model requests, so a person's
-  actions are never in it. A recording opens only if it declares an LLM-only host and LLM seats, or (an
-  older recording) every seat made requests in every finished season and every command is attributed to the
-  LLM; the panel says which. Otherwise it is refused as *unknown* or *not LLM-only*.
+  actions are never in it, and a seat with model requests every season may still have had a person act in it.
+  A recording opens only if it declares a spectator host and every seat as an LLM. An older recording that does
+  not declare this is refused as *unknown* (its human actions may be missing); there is no inspection path.
+  A recording with a human or other non-LLM controller is refused as *not LLM-only*.
 - **Switching runs.** Opening the run list pauses playback and it stays paused when you close the list. A run
   on a different map than the loaded scene is refused with the reason; the run already open is kept. City,
   tower and army markers are rebuilt for a run on the same map.
