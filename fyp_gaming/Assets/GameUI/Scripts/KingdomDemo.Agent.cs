@@ -376,7 +376,7 @@ namespace LuanShi
         }
         void CancelAgentTurn()
         {
-            if (!agentTurnActive || agentRunner == null) return;
+            if (!CanCancelAgentTurn()) return;
             if (agentRunner.State != RunnerState.Requesting && agentRunner.State != RunnerState.Executing) return;
             agentRunner.Cancel("user cancelled");
             agentResumePending = false;
@@ -416,14 +416,9 @@ namespace LuanShi
                 selArmy = null;
                 RefreshObservation();
             }
-            if (CanExposeAgentDetailsForSeat(seatId))
-                jsonFeed.Add((result.Ok ? "✓ " : "✗ ") + "[LLM] " + (cmd != null ? cmd.ToJson() : "null"));
-            else
-            {
-                string publicType = cmd != null && !ActionType.IsOwnerOnlyLog(cmd.Type) ? cmd.Type : "private order";
-                jsonFeed.Add("[LLM] " + publicType + " -> " + (result.Ok ? "ok" : "rejected"));
-            }
-            if (jsonFeed.Count > 4) jsonFeed.RemoveAt(0);
+            string feedLine = HandoverUiPrivacy.FormatLiveAgentFeedLine(
+                CanExposeAgentDetailsForSeat(seatId), cmd, result);
+            if (!string.IsNullOrEmpty(feedLine)) PushAgentFeed(feedLine);
             return result;
         }
         Observation ObserveAgentSeat(string seatId) => FilteredObservation(seatId);

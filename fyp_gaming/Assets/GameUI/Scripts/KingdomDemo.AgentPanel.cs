@@ -31,28 +31,16 @@ namespace LuanShi
         }
 
         bool CanExposeAgentDetailsForSeat(string seatId)
-        {
-            if (spectatorMode) return true;
-            if (string.IsNullOrEmpty(seatId)) return false;
-            if (string.Equals(seatId, currentSeat, System.StringComparison.Ordinal))
-                return showAgentDetails || handoverState.IsEligibleSeat(seatId);
-            bool hotseat = engine != null && SeatRotation.HumanSeats(engine.State).Count > 1;
-            if (hotseat || handoverState.EligibleSeats.Count > 1
-                || handoverState.HasAnyEpisode() || handoverState.IsEligibleSeat(seatId))
-                return false;
-            return showAgentDetails;
-        }
+            => HandoverUiPrivacy.CanExposeLiveAgentDetails(
+                spectatorMode, showAgentDetails, seatId, currentSeat, engine, handoverState);
 
         bool ShouldMaskForeignAgentDetails()
-        {
-            if (string.IsNullOrEmpty(agentSeatId) || string.IsNullOrEmpty(currentSeat))
-                return false;
-            if (string.Equals(agentSeatId, currentSeat, System.StringComparison.Ordinal))
-                return false;
-            bool hotseat = engine != null && SeatRotation.HumanSeats(engine.State).Count > 1;
-            return !showAgentDetails || hotseat || handoverState.EligibleSeats.Count > 1
-                || handoverState.HasAnyEpisode() || handoverState.IsEligibleSeat(agentSeatId);
-        }
+            => HandoverUiPrivacy.ShouldMaskAgentDetails(
+                spectatorMode, showAgentDetails, agentSeatId, currentSeat, engine, handoverState);
+
+        bool CanCancelAgentTurn()
+            => HandoverUiPrivacy.CanCancelAgentTurn(
+                spectatorMode, IsAgentRunning(), showAgentDetails, agentSeatId, currentSeat, engine, handoverState);
 
         partial void DrawAgentPanel(Rect area)
         {
@@ -75,9 +63,11 @@ namespace LuanShi
                       uiPanelTitle);
             var cancelRect = new Rect(area.x + area.width - PanelHeaderPadX - AgentCancelWidth,
                                       area.y + AgentTitleRowY, AgentCancelWidth, AgentCancelHeight);
+            bool canCancel = CanCancelAgentTurn();
             var previousEnabled = GUI.enabled;
-            GUI.enabled = running;
-            if (GUI.Button(cancelRect, "Cancel", running ? uiButton : uiButtonDisabledSmall)) CancelAgentTurn();
+            GUI.enabled = canCancel;
+            if (GUI.Button(cancelRect, "Cancel", canCancel ? uiButton : uiButtonDisabledSmall) && canCancel)
+                CancelAgentTurn();
             GUI.enabled = previousEnabled;
 
             string provider = agentTransport != null
@@ -88,10 +78,10 @@ namespace LuanShi
                       EllipsizeToWidth(uiSmall, mode + "  " + provider, width), uiSmall);
 
             GUI.Label(new Rect(x, area.y + AgentStateRowY, width, AgentRowHeight),
-                      EllipsizeToWidth(uiBody, AgentStateLine(), width), uiBody);
+                      EllipsizeToWidth(uiBody, AgentStateLine(maskForeign), width), uiBody);
 
             GUI.Label(new Rect(x, area.y + AgentRequestsRowY, width, AgentRowHeight),
-                      AgentRequestsLine(), uiSmall);
+                      AgentRequestsLine(maskForeign), uiSmall);
 
             if (!turnRows) return;
 
@@ -143,7 +133,7 @@ namespace LuanShi
             string footer = AgentRecorderLabel();
             if (showAgentDetails && !maskForeign) footer = "Observer detail (demo transparency)  ·  " + footer;
             DrawFittedLabel(new Rect(x, area.y + AgentRecorderRowY, width, AgentRowHeight),
-                            EllipsizeToWidth(uiMono, footer, width), uiMono, agentRecorderShort);
+                            EllipsizeToWidth(uiMono, footer, width), uiMono, maskForeign ? null : agentRecorderShort);
 
             string failure = AgentFailureReason();
             if (showAgentDetails && !maskForeign && !string.IsNullOrEmpty(failure))
@@ -151,8 +141,14 @@ namespace LuanShi
                           EllipsizeToWidth(uiReason, "failure: " + failure, width), uiReason);
         }
 
-        string AgentStateLine()
+        string AgentStateLine(bool maskForeign = false)
         {
+            if (maskForeign)
+            {
+                if (IsAgentRunning()) return "Playing turn...";
+                LlmTurnRunner r = agentRunner;
+                return r != null && r.State != RunnerState.Idle ? "Turn ended" : "Idle";
+            }
             LlmTurnRunner runner = agentRunner;
             if (runner != null && runner.EndReason != EndReason.None
                 && (runner.State == RunnerState.Finished || runner.State == RunnerState.Failed
@@ -171,8 +167,9 @@ namespace LuanShi
 
         string AgentStateDisplayName() => CapitalizeAgentState(AgentStateName());
 
-        string AgentRequestsLine()
+        string AgentRequestsLine(bool maskForeign = false)
         {
+            if (maskForeign) return "Status hidden for seat privacy";
             LlmTurnRunner runner = agentRunner;
             int req = runner != null ? runner.RequestsThisTurn : 0;
             int act = runner != null ? runner.ActionsThisTurn : 0;

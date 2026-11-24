@@ -14,6 +14,7 @@
     <Compile Include="../../Assets/GameEngine/**/*.cs" />
     <Compile Include="../../Assets/GameUI/Scripts/HandoverUiTypes.cs" />
     <Compile Include="../../Assets/GameUI/Scripts/HandoverUiModel.cs" />
+    <Compile Include="../../Assets/GameUI/Scripts/HandoverUiPrivacy.cs" />
     <Compile Include="../../Assets/GameUI/Scripts/HandoverBriefingBuilder.cs" />
   </ItemGroup>
 </Project>

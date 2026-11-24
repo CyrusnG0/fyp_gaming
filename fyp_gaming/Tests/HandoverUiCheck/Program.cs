@@ -20,6 +20,7 @@ namespace LuanShi.HandoverUiCheck
             TestSharedRunnerTelemetryAttribution();
             TestLongHistoryTruncationAndNoHiddenCounts();
             TestProviderFailureAndStaleReplies();
+            TestOpponentPrivacyPolicyAndCancelFeed();
 
             Console.WriteLine($"HandoverUiCheck: {_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;
@@ -513,6 +514,80 @@ namespace LuanShi.HandoverUiCheck
             });
             Check(!lateSubmit.Ok && engine.State.FindFaction("seat-0").CommandPoints == cpBefore,
                 "stale: deferred late reply and stale token submit execute nothing and preserve CP");
+        }
+
+        private static void TestOpponentPrivacyPolicyAndCancelFeed()
+        {
+            var sampleMarch = new ActionCommand { Type = ActionType.March, ActorSeatId = "seat-1", TargetId = "army-shu-1", ParamA = 22, ParamB = 5 };
+            var sampleScout = new ActionCommand { Type = ActionType.Scout, ActorSeatId = "seat-1", TargetId = "city-wei" };
+            var okRes = ValidationResult.Success;
+            var failRes = ValidationResult.Fail("invalid");
+
+            // 1. Before first handover with scene-default showAgentDetails=true (seat-0 Human, seat-1 Opponent LLM)
+            GameEngine preHandover = CreateTwoSeatGame(ControllerType.Human, ControllerType.Llm);
+            var preState = new HandoverCoordinatorState();
+            preState.Initialize(preHandover, new[] { "seat-0" });
+
+            bool preExpose = HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-1", "seat-0", preHandover, preState);
+            bool preMask = HandoverUiPrivacy.ShouldMaskAgentDetails(false, true, "seat-1", "seat-0", preHandover, preState);
+            bool preCancel = HandoverUiPrivacy.CanCancelAgentTurn(false, true, true, "seat-1", "seat-0", preHandover, preState);
+            Check(!preExpose && preMask && !preCancel,
+                "privacy-pre-handover: showAgentDetails=true still masks opponent seat-1 and disables Cancel before first handover");
+            Check(HandoverUiPrivacy.FormatLiveAgentFeedLine(preExpose, sampleMarch, okRes) == null
+                  && HandoverUiPrivacy.FormatLiveAgentFeedLine(preExpose, sampleMarch, failRes) == null
+                  && HandoverUiPrivacy.FormatLiveAgentFeedLine(preExpose, sampleScout, okRes) == null,
+                "privacy-pre-handover: generic feed omits opponent orders, results and private actions");
+
+            // 2. Player's own delegated seat (single human seat-0 handed over to LLM, showAgentDetails=true and false)
+            int tok0 = preHandover.BeginSeatTurn("seat-0");
+            preState.RequestHandoverToAi(preHandover, "seat-0", out _);
+            preHandover.EndSeatTurn(tok0);
+            preState.SyncBoundaryAfterEngineChange(preHandover, "seat-0", preHandover.Observe("seat-0"));
+
+            bool ownExposeTrue = HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-0", "seat-0", preHandover, preState);
+            bool ownExposeFalse = HandoverUiPrivacy.CanExposeLiveAgentDetails(false, false, "seat-0", "seat-0", preHandover, preState);
+            bool ownCancelRun = HandoverUiPrivacy.CanCancelAgentTurn(false, true, true, "seat-0", "seat-0", preHandover, preState);
+            bool ownCancelIdle = HandoverUiPrivacy.CanCancelAgentTurn(false, false, true, "seat-0", "seat-0", preHandover, preState);
+            string ownFeed = HandoverUiPrivacy.FormatLiveAgentFeedLine(ownExposeTrue, new ActionCommand { Type = ActionType.LevyTax, ActorSeatId = "seat-0", TargetId = "city-wei" }, okRes);
+            Check(ownExposeTrue && ownExposeFalse && ownCancelRun && !ownCancelIdle && ownFeed != null && ownFeed.Contains("[LLM]"),
+                "privacy-own-delegated: single player's own delegated seat-0 stays exposed, cancellable while running, and shown in feed");
+
+            // 3. After handover episode exists, opponent seat-1 stays masked
+            bool postExpose = HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-1", "seat-0", preHandover, preState);
+            bool postMask = HandoverUiPrivacy.ShouldMaskAgentDetails(false, true, "seat-1", "seat-0", preHandover, preState);
+            bool postCancel = HandoverUiPrivacy.CanCancelAgentTurn(false, true, true, "seat-1", "seat-0", preHandover, preState);
+            Check(!postExpose && postMask && !postCancel && HandoverUiPrivacy.FormatLiveAgentFeedLine(postExpose, sampleMarch, okRes) == null,
+                "privacy-post-handover: opponent seat-1 remains masked and non-cancellable after handover episode");
+
+            // 4. Reversed play order (seat-0 opponent LLM first, seat-1 single human / delegated)
+            GameEngine rev = CreateTwoSeatGame(ControllerType.Llm, ControllerType.Human);
+            var revState = new HandoverCoordinatorState();
+            revState.Initialize(rev, new[] { "seat-1" });
+            Check(!HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-0", "seat-0", rev, revState)
+                  && !HandoverUiPrivacy.CanCancelAgentTurn(false, true, true, "seat-0", "seat-0", rev, revState)
+                  && HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-1", "seat-0", rev, revState),
+                "privacy-reversed-order: opponent seat-0 masked even if currentSeat sits on seat-0 while single human owns seat-1");
+
+            // 5. Hotseat (multiple human / handover-eligible seats)
+            GameEngine hotseat = CreateTwoSeatGame(ControllerType.Human, ControllerType.Human);
+            hotseat.State.Factions.Add(new FactionState { SeatId = "seat-2", Name = "Wu", Controller = ControllerType.Llm });
+            var hotState = new HandoverCoordinatorState();
+            hotState.Initialize(hotseat, new[] { "seat-0", "seat-1" });
+            Check(!HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-2", "seat-0", hotseat, hotState)
+                  && !HandoverUiPrivacy.CanCancelAgentTurn(false, true, true, "seat-2", "seat-0", hotseat, hotState)
+                  && !HandoverUiPrivacy.CanExposeLiveAgentDetails(false, true, "seat-0", "seat-0", hotseat, hotState),
+                "privacy-hotseat: hotseat masks both opponent LLM and delegated hotseat LLM across shared screen");
+
+            // 6. Spectator mode preserved
+            GameEngine spec = CreateTwoSeatGame(ControllerType.Llm, ControllerType.Llm);
+            var specState = new HandoverCoordinatorState();
+            specState.Initialize(spec, Array.Empty<string>(), allowHandover: false);
+            bool s0Expose = HandoverUiPrivacy.CanExposeLiveAgentDetails(true, false, "seat-0", "seat-0", spec, specState);
+            bool s1Expose = HandoverUiPrivacy.CanExposeLiveAgentDetails(true, false, "seat-1", "seat-0", spec, specState);
+            bool s0Mask = HandoverUiPrivacy.ShouldMaskAgentDetails(true, false, "seat-0", "seat-0", spec, specState);
+            bool s0Cancel = HandoverUiPrivacy.CanCancelAgentTurn(true, true, false, "seat-0", "seat-0", spec, specState);
+            Check(s0Expose && s1Expose && !s0Mask && !s0Cancel && HandoverUiPrivacy.FormatLiveAgentFeedLine(s1Expose, sampleMarch, okRes) != null,
+                "privacy-spectator: spectator mode preserves both seats' visibility while keeping AgentPanel Cancel disabled");
         }
     }
 }

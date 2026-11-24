@@ -26,8 +26,10 @@ namespace LuanShi
             // Single-LLM transparency is an explicit opt-in. Spectator chat is a researcher view.
             // A reclaimed seat's own delegation trace stays viewable for that seat only.
             if (agentRunner == null) return;
-            bool hasOwnEpisode = handoverState.GetEpisode(currentSeat) != null;
-            if (!spectatorMode && !hasOwnEpisode && (!agentHasSeat || !CanExposeAgentDetailsForSeat(agentSeatId))) return;
+            if (!spectatorMode && handoverShowing) return;
+            bool hasOwnEpisode = !string.IsNullOrEmpty(currentSeat) && handoverState.GetEpisode(currentSeat) != null;
+            bool canExposeLive = agentHasSeat && CanExposeAgentDetailsForSeat(agentSeatId);
+            if (!spectatorMode && !hasOwnEpisode && !canExposeLive) return;
 
             float top = (spectatorMode ? SpectatorPanelArea() : AgentPanelArea()).yMax;
             float available = ChatBottomY - top - ChatGap;
@@ -129,7 +131,7 @@ namespace LuanShi
 
             string footer = spectatorMode
                 ? "Not shown to the models\nFilter one seat"
-                : "Observer view\nBrief explanations only";
+                : "Your faction AI trace\nBrief explanations only";
             GUI.Label(new Rect(area.x + 120f, area.yMax - ChatFooterHeight + 2f,
                 area.width - 130f, ChatFooterHeight - 2f), footer, uiSmallWrap);
         }
@@ -245,11 +247,11 @@ namespace LuanShi
             {
                 if (IsAgentRunning() && CanExposeAgentDetailsForSeat(agentSeatId))
                     return agentRunner.ActivityForSeat(agentSeatId);
-                if (!string.IsNullOrEmpty(currentSeat)
-                    && (handoverState.GetEpisode(currentSeat) != null
-                        || !CanExposeAgentDetailsForSeat(agentSeatId)))
+                if (!string.IsNullOrEmpty(currentSeat) && handoverState.GetEpisode(currentSeat) != null)
                     return handoverState.GetEpisodeActivities(currentSeat);
-                return agentRunner.ActivityForSeat(agentSeatId);
+                if (CanExposeAgentDetailsForSeat(agentSeatId))
+                    return agentRunner.ActivityForSeat(agentSeatId);
+                return Array.Empty<LlmActivity>();
             }
             return string.IsNullOrEmpty(agentChatFilterSeat)
                 ? agentRunner.Activity
