@@ -20,6 +20,13 @@ namespace LuanShi.Engine
         public bool JsonMode = true;
 
         /// <summary>
+        /// Optional provider reasoning-effort control, empty by default. Accepted values are
+        /// none, low, medium, high and xhigh. Sent as the OpenAI-compatible
+        /// <c>reasoning_effort</c> body field only when set; other providers are unaffected.
+        /// </summary>
+        public string ReasoningEffort = "";
+
+        /// <summary>
         /// Demo-scope opt-in, default OFF. When true, a model reply shaped as an investigation
         /// request may run the read-only manual_lookup tool and its bounded result is added to the
         /// next prompt. When false, the runner, prompt text and legacy action-only path are
@@ -198,7 +205,8 @@ namespace LuanShi.Engine
         /// File first, then environment override. Recognised snake_case keys are provider, base_url,
         /// model, api_key, api_key_env, json_mode, max_requests_per_turn, max_actions_per_turn,
         /// max_invalid_per_turn, max_turn_seconds, request_timeout_ms, max_output_tokens,
-        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, enable_manual_lookup,
+        /// max_total_requests, usd_per_mtok_in, usd_per_mtok_out, max_usd, reasoning_effort,
+        /// enable_manual_lookup,
         /// enable_personas, enable_attack, enable_research, enable_garrison_conversion,
         /// enable_diplomacy, personas, and the
         /// deliberation-only keys
@@ -250,6 +258,8 @@ namespace LuanShi.Engine
             sb.Append("; max_turn_seconds=").Append(MaxTurnSeconds.ToString(CultureInfo.InvariantCulture));
             sb.Append("; request_timeout_ms=").Append(RequestTimeoutMs.ToString(CultureInfo.InvariantCulture));
             sb.Append("; max_output_tokens=").Append(MaxOutputTokens.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrEmpty(ReasoningEffort))
+                sb.Append("; reasoning_effort=").Append(ReasoningEffort);
             sb.Append("; max_total_requests=").Append(MaxTotalRequests.ToString(CultureInfo.InvariantCulture));
             sb.Append("; usd_per_mtok_in=").Append(Number(UsdPerMTokIn));
             sb.Append("; usd_per_mtok_out=").Append(Number(UsdPerMTokOut));
@@ -308,6 +318,8 @@ namespace LuanShi.Engine
                     case "request_timeout_ms": RequestTimeoutMs = Int(field.Value, RequestTimeoutMs); break;
                     case "max_output_tokens": MaxOutputTokens = Int(field.Value, MaxOutputTokens); break;
                     case "max_total_requests": MaxTotalRequests = Int(field.Value, MaxTotalRequests); break;
+                    case "reasoning_effort":
+                        ReasoningEffort = NormalizeReasoningEffort(Text(field.Value, ReasoningEffort)); break;
                     case "usd_per_mtok_in": UsdPerMTokIn = Number(field.Value, UsdPerMTokIn); break;
                     case "usd_per_mtok_out": UsdPerMTokOut = Number(field.Value, UsdPerMTokOut); break;
                     case "max_usd": MaxUsd = Number(field.Value, MaxUsd); break;
@@ -404,6 +416,23 @@ namespace LuanShi.Engine
                 : Environment.GetEnvironmentVariable(ApiKeyEnv);
             if (!string.IsNullOrEmpty(direct)) _apiKey = direct.Trim();
             else if (!string.IsNullOrEmpty(named)) _apiKey = named.Trim();
+        }
+
+        private static string NormalizeReasoningEffort(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "";
+            string effort = value.Trim().ToLowerInvariant();
+            switch (effort)
+            {
+                case "none":
+                case "low":
+                case "medium":
+                case "high":
+                case "xhigh":
+                    return effort;
+                default:
+                    return "";
+            }
         }
 
         private static string CleanKey(string value)

@@ -81,6 +81,20 @@ internal static partial class Harness
            && LlmActionParser.ResearchTypes.Contains(ActionType.Research)
            && !LlmActionParser.SupportedTypes.Contains(ActionType.Research),
             "research is advertised as an opt-in type, not as part of the demo vocabulary");
+
+        ParseResult scout = LlmActionParser.Parse(
+            "{\"type\":\"scout\",\"target_id\":\"city-b\"}", false, true);
+        ResCheck(scout.Ok && scout.Action.Type == ActionType.Scout
+           && scout.Action.TargetId == "city-b" && !scout.Action.EndTurn,
+            "scout parses with the research bundle enabled (" + (scout.Error ?? "ok") + ")");
+        ParseResult scoutOff = LlmActionParser.Parse(
+            "{\"type\":\"scout\",\"target_id\":\"city-b\"}", false, false);
+        ResCheck(!scoutOff.Ok && scoutOff.Error == "unsupported action type",
+            "scout stays unavailable when research is off");
+        ParseResult scoutCoords = LlmActionParser.Parse(
+            "{\"type\":\"scout\",\"target_id\":\"city-b\",\"param_a\":1,\"param_b\":2}", false, true);
+        ResCheck(!scoutCoords.Ok && scoutCoords.Error == "invalid field",
+            "scout rejects coordinates");
     }
 
     private static void ResParserRejects()
@@ -172,6 +186,22 @@ internal static partial class Harness
         int endTurn = options.FindIndex(o => o.Type == "end_turn");
         ResCheck(firstResearch > lastDomestic && firstResearch < endTurn,
             "research sits after the domestic blocks and before end_turn");
+
+        var scoutWorld = ResWorld(9709, 500);
+        SetLevel(scoutWorld, "seat-a", ResearchLine.Espionage, BalanceConfig.ScoutResearchLevel);
+        scoutWorld.State.Cities.Add(new CityState
+        {
+            Id = "city-enemy", Name = "Enemy City", X = 9, Z = 0, OwnerSeatId = "seat-b",
+            Population = 5000, Food = 1000, Gold = 100, Morale = 60,
+        });
+        scoutWorld.State.FindFaction("seat-a").AddScoutReport("city-enemy", scoutWorld.State.Season);
+        Observation scoutObs = scoutWorld.Observe("seat-a");
+        ActionOption scout = ActionCatalogue.Build(scoutObs, null, true)
+            .FirstOrDefault(o => o.Type == ActionType.Scout);
+        ResCheck(scout != null && scout.TargetId == "city-enemy"
+           && scout.CommandPointCost == BalanceConfig.CommandPointCost(ActionType.Scout)
+           && scout.Label.Contains("Enemy City"),
+            "a known enemy city gets a scout candidate when espionage 1 is researched");
     }
 
     private static void ResCatalogueBoundaries()

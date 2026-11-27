@@ -46,6 +46,7 @@ namespace LuanShi.Engine
             "- Supported orders: levy_tax, lighten_labor, reclaim, recruit (args.unit_type must be \"infantry\"), train, fortify, relief. Each targets an owned city id.\n" +
             "- march targets one of your own army ids; param_a and param_b are the destination x and z taken from MOVEMENT OPTIONS.\n" +
             "- A march costs 1 command point. One march per army per season, except cavalry, which may march twice.\n" +
+            "- An army can march up to its full movement budget in one order. The cost shown for each MOVEMENT OPTION is the total path movement cost (not command points); higher cost means farther away. Choose higher-cost options to cover more ground or reach distant objectives.\n" +
             "- Only march to a destination listed under MOVEMENT OPTIONS. The engine revalidates ownership, sight, path cost and occupancy.\n" +
             "- end_turn ends your turn and costs nothing.\n" +
             "- The engine revalidates every order. A rejected order costs nothing; act again within your remaining budget.\n\n" +

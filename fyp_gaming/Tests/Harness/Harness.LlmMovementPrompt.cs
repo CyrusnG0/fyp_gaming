@@ -40,6 +40,9 @@ internal static partial class Harness
         W2Check(PromptBuilder.VersionFor(true) == "demo-slice-4"
            && PromptBuilder.SystemPromptFor(true).Contains("MOVEMENT OPTIONS"),
             "planning prompts use demo-slice-4 and advertise the movement section");
+        W2Check(PromptBuilder.SystemPromptFor(true).Contains("full movement budget")
+           && PromptBuilder.SystemPromptFor(true).Contains("higher cost means farther away"),
+            "planning prompt explains the full movement budget and path cost");
         W2Check(prompt.Contains("MOVEMENT OPTIONS (candidates, revalidated by the engine)")
            && prompt.Contains("army_id=army-a-1 unit_type=infantry position=1,1")
            && prompt.Contains("marches_left=1") && prompt.Contains("budget=")

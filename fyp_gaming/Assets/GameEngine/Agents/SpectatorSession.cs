@@ -77,11 +77,10 @@ namespace LuanShi.Engine
             /// <summary>Seat-safe candidates honoring explicit per-run spatial options.</summary>
             public MovementView PlanMovement(SpatialContextOptions spatialOptions)
             {
-                bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
-                return _session.Runner.RequireVisibleMarchRoutes || spatialOn
-                    ? MovementPlanner.BuildDiversified(_engine, _seatId,
-                        MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
-                    : MovementPlanner.Build(_engine, _seatId);
+                // See SingleLlmTurnHost: diversified selection keeps far reachable cells visible even
+                // when spatial context is off; spatial tags themselves remain opt-in.
+                return MovementPlanner.BuildDiversified(_engine, _seatId,
+                    MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions);
             }
 
             /// <summary>

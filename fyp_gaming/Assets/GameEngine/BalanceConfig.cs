@@ -12,7 +12,7 @@ namespace LuanShi.Engine
         public const int ArmyMoveCostPerSeason = 6;       // TBD: total hex-cost an army may spend per season
         public const int FogWatchTowerRange = 5;          // watchtower vision radius
 
-        public const int CityBaseFoodYield = 200;         // TBD: passive food per owned city per season (pre-開墾)
+        public const int CityBaseFoodYield = 10000;         // TBD: passive food per owned city per season (pre-開墾)
 
         public const int TaxLevyAmount = 200;             // TBD: 徵稅 D1 gold gained (design §11 quotes no number)
         public const int TaxLevyMoraleCost = 5;           // LOCKED (design §11): 徵稅 民心 −5
@@ -85,7 +85,7 @@ namespace LuanShi.Engine
         public const float StarvationPopLoss = 0.10f;     // TBD: pop fraction lost when food runs out
 
         public const int StartPopulation = 10000;         // TBD
-        public const int StartFood = 500;                 // TBD
+        public const int StartFood = 10000;                 // TBD
         public const int StartGold = 300;                 // TBD
         public const int StartFieldArmyTroops = 2000;     // TBD
 

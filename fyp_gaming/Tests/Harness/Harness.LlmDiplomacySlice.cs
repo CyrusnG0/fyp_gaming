@@ -390,6 +390,10 @@ internal static partial class Harness
         DipCheck(onSystem.Contains("whole number of seasons, for example \"" + BalanceConfig.TreatyDurationSeasons + "\"")
            && !onSystem.Contains("\"duration\":\"<seasons>\""),
             "the addendum shows duration as a whole number of seasons with a concrete example");
+        DipCheck(onSystem.Contains("top-level \"text\" field")
+           && onSystem.Contains("never inside args")
+           && onSystem.Contains("\"text\":\"<your note>\""),
+            "the addendum places a treaty note in a top-level text field, not inside args");
         DipCheck(onSystem.Contains("NOT available in this build")
            && onSystem.Contains("declare_war") && onSystem.Contains("break_treaty")
            && onSystem.Contains("counteroffers"),

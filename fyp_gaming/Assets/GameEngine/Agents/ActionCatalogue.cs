@@ -102,7 +102,11 @@ namespace LuanShi.Engine
                 }
             }
 
-            if (hasSeat && includeResearch) AppendResearch(options, observation);
+            if (hasSeat && includeResearch)
+            {
+                AppendResearch(options, observation);
+                AppendScoutMissions(options, observation);
+            }
             if (hasSeat) AppendAttacks(options, observation, attacks);
 
             options.Add(new ActionOption
