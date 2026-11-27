@@ -9,14 +9,14 @@ using LuanShi.Engine;
 internal static partial class Harness
 {
     // Captured from the ORIGINAL commit 23669af (git archive + a temp build of its engine sources).
-    // The rich level-3/level-0 constants in Harness.PromptSizeBoundary.cs were re-derived the same
-    // way and match the pre-change values exactly.
-    private const int PromptSizeOriginalNonRichSystemLen = 3721;
+    // The system fixture was re-baselined when the march-budget rule was restored; the user prompt
+    // still matches the original commit exactly.
+    private const int PromptSizeOriginalNonRichSystemLen = 3989;
     private const int PromptSizeOriginalNonRichUserLen = 2899;
     private const string PromptSizeOriginalNonRichUserHash =
         "93d556c5b0572c212a7468dacada0d67823d68a96891a03077f6f62a6981c24e";
     private const string PromptSizeOriginalNonRichSystemHash =
-        "981ecfd8f0034a040901500cf979d629b6f96ea2e9ff3c866c03b452ad2f9f04";
+        "169e3183bc7bb96534c38696dfa75fcfbd8aa25115dfb09425f3d1aba4734d3d";
 
     /// <summary>
     /// Sizes below the level-5 budget (674 and 2000 here) fit at level 4 with the full result.
@@ -285,7 +285,7 @@ internal static partial class Harness
               && request.User.Length == PromptSizeOriginalNonRichUserLen
               && PromptSizeProbeHash(request.User) == PromptSizeOriginalNonRichUserHash
               && PromptSizeProbeHash(request.System) == PromptSizeOriginalNonRichSystemHash,
-            "[new] probe parity: the non-rich runner prompt is byte-identical to commit 23669af");
+            "[new] probe parity: the non-rich prompt matches the re-baselined fixture (user unchanged from 23669af)");
     }
 
     // ---- extraction helpers ----------------------------------------------------------------

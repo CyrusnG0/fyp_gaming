@@ -52,11 +52,12 @@ namespace LuanShi.Engine
         /// <summary>Read-only, seat-filtered candidates honoring explicit per-run spatial options.</summary>
         public MovementView PlanMovement(SpatialContextOptions spatialOptions)
         {
-            bool spatialOn = spatialOptions != null && spatialOptions.IsEnabled;
-            return (_config != null && _config.EffectiveVisibleMarchRoutes) || spatialOn
-                ? MovementPlanner.BuildDiversified(_engine, _seatId,
-                    MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions)
-                : MovementPlanner.Build(_engine, _seatId);
+            // Keep captures first, then spread the advertised destinations across compass sectors so
+            // far reachable cells are offered too. Cheap-first selection shows mostly adjacent cells
+            // and makes a full-budget march look like a one-tile move. Spatial tags stay off unless
+            // the caller enabled spatial context.
+            return MovementPlanner.BuildDiversified(_engine, _seatId,
+                MovementPlanner.DefaultMaxOptionsPerArmy, null, spatialOptions);
         }
 
         /// <summary>Read-only, seat-filtered attack/assault candidates.</summary>

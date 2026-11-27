@@ -10,6 +10,9 @@ internal static partial class Harness
 {
     private static void RunCombatMovementRehearsal()
     {
+        Section("[CMR-0] default planning host advertises far march options");
+        InspectDefaultHostMovement();
+
         Section("[CMR-1] spatial context inspection (CompactContact, Standard 12-cap vs Rich)");
         InspectCompactContactOpeningSpatial();
         InspectCompactContactNearEnemySpatial();
@@ -20,6 +23,19 @@ internal static partial class Harness
         RehearseCityAssaultCapture();
         RehearseFoggedMarchRejection();
         RehearseWeakAssaultAccepted();
+    }
+
+    private static void InspectDefaultHostMovement()
+    {
+        GameEngine engine = ScenarioEngine(CompactScenario.CompactContact, BalanceProfile.Standard, 31001);
+        var host = new SingleLlmTurnHost(engine, new LlmConfig(), "seat-0", null, null, null);
+        MovementView view = host.PlanMovement();
+        ArmyMovePlan van = view.Armies.First(a => a.ArmyId == "army-wei-1");
+        int near = van.Options.Count(o => o.PathCost <= 2);
+        int far = van.Options.Count(o => o.PathCost >= 3);
+        CmrCheck(van.Options.Count == MovementPlanner.DefaultMaxOptionsPerArmy && near > 0 && far > 0,
+            "default host spreads near and far options (near=" + near + ", far=" + far
+            + ", budget=" + van.Budget + ")");
     }
 
     private static void CmrCheck(bool ok, string name) => Check(ok, "[CMR] " + name);

@@ -196,10 +196,12 @@ namespace LuanShi.Engine
             if (type == null) return ParseResult.Failure("type is required");
             bool attackType = AttackSet.Contains(type);
             bool researchType = type == ActionType.Research;
+            bool scoutType = type == ActionType.Scout;
             bool diplomacyType = DiplomacySet.Contains(type);
             if (!VocabularySet.Contains(type) && !(allowAttack && attackType)
                 && !(allowResearch && researchType) && !(allowDiplomacy && diplomacyType)
-                && !(allowGarrisonConversion && type == ActionType.ConvertGarrison))
+                && !(allowGarrisonConversion && type == ActionType.ConvertGarrison)
+                && !(allowResearch && scoutType))
                 return ParseResult.Failure("unsupported action type");
 
             bool endTurn = type == EndTurnType;
@@ -237,6 +239,10 @@ namespace LuanShi.Engine
                 return ParseResult.Failure("invalid field");
             // A diplomacy order names a seat, never a hex, so a coordinate field is equally invalid.
             if (diplomacyType && (hasParamA || hasParamB))
+                return ParseResult.Failure("invalid field");
+            // Scout names a city and carries no coordinates or fixed arguments; the engine
+            // revalidates Espionage, gold, sight and the target city.
+            if (scoutType && (hasParamA || hasParamB))
                 return ParseResult.Failure("invalid field");
             if (type == ActionType.ConvertGarrison && (!hasParamA || paramA <= 0 || (hasParamB && paramB != 0)
                 || (argsNode != null && argsNode.Items.Count != 0)))

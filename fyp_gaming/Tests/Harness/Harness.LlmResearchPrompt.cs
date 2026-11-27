@@ -74,6 +74,9 @@ internal static partial class Harness
         ResCheck(addendum.Contains("research_points") && addendum.Contains("CANDIDATE OPTIONS")
            && addendum.Contains("command-point price") && addendum.Contains("season rollover"),
             "the addendum points at the seat's own points, the priced candidates and the income timing");
+        ResCheck(addendum.Contains("SCOUTING") && addendum.Contains("\"type\":\"scout\"")
+           && addendum.Contains("enemy or neutral city") && addendum.Contains("never your own city"),
+            "the addendum tells the model it can scout known enemy or neutral cities");
 
         bool deferred = addendum.Contains("agri 2: DEFERRED") && addendum.Contains("agri 3: DEFERRED")
             && addendum.Contains("agri 4: DEFERRED") && addendum.Contains("military 5: DEFERRED");

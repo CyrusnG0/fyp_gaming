@@ -35,6 +35,13 @@ internal static partial class Harness
             "POSTs exactly to {base_url}/chat/completions");
         Check(captured != null && captured.Authorization == "Bearer " + LlmFakeKey,
             "Bearer key is sent to the provider and is not logged");
+        Check(captured != null && !string.IsNullOrEmpty(captured.UserAgent)
+              && captured.UserAgent.StartsWith("LuanShi/", StringComparison.Ordinal),
+            "client identifies itself with a LuanShi User-Agent");
+        Check(captured != null && !string.IsNullOrEmpty(captured.SessionId)
+              && captured.SessionId.StartsWith("luanshi-", StringComparison.Ordinal)
+              && captured.SessionId.Length > "luanshi-".Length,
+            "x-opencode-session carries a non-empty per-transport id");
         Check(captured != null && captured.Body.Contains("\"model\":\"http-model\"")
               && captured.Body.Contains("\"max_tokens\":123")
               && captured.Body.Contains("\"messages\":[{\"role\":\"system\"")
@@ -137,6 +144,8 @@ internal static partial class Harness
         public string Method;
         public string Path;
         public string Authorization;
+        public string UserAgent;
+        public string SessionId;
         public string Body;
     }
 
@@ -185,6 +194,8 @@ internal static partial class Harness
                     Method = context.Request.HttpMethod,
                     Path = context.Request.Url.AbsolutePath,
                     Authorization = context.Request.Headers["Authorization"],
+                    UserAgent = context.Request.Headers["User-Agent"],
+                    SessionId = context.Request.Headers["x-opencode-session"],
                     Body = body,
                 };
 

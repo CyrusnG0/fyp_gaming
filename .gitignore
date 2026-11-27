@@ -19,6 +19,7 @@
 !.env.example
 *.local.json
 /runs/
+/fyp_gaming/runs/
 
 # Unity creates this alongside the ignored crash-recovery directory
 /fyp_gaming/Assets/_Recovery.meta

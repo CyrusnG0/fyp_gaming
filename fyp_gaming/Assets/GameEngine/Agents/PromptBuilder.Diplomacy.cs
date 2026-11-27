@@ -68,8 +68,11 @@ namespace LuanShi.Engine
                    "- propose_treaty offers a treaty to another faction. It is exactly " +
                    "{\"type\":\"propose_treaty\",\"target_id\":\"<other seat id>\",\"args\":" +
                    "{\"treaty_type\":\"nap|alliance|truce\"}} and may add \"duration\" " +
-                   "inside args as a whole number of seasons, for example \"" + term + "\", plus an " +
-                   "optional \"text\" note. The term defaults to " + term +
+                   "inside args as a whole number of seasons, for example \"" + term + "\". " +
+                   "An optional note is a top-level \"text\" field beside target_id, never inside args: " +
+                   "{\"type\":\"propose_treaty\",\"target_id\":\"<other seat id>\",\"args\":" +
+                   "{\"treaty_type\":\"alliance\",\"duration\":\"" + term + "\"},\"text\":\"<your note>\"}. " +
+                   "The term defaults to " + term +
                    " seasons and is clamped to " + min + ".." + max + ". Only the two parties see the " +
                    "offer and its note; it is not public.\n" +
                    "- respond_treaty answers an offer addressed to you. It is exactly " +

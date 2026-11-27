@@ -95,7 +95,26 @@ namespace LuanShi.Engine
                    " prestige once, when the level is bought.\n" +
                    "- research costs " + Number(orderCost) + " command point" +
                    (orderCost == 1 ? "" : "s") +
-                   " and uses one request like any other order; end_turn is unchanged.";
+                   " and uses one request like any other order; end_turn is unchanged.\n" +
+                   "\nSCOUTING (unlocked by espionage " + Number(BalanceConfig.ScoutResearchLevel) +
+                   "; engine authoritative):\n" +
+                   "- scout is an espionage mission: exactly {\"type\":\"scout\",\"target_id\":" +
+                   "\"<enemy or neutral city id>\"}. For scout only, this overrides the base OUTPUT " +
+                   "CONTRACT's target_id ownership rule: target_id must be an enemy or neutral city " +
+                   "listed in CANDIDATE OPTIONS, never your own city.\n" +
+                   "- It costs " + Number(BalanceConfig.ScoutGoldCost) + " gold and " +
+                   Number(BalanceConfig.CommandPointCost(ActionType.Scout)) + " command point" +
+                   (BalanceConfig.CommandPointCost(ActionType.Scout) == 1 ? "" : "s") +
+                   ", plus one request. Gold is spent even when the mission fails.\n" +
+                   "- Success creates a scouted report for this season and the next. Failure exposes " +
+                   "the spy and reports nothing.\n" +
+                   "- Below espionage " + Number(BalanceConfig.ScoutExactAccuracyLevel) +
+                   " the report gives garrison and food as few/some/many; at espionage " +
+                   Number(BalanceConfig.ScoutExactAccuracyLevel) + "+ it gives exact numbers. Success " +
+                   "chance is " + Percent(BalanceConfig.SpyBaseSuccessChance) + " + " +
+                   PercentagePoints(BalanceConfig.SpySuccessPerLevel) +
+                   " per espionage level, capped at certainty. Only target a city listed as a scout " +
+                   "candidate in CANDIDATE OPTIONS.";
         }
 
         /// <summary>Design §9's forged-reports level. A level index, not a tunable balance value.</summary>
